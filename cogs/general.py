@@ -16,7 +16,7 @@ class General(commands.Cog):
         #讀取檔案
         with open("data/data.json","r") as f:
             data = json.load(f)
-        userid = interaction.user.id
+        userid = str(interaction.user.id)
 
         #蛋糕查詢
         if "cake" in data[userid]:
