@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands,Embed
-from discord.ext import commands
+from discord.ext import commands,tasks
 from . import common
 from datetime import datetime, timezone, timedelta
 import asyncio
@@ -10,17 +10,19 @@ import asyncio
 class Startup(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
+        self.testloop.start()  
 
-
-    @commands.Cog.listener()
-    async def on_ready(self):
-        await self.bot.get_channel(common.admin_log_channel).send('cog的on_ready測試')
-        await self.testloop()
-
+    async def cog_unload(self):
+        self.testloop.cancel()
+        
+    @tasks.loop(seconds=10)
     async def testloop(self):
-        while True:
-            await self.bot.get_channel(common.admin_log_channel).send('cog的loop測試')
-            await asyncio.sleep(10)
+        pass
+        
+    @testloop.before_loop    
+    async def before_testloop(self):
+        await self.bot.wait_until_ready()
+
 
         
 
