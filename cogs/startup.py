@@ -13,11 +13,12 @@ class Startup(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
         self.clearstardoor.start()  
-        self.userdata_initialization()
+        self.userdata_initialization.start()
 
     #卸載cog時觸發
     async def cog_unload(self):
         self.clearstardoor.cancel()
+        self.userdata_initialization.cancel()
 
         
     #自動鎖定過期的星門
@@ -32,6 +33,7 @@ class Startup(commands.Cog):
                         await thread.edit(archived=True,locked=True,reason="自動鎖定過期的星門")
 
     #用戶資料建檔
+    @tasks.loop(seconds=5,count=1)
     async def userdata_initialization(self):
         await self.bot.get_channel(common.admin_log_channel).send("資料初始化測試訊息")
         with open("data/data.json","r") as f:
@@ -47,7 +49,9 @@ class Startup(commands.Cog):
     @clearstardoor.before_loop    
     async def before_clearstardoor(self):
         await self.bot.wait_until_ready()
-
+    @userdata_initialization.before_loop    
+    async def before_userdata_initialization(self):
+        await self.bot.wait_until_ready()
 
         
 
