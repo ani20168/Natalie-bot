@@ -13,7 +13,7 @@ class Startup(commands.Cog):
 
 
     @commands.Cog.listener()
-    async def on_resumed(self):
+    async def on_guild_join(self,guild):
         await self.bot.get_channel(common.admin_log_channel).send('cog的on_ready測試')
         await self.testloop()
 
