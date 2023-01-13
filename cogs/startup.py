@@ -38,9 +38,11 @@ class Startup(commands.Cog):
         await self.bot.get_channel(common.admin_log_channel).send("資料初始化測試訊息")
         with open("data/data.json","r") as f:
             data = json.load(f)
+
         for member in self.bot.get_all_members():
-            if member.id not in data:
-                data[member.id] = {"cake": 0}
+            if str(member.id) not in data:
+                data[str(member.id)] = {"cake": 0}
+                
         with open("data/data.json","w") as f:
             json.dump(data,f)
 
