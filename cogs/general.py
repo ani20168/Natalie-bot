@@ -65,6 +65,17 @@ class General(commands.Cog):
                 embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
                 await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
 
+    @commands.Cog.listener()
+    async def on_member_join(self,member):
+        with open("data/data.json","r") as f:
+            data = json.load(f)
+
+        if str(member.id) not in data:
+            data[str(member.id)] = {"cake": 0}
+
+        with open("data/data.json","w") as f:
+            json.dump(data,f)
+
 
 
 async def setup(client:commands.Bot):

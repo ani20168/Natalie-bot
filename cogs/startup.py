@@ -32,17 +32,16 @@ class Startup(commands.Cog):
                     if any( tag.name == "星門" for tag in thread.applied_tags):
                         await thread.edit(archived=True,locked=True,reason="自動鎖定過期的星門")
 
-    #用戶資料建檔
+    #用戶資料初始化/檢查
     @tasks.loop(seconds=5,count=1)
     async def userdata_initialization(self):
-        await self.bot.get_channel(common.admin_log_channel).send("資料初始化測試訊息")
         with open("data/data.json","r") as f:
             data = json.load(f)
 
         for member in self.bot.get_all_members():
             if str(member.id) not in data:
                 data[str(member.id)] = {"cake": 0}
-                
+
         with open("data/data.json","w") as f:
             json.dump(data,f)
 
