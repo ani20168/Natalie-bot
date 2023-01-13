@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 import asyncio
 
 
-utc8 = datetime.timezone(datetime.timedelta(hours=8))
+utc8 = timezone(timedelta(hours=8))
 
 class Startup(commands.Cog):
     def __init__(self, client:commands.Bot):
