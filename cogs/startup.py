@@ -21,16 +21,12 @@ class Startup(commands.Cog):
     @tasks.loop(hours=1)
     async def clearstardoor(self):
         nowtime = datetime.now(timezone(timedelta(hours=8)))
-        if nowtime.hour == 18:
-            list = self.bot.get_channel(1057894690478899330).threads
-            await self.bot.get_channel(common.admin_log_channel).send(embed=Embed(title="星門管理員",description="正在清除過期的星門...",color=common.bot_color))
+        if nowtime.hour == 0:
+            list = self.bot.get_channel(1057894690478899330).threads           
             if len(list) != 0:
                 for thread in list:
                     if any( tag.name == "星門" for tag in thread.applied_tags):
                         await thread.edit(archived=True,locked=True,reason="自動鎖定過期的星門")
-                await self.bot.get_channel(common.admin_log_channel).send(embed=Embed(title="星門管理員",description=f"已鎖定{len(list)}個星門。",color=common.bot_color))
-            else: 
-                await self.bot.get_channel(common.admin_log_channel).send(embed=Embed(title="星門管理員",description="沒有可以鎖定的星門。",color=common.bot_color))
 
     @clearstardoor.before_loop    
     async def before_clearstardoor(self):
