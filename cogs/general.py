@@ -1,8 +1,8 @@
-import discord
 from discord import app_commands,Embed
 from discord.ext import commands
 from . import common
 from datetime import datetime, timezone, timedelta
+import json
 
 
 
@@ -13,12 +13,33 @@ class General(commands.Cog):
 
     @app_commands.command(name = "info", description = "關於Natalie...")
     async def info(self,interaction):
+        #讀取檔案
+        with open("data/data.json","r") as f:
+            data = json.load(f)
+        userid = interaction.user.id
+
+        #蛋糕查詢
+        if "cake" in data[userid]:
+            cake = data[userid]["cake"]
+        else:
+            data[userid]["cake"] = 0
+            cake = data[userid]["cake"]
+            with open("data/data.json","w") as f:
+                json.dump(data,f)
+
         description = """
         你好!我是Natalie!
-        以下是我擁有的指令:
-        無
+        你可以在這裡查看個人資料及指令表。
         """
-        await interaction.response.send_message(embed=Embed(title="我是Natalie!",description=description,color=common.bot_color))
+        message = Embed(title="我是Natalie!",description=description,color=common.bot_color)
+        message.add_field(name="個人資料",value=f"你有{cake}塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
+        message.add_field(
+            name="指令表",
+            value='''
+            /info -- 查看指令表及個人資料
+            ''',
+            inline=False)
+        await interaction.response.send_message(embed=message)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
