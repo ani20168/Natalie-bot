@@ -4,6 +4,7 @@ from discord.ext import commands,tasks
 from . import common
 from datetime import datetime,timezone,timedelta
 import asyncio
+import json
 
 
 
@@ -12,6 +13,7 @@ class Startup(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
         self.clearstardoor.start()  
+        self.userdata_initialization()
 
     #卸載cog時觸發
     async def cog_unload(self):
@@ -28,6 +30,17 @@ class Startup(commands.Cog):
                 for thread in list:
                     if any( tag.name == "星門" for tag in thread.applied_tags):
                         await thread.edit(archived=True,locked=True,reason="自動鎖定過期的星門")
+
+    #用戶資料建檔
+    async def userdata_initialization(self):
+        await self.bot.get_channel(common.admin_log_channel).send("資料初始化測試訊息")
+        with open("data/data.json","r") as f:
+            data = json.load(f)
+        for member in self.bot.get_all_members():
+            if member.id not in data:
+                data[member.id] = {"cake": 0}
+        with open("data/data.json","w") as f:
+            json.dump(data,f)
 
 
 
