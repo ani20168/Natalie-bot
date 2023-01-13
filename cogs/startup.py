@@ -7,6 +7,7 @@ import asyncio
 
 
 
+
 class Startup(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
@@ -17,7 +18,7 @@ class Startup(commands.Cog):
         self.clearstardoor.cancel()
         
     #自動鎖定過期的星門
-    @tasks.loop(time=datetime.time(hour=17,tzinfo=timezone(timedelta(hours=8))))
+    @tasks.loop(time=datetime.time(hour=17,tzinfo=datetime.timezone(datetime.timedelta(hours=8))))
     async def clearstardoor(self):
         list = self.bot.get_channel(1057894690478899330).threads
         await self.bot.get_channel(common.admin_log_channel).send(embed=Embed(title="星門管理員",description="正在清除過期的星門...",color=common.bot_color))
