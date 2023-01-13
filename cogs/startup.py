@@ -18,8 +18,9 @@ class Startup(commands.Cog):
         await self.testloop()
 
     async def testloop(self):
-        await self.bot.get_channel(common.admin_log_channel).send('cog的loop測試')
-        await asyncio.sleep(10)
+        while True:
+            await self.bot.get_channel(common.admin_log_channel).send('cog的loop測試')
+            await asyncio.sleep(10)
 
         
 
