@@ -12,10 +12,12 @@ class Startup(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
         self.clearstardoor.start()  
+        self.test.start()
 
     #卸載cog時觸發
     async def cog_unload(self):
         self.clearstardoor.cancel()
+        self.test.cancel()
         
     #自動鎖定過期的星門
     @tasks.loop(hours=1)
@@ -27,6 +29,10 @@ class Startup(commands.Cog):
                 for thread in list:
                     if any( tag.name == "星門" for tag in thread.applied_tags):
                         await thread.edit(archived=True,locked=True,reason="自動鎖定過期的星門")
+
+    @tasks.loop(seconds=15)
+    async def test(self):
+        await self.bot.get_channel(common.admin_log_channel).send('123')
 
     @clearstardoor.before_loop    
     async def before_clearstardoor(self):
