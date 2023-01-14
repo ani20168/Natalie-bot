@@ -56,15 +56,18 @@ class Startup(commands.Cog):
             540856651805360148,
             540856695992221706]
         
-        testmessage= Embed(title="Debug",color=common.bot_color)
+        data = common.dataload()
 
         for channelid in vclist:
             channel = self.bot.get_channel(channelid)
-            testmessage.add_field(name=f"{channel.name}",value=f"""
-            頻道內有{len(channel.members)}個人，列表:
-            {channel.members}
-            """)
-        await self.bot.get_channel(common.admin_log_channel).send(embed=testmessage)
+            for member in channel.members:
+                #如果資料內有用戶ID(正常都會有)，並且非機器人
+                if str(member.id) in data and member.bot == False:
+                    data[str(member.id)]["cake"] += 1
+
+        common.datawrite(data)
+
+
 
 
     @clearstardoor.before_loop    
