@@ -14,11 +14,13 @@ class Startup(commands.Cog):
         self.bot = client
         self.clearstardoor.start()  
         self.userdata_initialization.start()
+        self.give_cake_in_vc.start()
 
     #卸載cog時觸發
     async def cog_unload(self):
         self.clearstardoor.cancel()
         self.userdata_initialization.cancel()
+        self.give_cake_in_vc.cancel()
 
         
     #自動鎖定過期的星門
@@ -35,16 +37,34 @@ class Startup(commands.Cog):
     #用戶資料初始化/檢查
     @tasks.loop(seconds=5,count=1)
     async def userdata_initialization(self):
-        with open("data/data.json","r") as f:
-            data = json.load(f)
+        data = common.dataload()
 
         for member in self.bot.get_all_members():
             if str(member.id) not in data:
                 data[str(member.id)] = {"cake": 0}
 
-        with open("data/data.json","w") as f:
-            json.dump(data,f)
+        common.datawrite(data)
 
+    #每5分鐘，有在指定的語音頻道內則給予蛋糕
+    @tasks.loop(minutes=5)
+    async def give_cake_in_vc(self):
+        vclist = [
+            419108485435883535,
+            456422626567389206,
+            616238868164771861,
+            540856580325769226,
+            540856651805360148,
+            540856695992221706]
+        
+        testmessage= Embed(title="Debug",color=common.bot_color)
+
+        for channelid in vclist:
+            channel = self.bot.get_channel(channelid)
+            testmessage.add_field(name=f"{channel.name}",value=f"""
+            頻道內有{len(channel.members)}個人，列表:
+            {channel.members}
+            """)
+        await self.bot.get_channel(common.admin_log_channel).send(embed=testmessage)
 
 
     @clearstardoor.before_loop    
@@ -53,7 +73,9 @@ class Startup(commands.Cog):
     @userdata_initialization.before_loop    
     async def before_userdata_initialization(self):
         await self.bot.wait_until_ready()
-
+    @give_cake_in_vc.before_loop
+    async def before_give_cake_in_vc(self):
+        await self.bot.wait_until_ready()
         
 
 async def setup(client:commands.Bot):
