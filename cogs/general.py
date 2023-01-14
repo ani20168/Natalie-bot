@@ -9,6 +9,9 @@ import json
 class General(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
+        #獲得蛋糕的冷卻
+        self.cake_cooldown = 20
+        self.last_cake_time = {}
 
 
     @app_commands.command(name = "info", description = "關於Natalie...")
@@ -66,7 +69,7 @@ class General(commands.Cog):
                 await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
 
     @commands.Cog.listener()
-    async def on_member_join(self,member):
+    async def on_member_join(self,member):  
         with open("data/data.json","r") as f:
             data = json.load(f)
 
@@ -76,6 +79,18 @@ class General(commands.Cog):
         with open("data/data.json","w") as f:
             json.dump(data,f)
 
+    @commands.Cog.listener()
+    async def on_message(self,message):
+        if not message.author.bot:
+            memberid = message.author.id
+            now = message.created_at
+            # 如果成員還沒有獲得過蛋糕，或者已經過了冷卻時間
+            if memberid not in self.last_cake_time or now - self.last_cake_time[memberid] > self.cake_cooldown:
+                data = common.dataload()
+                data[str(memberid)]["cake"] += 1
+                common.datawrite(data)
+                # 更新最後一次獲得蛋糕的時間
+                self.last_cake_time[memberid] = now
 
 
 async def setup(client:commands.Bot):
