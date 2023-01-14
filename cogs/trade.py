@@ -26,7 +26,7 @@ class Trade(commands.Cog):
 
             now = datetime.now()
             data = common.dataload()
-            memberid = str(interaction.member.id)
+            memberid = str(interaction.user.id)
             if "redeem member role interval" in data[memberid]:
                 last_redeem = datetime.strptime(data[memberid]['redeem member role interval'], '%Y-%m-%d %H:%M')
                 #如果有資料，則進行天數比對
