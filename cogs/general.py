@@ -10,7 +10,7 @@ class General(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
         #獲得蛋糕的冷卻
-        self.cake_cooldown = 20
+        self.cake_cooldown = timedelta(seconds=20)
         self.last_cake_time = {}
 
 
@@ -82,15 +82,15 @@ class General(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self,message):
         if not message.author.bot:
-            memberid = message.author.id
-            now = message.created_at
+            memberid = str(message.author.id)
+            now = datetime.now()
             # 如果成員還沒有獲得過蛋糕，或者已經過了冷卻時間
             if memberid not in self.last_cake_time or now - self.last_cake_time[memberid] > self.cake_cooldown:
                 data = common.dataload()
-                data[str(memberid)]["cake"] += 1
+                data[memberid]["cake"] += 1
                 common.datawrite(data)
                 # 更新最後一次獲得蛋糕的時間
-                self.last_cake_time[memberid] = now
+                self.last_cake_time[memberid] = datetime.now()
 
 
 async def setup(client:commands.Bot):
