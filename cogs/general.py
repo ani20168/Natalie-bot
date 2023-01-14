@@ -70,14 +70,12 @@ class General(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self,member):  
-        with open("data/data.json","r") as f:
-            data = json.load(f)
+        data = common.dataload()
 
         if str(member.id) not in data:
             data[str(member.id)] = {"cake": 0}
 
-        with open("data/data.json","w") as f:
-            json.dump(data,f)
+        common.datawrite(data)
 
     @commands.Cog.listener()
     async def on_message(self,message):
