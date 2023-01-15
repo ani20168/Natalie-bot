@@ -25,13 +25,21 @@ class Trade(commands.Cog):
                 return
             colorhex = int("0x"+colorhex,16)
 
+            #ban word
+            ban_word_list = ["administrator","moderator","管理員","admin","mod","ADMINISTRATOR","MODERATOR","ADMIN","MOD"]
+            #如果rolename在list內，或者在妹妹群的身分組內
+            if any(ban_word == rolename for ban_word in ban_word_list) or any(similar_word.name == rolename for similar_word in self.bot.get_guild(419108485435883531).roles):
+                await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description="兌換失敗:與現有身分組重複或相似。",color=common.bot_error_color))
+                return
+                
+
             now = datetime.now()
             data = common.dataload()
             memberid = str(interaction.user.id)
             if "redeem member role interval" in data[memberid]:
                 last_redeem = datetime.strptime(data[memberid]['redeem member role interval'], '%Y-%m-%d %H:%M')
                 #如果有資料，則進行天數比對
-                if now - last_redeem >=timedelta(minutes=3):
+                if now - last_redeem >=timedelta(days=30):
                     data[memberid]['redeem member role interval'] = now.strftime('%Y-%m-%d %H:%M')
                 else:
                     #不符合資格(尚在兌換冷卻期)
