@@ -43,7 +43,8 @@ class Trade(commands.Cog):
                     data[memberid]['redeem member role interval'] = now.strftime('%Y-%m-%d %H:%M')
                 else:
                     #不符合資格(尚在兌換冷卻期)
-                    remaining_days, remaining_seconds = divmod((30 - (now - last_redeem).days) * 86400, 86400)
+                    remaining_time = last_redeem + timedelta(days=30) - now
+                    remaining_days, remaining_seconds = divmod(remaining_time.days * 24 * 60 * 60 + remaining_time.seconds, 86400)
                     remaining_hours, remaining_seconds = divmod(remaining_seconds, 3600)
                     await interaction.response.send_message(embed=Embed(
                             title="兌換自訂稱號",
