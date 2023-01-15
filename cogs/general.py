@@ -30,10 +30,7 @@ class General(commands.Cog):
             with open("data/data.json","w") as f:
                 json.dump(data,f)
 
-        description = """
-        你好!我是Natalie!
-        你可以在這裡查看個人資料及指令表。
-        """
+        description = "你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。"
         message = Embed(title="我是Natalie!",description=description,color=common.bot_color)
         message.add_field(name="個人資料",value=f"你有{cake}塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
         message.add_field(
