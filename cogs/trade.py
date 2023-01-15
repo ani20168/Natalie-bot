@@ -47,7 +47,7 @@ class Trade(commands.Cog):
                     remaining_hours, remaining_seconds = divmod(remaining_seconds, 3600)
                     await interaction.response.send_message(embed=Embed(
                             title="兌換自訂稱號",
-                            description="兌換失敗:你每個月只能兌換一次，距離下次兌換還有**{remaining_days}**天**{remaining_hours}**小時。",
+                            description=f"兌換失敗:你每個月只能兌換一次，距離下次兌換還有**{remaining_days}**天**{remaining_hours}**小時。",
                             color=common.bot_error_color))
                     return
 
