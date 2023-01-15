@@ -39,11 +39,16 @@ class Trade(commands.Cog):
             if "redeem member role interval" in data[memberid]:
                 last_redeem = datetime.strptime(data[memberid]['redeem member role interval'], '%Y-%m-%d %H:%M')
                 #如果有資料，則進行天數比對
-                if now - last_redeem >=timedelta(minutes=1):
+                if now - last_redeem >=timedelta(days=30):
                     data[memberid]['redeem member role interval'] = now.strftime('%Y-%m-%d %H:%M')
                 else:
                     #不符合資格(尚在兌換冷卻期)
-                    await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description="兌換失敗:你每個月只能兌換一次。",color=common.bot_error_color))
+                    remaining_days, remaining_seconds = divmod((30 - (now - last_redeem).days) * 86400, 86400)
+                    remaining_hours, remaining_seconds = divmod(remaining_seconds, 3600)
+                    await interaction.response.send_message(embed=Embed(
+                            title="兌換自訂稱號",
+                            description="兌換失敗:你每個月只能兌換一次，距離下次兌換還有**{remaining_days}**天**{remaining_hours}**小時。",
+                            color=common.bot_error_color))
                     return
 
             #如果沒有資料
@@ -52,7 +57,7 @@ class Trade(commands.Cog):
             #添加身分組
             await interaction.guild.create_role(name=rolename,color=colorhex,reason="Nitro Booster兌換每月自訂稱號")
             await interaction.user.add_roles(discord.utils.get(interaction.guild.roles,name=rolename))
-            await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description=f"兌換成功!你現在擁有《 ***{rolename}*** 》稱號。",color=common.bot_color))
+            await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description=f"兌換成功!你現在擁有《 **{rolename}** 》稱號。",color=common.bot_color))
             common.datawrite(data)
             
 
