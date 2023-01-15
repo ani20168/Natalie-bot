@@ -39,7 +39,7 @@ class Trade(commands.Cog):
             if "redeem member role interval" in data[memberid]:
                 last_redeem = datetime.strptime(data[memberid]['redeem member role interval'], '%Y-%m-%d %H:%M')
                 #如果有資料，則進行天數比對
-                if now - last_redeem >=timedelta(days=30):
+                if now - last_redeem >=timedelta(minutes=1):
                     data[memberid]['redeem member role interval'] = now.strftime('%Y-%m-%d %H:%M')
                 else:
                     #不符合資格(尚在兌換冷卻期)
