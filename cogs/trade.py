@@ -41,8 +41,8 @@ class Trade(commands.Cog):
             else:
                 data[memberid]['redeem member role interval'] = now.strftime('%Y-%m-%d %H:%M')
             #添加身分組
-            await interaction.guild.create_role(name=rolename,color=colorhex,reason="Nitro Booster兌換每月自訂稱號")
-            await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description=f"兌換成功!你現在擁有***{rolename}***稱號。",color=common.bot_color))
+            await interaction.user.add_roles(interaction.guild.create_role(name=rolename,color=colorhex,reason="Nitro Booster兌換每月自訂稱號"))
+            await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description=f"兌換成功!你現在擁有《 ***{rolename}*** 》稱號。",color=common.bot_color))
             common.datawrite(data)
             
 
