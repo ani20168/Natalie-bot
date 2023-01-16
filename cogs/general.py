@@ -17,8 +17,7 @@ class General(commands.Cog):
     @app_commands.command(name = "info", description = "關於Natalie...")
     async def info(self,interaction):
         #讀取檔案
-        with open("data/data.json","r") as f:
-            data = json.load(f)
+        data = common.dataload()
         userid = str(interaction.user.id)
 
         #蛋糕查詢
@@ -27,12 +26,25 @@ class General(commands.Cog):
         else:
             data[userid]["cake"] = 0
             cake = data[userid]["cake"]
-            with open("data/data.json","w") as f:
-                json.dump(data,f)
+            common.datawrite(data)
+
+        #等級查詢
+        if "level" in data[userid]:
+            level = data[userid]["level"]
+            level_exp = data[userid]["level_exp"]
+            level_next_exp = data[userid]["level_next_exp"]
+        else:
+            data[userid]["level"] = 1
+            level = data[userid]["level"]
+            data[userid]["level_exp"] = 0
+            level_exp = data[userid]["level_exp"]
+            data[userid]["level_next_exp"] = level * (level+1)*30
+            level_next_exp = data[userid]["level_next_exp"]
+            common.datawrite(data)
 
         description = "你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。"
         message = Embed(title="我是Natalie!",description=description,color=common.bot_color)
-        message.add_field(name="個人資料",value=f"你有{cake}塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
+        message.add_field(name="個人資料",value=f"等級:**{level}**  經驗值:**{level_exp}**/**{level_next_exp}**\n你有{cake}塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
         message.add_field(
             name="指令表",
             value='''
@@ -40,6 +52,57 @@ class General(commands.Cog):
             ''',
             inline=False)
         await interaction.response.send_message(embed=message)
+
+    @app_commands.command(name = "eat", description = "餵食Natalie!")
+    @app_commands.describe(eat_cake="要餵食的蛋糕數量")
+    @app_commands.rename(eat_cake="數量")
+    async def eat(self,interaction,eat_cake: int):
+        if not interaction.user.id == common.bot_owner_id:
+            await interaction.response.send_message("暫未開放。")
+            return
+        data = common.dataload()
+        userid = str(interaction.user.id)
+        if "level" in data[userid]:
+            level = data[userid]["level"]
+            level_exp = data[userid]["level_exp"]
+            level_next_exp = data[userid]["level_next_exp"]
+        else:
+            data[userid]["level"] = 1
+            level = data[userid]["level"]
+            data[userid]["level_exp"] = 0
+            level_exp = data[userid]["level_exp"]
+            data[userid]["level_next_exp"] = level * (level+1)*30
+            level_next_exp = data[userid]["level_next_exp"]
+        
+        cake = data[userid]["cake"]
+        if not isinstance(eat_cake, int):
+            await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:輸入格式錯誤。",color=common.bot_error_color))
+            return
+
+
+        if cake >= eat_cake:
+            cake -= eat_cake
+            level_exp += eat_cake
+            message = Embed(title='餵食Natalie',description=f"我吃飽啦!(獲得{eat_cake}點經驗值)",color=common.bot_color)
+            #升級
+            if level_exp >= level_next_exp:
+                while level_exp >= level_next_exp:
+                    level += 1
+                    level_next_exp = level * (level+1)*30
+                message.add_field(name="升級!",value=f"你現在{level}等了。",inline=False)
+
+            data[userid]["level"] = level
+            data[userid]["level_exp"] = level_exp
+            data[userid]["level_next_exp"] = level_next_exp
+            common.datawrite(data)
+            await interaction.response.send_message(embed=message)
+        else:
+            await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:蛋糕不足",color=common.bot_error_color))
+            return
+
+        
+
+
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
