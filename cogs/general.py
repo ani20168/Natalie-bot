@@ -49,17 +49,23 @@ class General(commands.Cog):
             name="指令表",
             value='''
             /info -- 查看指令表及個人資料
+            /eat -- 餵食Natalie
             ''',
             inline=False)
         await interaction.response.send_message(embed=message)
 
     @app_commands.command(name = "eat", description = "餵食Natalie!")
-    @app_commands.describe(eat_cake="要餵食的蛋糕數量")
+    @app_commands.describe(eat_cake="要餵食的蛋糕數量，1蛋糕=1經驗值")
     @app_commands.rename(eat_cake="數量")
     async def eat(self,interaction,eat_cake: int):
         if not interaction.user.id == common.bot_owner_id:
             await interaction.response.send_message("暫未開放。")
             return
+        
+        if eat_cake <=0:
+            await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:請輸入有效的數量",color=common.bot_error_color))
+            return
+
         data = common.dataload()
         userid = str(interaction.user.id)
         if "level" in data[userid]:
@@ -75,10 +81,6 @@ class General(commands.Cog):
             level_next_exp = data[userid]["level_next_exp"]
         
         cake = data[userid]["cake"]
-        if not isinstance(eat_cake, int):
-            await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:輸入格式錯誤。",color=common.bot_error_color))
-            return
-
 
         if cake >= eat_cake:
             cake -= eat_cake
@@ -94,6 +96,7 @@ class General(commands.Cog):
             data[userid]["level"] = level
             data[userid]["level_exp"] = level_exp
             data[userid]["level_next_exp"] = level_next_exp
+            data[userid]["cake"] = cake
             common.datawrite(data)
             await interaction.response.send_message(embed=message)
         else:
