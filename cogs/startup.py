@@ -65,10 +65,10 @@ class Startup(commands.Cog):
                 #VIP和MOD獎勵
                 if str(member.id) in data and any(role.id == 419185180134080513 or 605730134531637249 for role in member.roles):
                     data[str(member.id)]["cake"] += 1
+                #直播獎勵
                 if str(member.id) in data and member.activity:
                     if member.activity.type == discord.ActivityType.streaming:
                         data[str(member.id)]["cake"] += 1
-                        await self.bot.get_channel(common.admin_log_channel).send(content="直播中")
 
         common.datawrite(data)
 
