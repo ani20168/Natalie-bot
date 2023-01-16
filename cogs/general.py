@@ -57,11 +57,7 @@ class General(commands.Cog):
     @app_commands.command(name = "eat", description = "餵食Natalie!")
     @app_commands.describe(eat_cake="要餵食的蛋糕數量，1蛋糕=1經驗值")
     @app_commands.rename(eat_cake="數量")
-    async def eat(self,interaction,eat_cake: int):
-        if not interaction.user.id == common.bot_owner_id:
-            await interaction.response.send_message("暫未開放。")
-            return
-        
+    async def eat(self,interaction,eat_cake: int):       
         if eat_cake <=0:
             await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:請輸入有效的數量",color=common.bot_error_color))
             return
