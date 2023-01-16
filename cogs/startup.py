@@ -61,6 +61,7 @@ class Startup(commands.Cog):
                 #如果資料內有用戶ID(正常都會有)，並且非機器人
                 if str(member.id) in data and member.bot == False:
                     data[str(member.id)]["cake"] += 1
+                #VIP和MOD獎勵
                 if str(member.id) in data and any(role.id == 419185180134080513 or 605730134531637249 for role in member.roles):
                     data[str(member.id)]["cake"] += 1
 
