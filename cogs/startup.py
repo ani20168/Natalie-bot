@@ -68,7 +68,7 @@ class Startup(commands.Cog):
                 if str(member.id) in data and member.activity:
                     if member.activity.type == discord.ActivityType.streaming:
                         data[str(member.id)]["cake"] += 1
-                        await self.bot.get_channel(common.admin_log_channel).send(f"test:{member.name}直播中")
+                        await self.bot.get_channel(common.admin_log_channel).send(content=f"{member.name}直播中")
 
         common.datawrite(data)
 

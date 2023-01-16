@@ -47,7 +47,8 @@ class General(commands.Cog):
         message.add_field(name="個人資料",value=f"等級:**{level}**  經驗值:**{level_exp}**/**{level_next_exp}**\n你有{cake}塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
         message.add_field(
             name="指令表",
-            value='''/info -- 查看指令表及個人資料
+            value='''
+            /info -- 查看指令表及個人資料
             /eat -- 餵食Natalie
             ''',
             inline=False)
