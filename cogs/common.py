@@ -35,3 +35,5 @@ class LevelSystem:
             data[memberid]["level_exp"] = self.level_exp
             data[memberid]["level_next_exp"] = self.level_next_exp
             datawrite(data)
+            
+        return self
