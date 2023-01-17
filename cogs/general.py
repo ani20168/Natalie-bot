@@ -43,7 +43,7 @@ class General(commands.Cog):
             level_next_exp = data[userid]["level_next_exp"]
             common.datawrite(data)
         """
-        userlevel = common.LevelSystem.read_info(userid)
+        userlevel = common.LevelSystem.read_info(memberid=userid)
         description = "你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。"
         message = Embed(title="我是Natalie!",description=description,color=common.bot_color)
         message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有{cake}塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
