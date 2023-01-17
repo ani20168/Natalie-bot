@@ -16,3 +16,22 @@ def dataload(filepath="data/data.json"):
 def datawrite(data, filepath="data/data.json"):
     with open(filepath, "w") as f:
         json.dump(data, f)
+
+
+class LevelSystem:
+    def __init__(self) -> None:
+        self.level = 1
+        self.level_exp = 0
+        self.level_next_exp = self.level * (self.level+1)*30
+
+    def read_info(self,memberid: str):
+        data = dataload()
+        if "level" in data[memberid]:
+            self.level = data[memberid]["level"]
+            self.level_exp = data[memberid]["level_exp"]
+            self.level_next_exp = data[memberid]["level_next_exp"]
+        else:
+            data[memberid]["level"] = self.level
+            data[memberid]["level_exp"] = self.level_exp
+            data[memberid]["level_next_exp"] = self.level_next_exp
+            datawrite(data)

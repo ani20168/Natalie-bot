@@ -28,6 +28,7 @@ class General(commands.Cog):
             cake = data[userid]["cake"]
             common.datawrite(data)
 
+        """
         #等級查詢
         if "level" in data[userid]:
             level = data[userid]["level"]
@@ -41,10 +42,11 @@ class General(commands.Cog):
             data[userid]["level_next_exp"] = level * (level+1)*30
             level_next_exp = data[userid]["level_next_exp"]
             common.datawrite(data)
-
+        """
+        userlevel = common.LevelSystem.read_info(userid)
         description = "你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。"
         message = Embed(title="我是Natalie!",description=description,color=common.bot_color)
-        message.add_field(name="個人資料",value=f"等級:**{level}**  經驗值:**{level_exp}**/**{level_next_exp}**\n你有{cake}塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
+        message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有{cake}塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
         message.add_field(
             name="指令表",
             value='''
