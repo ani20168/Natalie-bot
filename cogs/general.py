@@ -28,26 +28,10 @@ class General(commands.Cog):
             cake = data[userid]["cake"]
             common.datawrite(data)
 
-        """
-        #等級查詢
-        if "level" in data[userid]:
-            level = data[userid]["level"]
-            level_exp = data[userid]["level_exp"]
-            level_next_exp = data[userid]["level_next_exp"]
-        else:
-            data[userid]["level"] = 1
-            level = data[userid]["level"]
-            data[userid]["level_exp"] = 0
-            level_exp = data[userid]["level_exp"]
-            data[userid]["level_next_exp"] = level * (level+1)*30
-            level_next_exp = data[userid]["level_next_exp"]
-            common.datawrite(data)
-        """
-        
         userlevel = common.LevelSystem().read_info(userid)
         description = "你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。"
         message = Embed(title="我是Natalie!",description=description,color=common.bot_color)
-        message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有{cake}塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
+        message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有**{cake}**塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
         message.add_field(
             name="指令表",
             value='''
@@ -67,34 +51,24 @@ class General(commands.Cog):
 
         data = common.dataload()
         userid = str(interaction.user.id)
-        if "level" in data[userid]:
-            level = data[userid]["level"]
-            level_exp = data[userid]["level_exp"]
-            level_next_exp = data[userid]["level_next_exp"]
-        else:
-            data[userid]["level"] = 1
-            level = data[userid]["level"]
-            data[userid]["level_exp"] = 0
-            level_exp = data[userid]["level_exp"]
-            data[userid]["level_next_exp"] = level * (level+1)*30
-            level_next_exp = data[userid]["level_next_exp"]
+        userlevel = common.LevelSystem().read_info(userid)
         
         cake = data[userid]["cake"]
 
         if cake >= eat_cake:
             cake -= eat_cake
-            level_exp += eat_cake
+            userlevel.level_exp += eat_cake
             message = Embed(title='餵食Natalie',description=f"我吃飽啦!(獲得{eat_cake}點經驗值)",color=common.bot_color)
             #升級
-            if level_exp >= level_next_exp:
-                while level_exp >= level_next_exp:
-                    level += 1
-                    level_next_exp = level * (level+1)*30
-                message.add_field(name="升級!",value=f"你現在{level}等了。",inline=False)
+            if userlevel.level_exp >= userlevel.level_next_exp:
+                while userlevel.level_exp >= userlevel.level_next_exp:
+                    userlevel.level += 1
+                    userlevel.level_next_exp = userlevel.level * (userlevel.level+1)*30
+                message.add_field(name="升級!",value=f"你現在{userlevel.level}等了。",inline=False)
 
-            data[userid]["level"] = level
-            data[userid]["level_exp"] = level_exp
-            data[userid]["level_next_exp"] = level_next_exp
+            data[userid]["level"] = userlevel.level
+            data[userid]["level_exp"] = userlevel.level_exp
+            data[userid]["level_next_exp"] = userlevel.level_next_exp
             data[userid]["cake"] = cake
             common.datawrite(data)
             await interaction.response.send_message(embed=message)
