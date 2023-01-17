@@ -22,7 +22,7 @@ class LevelSystem:
     def __init__(self) -> None:
         self.level = 1
         self.level_exp = 0
-        self.level_next_exp = self.level * (self.level+1)*30
+        self.level_next_exp = 60
 
     def read_info(self,memberid: str):
         data = dataload()
