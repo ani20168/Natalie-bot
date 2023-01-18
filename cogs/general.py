@@ -76,9 +76,6 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:蛋糕不足",color=common.bot_error_color))
             return
 
-        
-
-
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
