@@ -28,10 +28,16 @@ class MiningGame(commands.Cog):
         }
         self.collection_list = {
         "森林礦坑": ["昆蟲化石", "遠古的妖精翅膀", "萬年神木之根", "古代陶器碎片"],
-        "荒野高原": ["風的根源石", "儀式石碑", "被詛咒的匕首"],
-        "蛋糕仙境": ["不滅的蠟燭", "蛋糕製造機"],
+        "荒野高原": ["風的根源石", "儀式石碑", "被詛咒的匕首", "神祕骷髏項鍊"],
+        "蛋糕仙境": ["不滅的蠟燭", "蛋糕製造機", "異界之門鑰匙"],
         "永世凍土": ["雪怪排泄物", "冰鎮草莓甜酒"],
-        "熾熱火炎山": ["上古琥珀", "火龍遺骨"]
+        "熾熱火炎山": ["上古琥珀", "火龍遺骨", "地獄辣炒年糕"]
+        }
+        self.mineral_pricelist = {
+            "鐵": 10,
+            "金": 30,
+            "鈦晶": 70,
+            "鑽石": 150
         }
 
 
@@ -44,7 +50,8 @@ class MiningGame(commands.Cog):
                 "mine": "森林礦坑",
                 "pickaxe_health": 100,
                 "pickaxe_maxhealth": 100,
-                "autofix": False
+                "autofix": False,
+                "collections": {}
                 }
             common.datawrite(data,"data/mining.json")
 
@@ -59,6 +66,7 @@ class MiningGame(commands.Cog):
         mining_data = self.miningdata_read(userid)
         userlevel = common.LevelSystem().read_info(userid)
 
+        #確認礦鎬壞了沒
         if mining_data[userid]["pickaxe_health"] == 0:
             if mining_data[userid]["autofix"] == True:
                 mining_data[userid]["pickaxe_health"] = mining_data[userid]["pickaxe_maxhealth"]
@@ -82,12 +90,22 @@ class MiningGame(commands.Cog):
                 message = Embed(title="Natalie 挖礦",description=f"你挖到了{reward}!",color=common.bot_color)
                 if reward != "石頭":
                     mining_data[userid][reward] +=1
+
         #開始抽收藏品(0.5%機會)
+        random_num = random.random()
         if random_num < 0.005:
+            collection = random.choice(self.collection_list[mining_data[userid]["mine"]])
+            mining_data[userid]["collections"][collection] += 1
+            message.add_field(name="找到收藏品!",value=f"獲得**{collection}**!",inline= False)
 
-            message.add_field(name="找到收藏品!")
+        #高風險礦場機率爆裝
+        random_num = random.random()
+        if random_num < 0.1 and mining_data[userid]["mine"] == "熾熱火炎山":
+            mining_data[userid]["pickaxe_health"] = 0
+            message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
 
+        await interaction.response.edit_message(embed=message)
         common.datawrite(mining_data,"data/mining.json")
         common.datawrite(user_data)
 
@@ -128,7 +146,9 @@ class MiningGame(commands.Cog):
         if data[userid]["autofix"] == True:
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經開啟了自動修理礦鎬。",color=common.bot_color),ephemeral=True,view=AutofixButton())
 
-
+    @app_commands.command(name = "mineral_sell",description="賣出所有礦物")
+    async def mineral_sell(self,interaction):
+        pass
 
 
     @mining.error
