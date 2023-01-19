@@ -110,8 +110,8 @@ class MiningGame(commands.Cog):
 
 
 class AutofixButton(discord.ui.View):
-    def __init__(self):
-        self.timeout = 20
+    def __init__(self, *,timeout= 20):
+        super().__init__(timeout=timeout)
     
     @discord.ui.button(label="關閉自動修理",style=discord.ButtonStyle.danger)
     async def autofix_button(self,interaction,button: discord.ui.Button):
