@@ -4,7 +4,8 @@ from discord.ext import commands
 from . import common
 from datetime import datetime, timezone, timedelta
 import json
-
+import random
+import asyncio
 
 
 
@@ -17,6 +18,20 @@ class MiningGame(commands.Cog):
         "鐵鎬": {"耐久度": 400, "需求等級": 6, "價格": 2000},
         "鑽石鎬": {"耐久度": 650, "需求等級": 10, "價格": 4500},
         "不要鎬": {"耐久度": 1000, "需求等級": 18, "價格": 10000}
+        }
+        self.mineral_chancelist = {
+        "森林礦坑": {"石頭": 0.3, "鐵": 0.45, "金": 0.25, "鈦晶": 0, "鑽石": 0},
+        "荒野高原": {"石頭": 0.1, "鐵": 0.4, "金": 0.3, "鈦晶": 0.2, "鑽石": 0},
+        "蛋糕仙境": {"石頭": 0, "鐵": 0.3, "金": 0.4, "鈦晶": 0.25, "鑽石": 0.05},
+        "永世凍土": {"石頭": 0, "鐵": 0.2, "金": 0.4, "鈦晶": 0.3, "鑽石": 0.1},
+        "熾熱火炎山": {"石頭": 0, "鐵": 0, "金": 0.4, "鈦晶": 0.3, "鑽石": 0.3}
+        }
+        self.collection_list = {
+        "森林礦坑": ["昆蟲化石", "遠古的妖精翅膀", "萬年神木之根", "古代陶器碎片"],
+        "荒野高原": ["風的根源石", "儀式石碑", "被詛咒的匕首"],
+        "蛋糕仙境": ["不滅的蠟燭", "蛋糕製造機"],
+        "永世凍土": ["雪怪排泄物", "冰鎮草莓甜酒"],
+        "熾熱火炎山": ["上古琥珀", "火龍遺骨"]
         }
 
 
@@ -53,7 +68,26 @@ class MiningGame(commands.Cog):
                 return
 
         mining_data[userid]["pickaxe_health"] -=10
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"test:礦鎬耐久 {mining_data[userid]['pickaxe_health']}",color=common.bot_color))
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
+        asyncio.sleep(15)
+
+        #開始抽獎
+        reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
+        random_num = random.random()
+        current_probability = 0
+        for reward, probability in reward_probabilities.items():
+            current_probability += probability
+            if random_num < current_probability:
+                #抽出礦物
+                message = Embed(title="Natalie 挖礦",description=f"你挖到了{reward}!",color=common.bot_color)
+                if reward != "石頭":
+                    mining_data[userid][reward] +=1
+        #開始抽收藏品(0.5%機會)
+        if random_num < 0.005:
+
+            message.add_field(name="找到收藏品!")
+
+
         common.datawrite(mining_data,"data/mining.json")
         common.datawrite(user_data)
 
@@ -90,13 +124,7 @@ class MiningGame(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="自動修理已開啟。\n在耐久不足時會自動消耗蛋糕進行修理。",color=common.bot_color))
             common.datawrite(data,"data/mining.json")
             return
-        """
-        if data[userid]["autofix"] == False:
-            data[userid]["autofix"] = True
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="自動修理已開啟。\n在耐久不足時會自動消耗蛋糕進行修理。",color=common.bot_color))
-            common.datawrite(data,"data/mining.json")
-            return
-        """
+
         if data[userid]["autofix"] == True:
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經開啟了自動修理礦鎬。",color=common.bot_color),ephemeral=True,view=AutofixButton())
 
@@ -110,7 +138,7 @@ class MiningGame(commands.Cog):
 
 
 class AutofixButton(discord.ui.View):
-    def __init__(self, *,timeout= 20):
+    def __init__(self, *,timeout= 30):
         super().__init__(timeout=timeout)
     
     @discord.ui.button(label="關閉自動修理",style=discord.ButtonStyle.danger)
@@ -121,10 +149,6 @@ class AutofixButton(discord.ui.View):
         common.datawrite(data,"data/mining.json")
         button.disabled = True
         await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description="自動修理已關閉。",color=common.bot_color),view=self)
-        
-
-    async def on_timeout(self,interaction) -> None:
-        await interaction.response.edit_message(view=None)
 
 async def setup(client:commands.Bot):
     await client.add_cog(MiningGame(client))
