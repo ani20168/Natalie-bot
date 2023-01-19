@@ -121,11 +121,12 @@ class AutofixButton(discord.ui.View):
         common.datawrite(data,"data/mining.json")
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="自動修理已關閉。",color=common.bot_color), ephemeral=True)
         button.disabled = True
-        await interaction.response.edit_message(view=self)
+        await interaction.followup.edit_message(view=self)
         
 
     async def on_timeout(self) -> None:
-        pass
+        for item in self.children:
+            item.disabled = True
 
 async def setup(client:commands.Bot):
     await client.add_cog(MiningGame(client))
