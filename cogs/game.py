@@ -53,6 +53,7 @@ class MiningGame(commands.Cog):
                 return
 
         mining_data[userid]["pickaxe_health"] -=10
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"test:礦鎬耐久 {mining_data[userid]['pickaxe_health']}",color=common.bot_color))
         common.datawrite(mining_data,"data/mining.json")
         common.datawrite(user_data)
 
@@ -97,7 +98,7 @@ class MiningGame(commands.Cog):
             return
         """
         if data[userid]["autofix"] == True:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經開啟了自動修理礦鎬。",color=common.bot_color),ephemeral=True,view=AutofixButton(timeout=20))
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經開啟了自動修理礦鎬。",color=common.bot_color),ephemeral=True,view=AutofixButton())
 
 
 
@@ -105,12 +106,12 @@ class MiningGame(commands.Cog):
     @mining.error
     async def on_mining_error(self,interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CommandOnCooldown):
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"輸入太快了，妹妹頂不住!請在{error.retry_after}後再試一次。",color=common.bot_error_color), ephemeral=True)
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"輸入太快了，妹妹頂不住!請在{int(error.retry_after)}秒後再試一次。",color=common.bot_error_color), ephemeral=True)
 
 
 class AutofixButton(discord.ui.View):
     def __init__(self):
-        super().__init__()
+        self.timeout = 20
     
     @discord.ui.button(label="關閉自動修理",style=discord.ButtonStyle.danger)
     async def autofix_button(self,interaction,button: discord.ui.Button):
