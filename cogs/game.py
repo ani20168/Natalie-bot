@@ -102,7 +102,7 @@ class MiningGame(commands.Cog):
 
 
 
-    @app_commands.error
+    @mining.error
     async def on_mining_error(self,interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CommandOnCooldown):
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"輸入太快了，妹妹頂不住!請在{error.retry_after}後再試一次。",color=common.bot_error_color), ephemeral=True)
