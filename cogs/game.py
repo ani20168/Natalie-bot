@@ -121,7 +121,7 @@ class AutofixButton(discord.ui.View):
         common.datawrite(data,"data/mining.json")
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="自動修理已關閉。",color=common.bot_color), ephemeral=True)
         button.disabled = True
-        await interaction.edit_original_message(view=self)
+        await interaction.edit_original_response(view=self)
         
 
     async def on_timeout(self) -> None:
