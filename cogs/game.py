@@ -148,6 +148,16 @@ class MiningGame(commands.Cog):
 
     @app_commands.command(name = "mineral_sell",description="賣出所有礦物")
     async def mineral_sell(self,interaction):
+        userid = str(interaction.user.id)
+        mining_data = self.miningdata_read(userid)
+        #計算賣出價
+        total_price = 0
+        for mineral, quantity in mining_data[userid].items():
+            if mineral in self.mineral_pricelist:
+                total_price += self.mineral_pricelist[mineral] * quantity
+        
+        #顯示
+        
         pass
 
 
