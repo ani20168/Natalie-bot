@@ -91,7 +91,7 @@ class MiningGame(commands.Cog):
             if random_num < current_probability:
                 #抽出礦物
                 print("已抽出礦物")
-                message.description = f"你挖到了{reward}"
+                message = Embed(title="Natalie 挖礦",description=f"你挖到了{reward}",color=common.bot_color)
                 if reward != "石頭":
                     mining_data[userid][reward] +=1
                 break
