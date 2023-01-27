@@ -20,11 +20,11 @@ class MiningGame(commands.Cog):
         "不要鎬": {"耐久度": 1000, "需求等級": 18, "價格": 10000}
         }
         self.mineral_chancelist = {
-        "森林礦坑": {"石頭": 0.3, "鐵": 0.45, "金": 0.25, "鈦晶": 0, "鑽石": 0},
-        "荒野高原": {"石頭": 0.1, "鐵": 0.4, "金": 0.3, "鈦晶": 0.2, "鑽石": 0},
-        "蛋糕仙境": {"石頭": 0, "鐵": 0.3, "金": 0.4, "鈦晶": 0.25, "鑽石": 0.05},
-        "永世凍土": {"石頭": 0, "鐵": 0.2, "金": 0.4, "鈦晶": 0.3, "鑽石": 0.1},
-        "熾熱火炎山": {"石頭": 0, "鐵": 0, "金": 0.4, "鈦晶": 0.3, "鑽石": 0.3}
+        "森林礦坑": {"石頭": 0.3, "鐵礦": 0.45, "金礦": 0.25, "鈦晶": 0, "鑽石": 0},
+        "荒野高原": {"石頭": 0.1, "鐵礦": 0.4, "金礦": 0.3, "鈦晶": 0.2, "鑽石": 0},
+        "蛋糕仙境": {"石頭": 0, "鐵礦": 0.3, "金礦": 0.4, "鈦晶": 0.25, "鑽石": 0.05},
+        "永世凍土": {"石頭": 0, "鐵礦": 0.2, "金礦": 0.4, "鈦晶": 0.3, "鑽石": 0.1},
+        "熾熱火炎山": {"石頭": 0, "鐵礦": 0, "金礦": 0.4, "鈦晶": 0.3, "鑽石": 0.3}
         }
         self.collection_list = {
         "森林礦坑": ["昆蟲化石", "遠古的妖精翅膀", "萬年神木之根", "古代陶器碎片"],
@@ -34,8 +34,8 @@ class MiningGame(commands.Cog):
         "熾熱火炎山": ["上古琥珀", "火龍遺骨", "地獄辣炒年糕"]
         }
         self.mineral_pricelist = {
-            "鐵": 10,
-            "金": 30,
+            "鐵礦": 10,
+            "金礦": 30,
             "鈦晶": 70,
             "鑽石": 150
         }
@@ -85,18 +85,17 @@ class MiningGame(commands.Cog):
         random_num = random.random()
         current_probability = 0
         for reward, probability in reward_probabilities.items():
-            print(f"當前reward:{reward},當前probability:{probability}")
+            
             current_probability += probability
             if random_num < current_probability:
                 #抽出礦物
-                print("已抽出礦物")
                 message = Embed(title="Natalie 挖礦",description=f"你挖到了{reward}",color=common.bot_color)
                 if reward != "石頭":
                     if reward not in mining_data[userid]:
                         mining_data[userid][reward] = 0
                     mining_data[userid][reward] +=1
                 break
-        print("開始抽收藏品")
+
         #開始抽收藏品(0.5%機會)
         random_num = random.random()
         if random_num < 0.005:
@@ -105,7 +104,7 @@ class MiningGame(commands.Cog):
                 mining_data[userid]["collections"][collection] = 0
             mining_data[userid]["collections"][collection] += 1
             message.add_field(name="找到收藏品!",value=f"獲得**{collection}**!",inline= False)
-        print("爆裝檢測")
+
         #高風險礦場機率爆裝
         random_num = random.random()
         if random_num < 0.1 and mining_data[userid]["mine"] == "熾熱火炎山":
@@ -116,7 +115,6 @@ class MiningGame(commands.Cog):
         await interaction.edit_original_response(embed=message)
         common.datawrite(mining_data,"data/mining.json")
         common.datawrite(user_data)
-
 
     @app_commands.command(name = "pickaxe_fix", description = "修理礦鎬(需要10塊蛋糕)")
     async def pickaxe_fix(self,interaction):
@@ -165,7 +163,8 @@ class MiningGame(commands.Cog):
         for mineral, quantity in mining_data[userid].items():
             if mineral in self.mineral_pricelist:
                 total_price += self.mineral_pricelist[mineral] * quantity
-                mineral_sellinfo_show += f"{mineral}:**{quantity}**個\n"
+                if quantity != 0:
+                    mineral_sellinfo_show += f"{mineral}:**{quantity}**個\n"
         message.add_field(name="你總共賣出了...",value=mineral_sellinfo_show,inline=False)
 
         #清除礦物
@@ -181,6 +180,11 @@ class MiningGame(commands.Cog):
         message.add_field(name=f"你獲得了{total_price}塊蛋糕",value="",inline=False)
         await interaction.response.send_message(embed=message)
 
+    @app_commands.command(name = "mining_info",description="挖礦資訊")
+    async def mining_info(self,interaction):
+        miningdata = self.miningdata_read()
+        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物")
+        pass
 
     @mining.error
     async def on_mining_error(self,interaction, error: app_commands.AppCommandError):
