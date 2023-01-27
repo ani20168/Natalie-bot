@@ -94,21 +94,21 @@ class MiningGame(commands.Cog):
                 if reward != "石頭":
                     mining_data[userid][reward] +=1
                 break
-
+        print("開始抽收藏品")
         #開始抽收藏品(0.5%機會)
         random_num = random.random()
         if random_num < 0.005:
             collection = random.choice(self.collection_list[mining_data[userid]["mine"]])
             mining_data[userid]["collections"][collection] += 1
             message.add_field(name="找到收藏品!",value=f"獲得**{collection}**!",inline= False)
-
+        print("爆裝檢測")
         #高風險礦場機率爆裝
         random_num = random.random()
         if random_num < 0.1 and mining_data[userid]["mine"] == "熾熱火炎山":
             mining_data[userid]["pickaxe_health"] = 0
             message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
-
+        print("修改embed")
         await interaction.response.edit_message(embed=message)
         common.datawrite(mining_data,"data/mining.json")
         common.datawrite(user_data)
