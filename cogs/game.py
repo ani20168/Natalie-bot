@@ -77,7 +77,7 @@ class MiningGame(commands.Cog):
 
         mining_data[userid]["pickaxe_health"] -=10
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
-        asyncio.sleep(15)
+        await asyncio.sleep(15)
 
         #開始抽獎
         reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
