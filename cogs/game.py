@@ -81,12 +81,15 @@ class MiningGame(commands.Cog):
 
         #開始抽獎
         reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
+        print(f"debug:reward_probabilities={reward_probabilities}")
         random_num = random.random()
         current_probability = 0
         for reward, probability in reward_probabilities.items():
+            print(f"當前reward:{reward},當前probability:{probability}")
             current_probability += probability
             if random_num < current_probability:
                 #抽出礦物
+                print("已抽出礦物")
                 message = Embed(title="Natalie 挖礦",description=f"你挖到了{reward}!",color=common.bot_color)
                 if reward != "石頭":
                     mining_data[userid][reward] +=1
