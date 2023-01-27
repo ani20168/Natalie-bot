@@ -76,8 +76,7 @@ class MiningGame(commands.Cog):
                 return
 
         mining_data[userid]["pickaxe_health"] -=10
-        message = Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color)
-        await interaction.response.send_message(embed=message)
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
         await asyncio.sleep(15)
 
         #開始抽獎
@@ -110,7 +109,7 @@ class MiningGame(commands.Cog):
             message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
         print(f"修改embed:{message}")
-        await interaction.response.edit_message(embed=message)
+        await interaction.edit_original_response(embed=message)
         common.datawrite(mining_data,"data/mining.json")
         common.datawrite(user_data)
 
