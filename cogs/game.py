@@ -76,7 +76,8 @@ class MiningGame(commands.Cog):
                 return
 
         mining_data[userid]["pickaxe_health"] -=10
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
+        message = Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color)
+        await interaction.response.send_message(embed=message)
         await asyncio.sleep(15)
 
         #開始抽獎
@@ -90,7 +91,7 @@ class MiningGame(commands.Cog):
             if random_num < current_probability:
                 #抽出礦物
                 print("已抽出礦物")
-                message = Embed(title="Natalie 挖礦",description=f"你挖到了{reward}!",color=common.bot_color)
+                message.description = f"你挖到了{reward}"
                 if reward != "石頭":
                     mining_data[userid][reward] +=1
                 break
