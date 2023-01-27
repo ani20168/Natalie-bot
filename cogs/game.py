@@ -92,6 +92,8 @@ class MiningGame(commands.Cog):
                 print("已抽出礦物")
                 message = Embed(title="Natalie 挖礦",description=f"你挖到了{reward}",color=common.bot_color)
                 if reward != "石頭":
+                    if reward not in mining_data[userid]:
+                        mining_data[userid][reward] = 0
                     mining_data[userid][reward] +=1
                 break
         print("開始抽收藏品")
@@ -99,6 +101,8 @@ class MiningGame(commands.Cog):
         random_num = random.random()
         if random_num < 0.005:
             collection = random.choice(self.collection_list[mining_data[userid]["mine"]])
+            if collection not in mining_data[userid]["collections"]:
+                mining_data[userid]["collections"][collection] = 0
             mining_data[userid]["collections"][collection] += 1
             message.add_field(name="找到收藏品!",value=f"獲得**{collection}**!",inline= False)
         print("爆裝檢測")
