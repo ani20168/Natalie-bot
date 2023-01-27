@@ -90,6 +90,7 @@ class MiningGame(commands.Cog):
                 message = Embed(title="Natalie 挖礦",description=f"你挖到了{reward}!",color=common.bot_color)
                 if reward != "石頭":
                     mining_data[userid][reward] +=1
+                break
 
         #開始抽收藏品(0.5%機會)
         random_num = random.random()
@@ -150,15 +151,28 @@ class MiningGame(commands.Cog):
     async def mineral_sell(self,interaction):
         userid = str(interaction.user.id)
         mining_data = self.miningdata_read(userid)
+        message = Embed(title="Natalie 挖礦",color=common.bot_color)
         #計算賣出價
         total_price = 0
+        mineral_sellinfo_show = ""
         for mineral, quantity in mining_data[userid].items():
             if mineral in self.mineral_pricelist:
                 total_price += self.mineral_pricelist[mineral] * quantity
-        
+                mineral_sellinfo_show += f"{mineral}:**{quantity}**個\n"
+        message.add_field(name="你總共賣出了...",value=mineral_sellinfo_show,inline=False)
+
+        #清除礦物
+        for mineral in self.mineral_pricelist.keys():
+            if mineral in mining_data[userid]:
+                mining_data[userid][mineral] = 0
+        common.datawrite(mining_data,"data/mining.json")
+
         #顯示
-        
-        pass
+        userdata = common.dataload()
+        userdata[userid]["cake"] += total_price
+        common.datawrite(userdata)
+        message.add_field(name=f"你獲得了{total_price}塊蛋糕",value="",inline=False)
+        await interaction.response.send_message(embed=message)
 
 
     @mining.error
