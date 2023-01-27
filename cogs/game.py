@@ -182,9 +182,25 @@ class MiningGame(commands.Cog):
 
     @app_commands.command(name = "mining_info",description="挖礦資訊")
     async def mining_info(self,interaction):
-        miningdata = self.miningdata_read()
-        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物")
-        pass
+        mining_data = self.miningdata_read()
+        userid = str(interaction.user.id)
+
+        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物",color=common.bot_color)
+        message.add_field(name="我的礦鎬",value=f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}",inline=False)
+        message.add_field(name="礦場位置",value=f"{mining_data[userid]['mine']}",inline=False)
+
+        #全部的收藏品列表
+        collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
+        #用戶的收藏品列表
+        collection_confirm_message = ""
+        collection_confirm_count = 0
+        for item in collection_confirm_list:
+            if item in mining_data[userid] and mining_data[userid][item] > 0:
+                collection_confirm_message += f"{item}: {mining_data[userid][item]}個\n"
+                collection_confirm_count += 1
+        message.add_field(name=f"擁有收藏品 {collection_confirm_count}/{len(collection_confirm_list)}",value=f"{collection_confirm_message}",inline=False)
+        await interaction.response.send_message(embed=message)
+        
 
     @mining.error
     async def on_mining_error(self,interaction, error: app_commands.AppCommandError):
