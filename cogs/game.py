@@ -108,7 +108,7 @@ class MiningGame(commands.Cog):
             mining_data[userid]["pickaxe_health"] = 0
             message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
-        print("修改embed")
+        print(f"修改embed:{message}")
         await interaction.response.edit_message(embed=message)
         common.datawrite(mining_data,"data/mining.json")
         common.datawrite(user_data)
