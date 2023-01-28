@@ -201,7 +201,7 @@ class MiningGame(commands.Cog):
     @app_commands.command(name = "collection_trade",description="販賣收藏品")
     async def collection_trade(self,interaction):
         userid = str(interaction.user.id)
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="debug",color=common.bot_color),view=CollectionTradeButton())
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="debug",color=common.bot_color),view=CollectionTradeButton(selluser=interaction))
 
     @mining.error
     async def on_mining_error(self,interaction, error: app_commands.AppCommandError):
@@ -210,13 +210,14 @@ class MiningGame(commands.Cog):
 
 
 class CollectionTradeButton(discord.ui.View):
-    def __init__(self, *,timeout= 30):
+    def __init__(self, *,timeout= 30,selluser):
         super().__init__(timeout=timeout)
+        self.selluser = selluser
 
     @discord.ui.button(label="購買!",style=discord.ButtonStyle.green)
     async def collection_trade_button(self,interaction,button: discord.ui.Button):
         button.disabled = True
-        await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"debug:\nself.interaction:{self.user.name}\ninteraction:{interaction.user.name}",color=common.bot_color),view=self)
+        await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"debug:\nself.interaction:{self.selluser.user.name}\ninteraction:{interaction.user.name}",color=common.bot_color),view=self)
         pass
 
 class AutofixButton(discord.ui.View):
