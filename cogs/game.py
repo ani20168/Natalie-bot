@@ -201,6 +201,7 @@ class MiningGame(commands.Cog):
     @app_commands.command(name = "collection_trade",description="販賣收藏品")
     @app_commands.describe(collection_name="要販賣的收藏品名稱",price="要販賣的價格(蛋糕)")
     @app_commands.rename(collection_name="名稱",price="價格")
+    @app_commands.checks.cooldown(1, 60)
     async def collection_trade(self,interaction,collection_name: str,price: int):
         userid = str(interaction.user.id)
         mining_data = self.miningdata_read(userid)
@@ -222,27 +223,40 @@ class MiningGame(commands.Cog):
             return
 
         #準備發送交易訊息
-        message = Embed(title="Natalie 挖礦",description="debug",color=common.bot_color)
-        await interaction.response.send_message(embed=message,view=CollectionTradeButton(selluser=interaction))
-
+        message = Embed(title="Natalie 挖礦",description=f"<@{userid}>正在販賣一項收藏品，有興趣的話請點擊下方的購買按鈕!\n交易提案有效時間為60秒。",color=common.bot_color)
+        message.add_field(name="收藏品",value=f"**{collection_name}**",inline=False)
+        message.add_field(name="價格",value=f"**{price}**塊蛋糕",inline=False)
+        await interaction.response.send_message(embed=message,view=CollectionTradeButton(selluser=interaction,collection_name=collection_name,price=price))
 
 
 
 
     @mining.error
+    @collection_trade.error
     async def on_mining_error(self,interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CommandOnCooldown):
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"輸入太快了，妹妹頂不住!請在{int(error.retry_after)}秒後再試一次。",color=common.bot_error_color), ephemeral=True)
 
 
 class CollectionTradeButton(discord.ui.View):
-    def __init__(self, *,timeout= 60,selluser):
+    def __init__(self, *,timeout= 60,selluser,collection_name,price):
         super().__init__(timeout=timeout)
         self.selluser = selluser
+        self.collection_name = collection_name
+        self.price = price
 
     @discord.ui.button(label="購買!",style=discord.ButtonStyle.green)
     async def collection_trade_button(self,interaction,button: discord.ui.Button):
-        button.disabled = True
+        user_data = common.dataload()
+        buyuserid = str(interaction.user.id)
+        mining_data = MiningGame().miningdata_read(buyuserid)
+
+        #買家有沒有錢?
+        if user_data[buyuserid]["cake"] < self.price:
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"錯誤:你只有**{user_data[buyuserid]['cake']}**塊蛋糕。",color=common.bot_error_color),ephemeral=True)
+            return
+
+
         await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"debug:\nself.interaction:{self.selluser.user.name}\ninteraction:{interaction.user.name}",color=common.bot_color),view=self)
         pass
 
