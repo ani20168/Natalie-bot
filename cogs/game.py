@@ -192,16 +192,42 @@ class MiningGame(commands.Cog):
         collection_confirm_message = ""
         collection_confirm_count = 0
         for item in collection_confirm_list:
-            if item in mining_data[userid] and mining_data[userid][item] > 0:
-                collection_confirm_message += f"{item}: {mining_data[userid][item]}個\n"
+            if item in mining_data[userid]['collections'] and mining_data[userid]['collections'][item] > 0:
+                collection_confirm_message += f"{item}: {mining_data[userid]['collections'][item]}個\n"
                 collection_confirm_count += 1
         message.add_field(name=f"擁有收藏品 {collection_confirm_count}/{len(collection_confirm_list)}",value=f"{collection_confirm_message}",inline=False)
         await interaction.response.send_message(embed=message)
         
     @app_commands.command(name = "collection_trade",description="販賣收藏品")
-    async def collection_trade(self,interaction):
+    @app_commands.describe(collection_name="要販賣的收藏品名稱",price="要販賣的價格(蛋糕)")
+    @app_commands.rename(collection_name="名稱",price="價格")
+    async def collection_trade(self,interaction,collection_name: str,price: int):
         userid = str(interaction.user.id)
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="debug",color=common.bot_color),view=CollectionTradeButton(selluser=interaction))
+        mining_data = self.miningdata_read(userid)
+
+        if price <= 0:
+            await interaction.response.send_message(embed=Embed(title='Natalie 挖礦',description="錯誤:請輸入有效的價格",color=common.bot_error_color))
+            return
+
+        #全部的收藏品列表
+        collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
+        #如果沒有在收藏品清單
+        if collection_name not in collection_confirm_list:
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="錯誤:不存在的收藏品。",color=common.bot_error_color))
+            return
+
+        #如果該收藏品不在用戶收藏品清單內或數量=0
+        if collection_name not in mining_data[userid]["collections"] or mining_data[userid]["collections"][collection_name] == 0:
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"錯誤:你沒有**{collection_name}**。",color=common.bot_error_color))
+            return
+
+        #準備發送交易訊息
+        message = Embed(title="Natalie 挖礦",description="debug",color=common.bot_color)
+        await interaction.response.send_message(embed=message,view=CollectionTradeButton(selluser=interaction))
+
+
+
+
 
     @mining.error
     async def on_mining_error(self,interaction, error: app_commands.AppCommandError):
@@ -210,7 +236,7 @@ class MiningGame(commands.Cog):
 
 
 class CollectionTradeButton(discord.ui.View):
-    def __init__(self, *,timeout= 30,selluser):
+    def __init__(self, *,timeout= 60,selluser):
         super().__init__(timeout=timeout)
         self.selluser = selluser
 
