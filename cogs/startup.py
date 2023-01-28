@@ -32,6 +32,26 @@ class Startup(commands.Cog):
                     if any( tag.name == "星門" for tag in thread.applied_tags):
                         await thread.edit(archived=True,locked=True,reason="自動鎖定過期的星門")
 
+    #挖礦遊戲刷新礦場總挖礦次數
+    @tasks.loop(hours=1)
+    async def mine_mininglimit_reflash(self):
+        nowtime = datetime.now(timezone(timedelta(hours=8)))
+        data = common.dataload("data/mining.json")
+        if "mine_mininglimit" not in data:
+            data["mine_mininglimit"] = {
+            "森林礦坑": 500,
+            "荒野高原": 500,
+            "蛋糕仙境": 500,
+            "永世凍土": 500,
+            "熾熱火炎山": 500
+            }
+        if nowtime.hour == 0:
+            for value in data["mine_mininglimit"]:
+                if value != 500:
+                    value = 500
+            pass
+        common.datawrite(data,"data/mining.json")
+
     #用戶資料初始化/檢查
     @tasks.loop(seconds=5,count=1)
     async def userdata_initialization(self):
@@ -75,15 +95,10 @@ class Startup(commands.Cog):
 
 
 
-
+    @userdata_initialization.before_loop 
     @clearstardoor.before_loop    
-    async def before_clearstardoor(self):
-        await self.bot.wait_until_ready()
-    @userdata_initialization.before_loop    
-    async def before_userdata_initialization(self):
-        await self.bot.wait_until_ready()
     @give_cake_in_vc.before_loop
-    async def before_give_cake_in_vc(self):
+    async def event_before_loop(self):
         await self.bot.wait_until_ready()
         
 
