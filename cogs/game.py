@@ -216,7 +216,7 @@ class CollectionTradeButton(discord.ui.View):
     @discord.ui.button(label="購買!",style=discord.ButtonStyle.green)
     async def collection_trade_button(self,interaction,button: discord.ui.Button):
         button.disabled = True
-        await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"debug:\nself.interaction:{self.interaction.user.name}\ninteraction:{interaction.user.name}",color=common.bot_color),view=self)
+        await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"debug:\nself.interaction:{self.user.name}\ninteraction:{interaction.user.name}",color=common.bot_color),view=self)
         pass
 
 class AutofixButton(discord.ui.View):
