@@ -80,7 +80,6 @@ class MiningGame(commands.Cog):
 
         #開始抽獎
         reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
-        print(f"debug:reward_probabilities={reward_probabilities}")
         random_num = random.random()
         current_probability = 0
         for reward, probability in reward_probabilities.items():
@@ -110,7 +109,6 @@ class MiningGame(commands.Cog):
             mining_data[userid]["pickaxe_health"] = 0
             message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
-        print(f"修改embed:{message}")
         await interaction.edit_original_response(embed=message)
         common.datawrite(mining_data,"data/mining.json")
         common.datawrite(user_data)
@@ -200,12 +198,26 @@ class MiningGame(commands.Cog):
         message.add_field(name=f"擁有收藏品 {collection_confirm_count}/{len(collection_confirm_list)}",value=f"{collection_confirm_message}",inline=False)
         await interaction.response.send_message(embed=message)
         
+    @app_commands.command(name = "collection_trade",description="販賣收藏品")
+    async def collection_trade(self,interaction):
+        userid = str(interaction.user.id)
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="debug",color=common.bot_color),view=CollectionTradeButton())
 
     @mining.error
     async def on_mining_error(self,interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CommandOnCooldown):
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"輸入太快了，妹妹頂不住!請在{int(error.retry_after)}秒後再試一次。",color=common.bot_error_color), ephemeral=True)
 
+
+class CollectionTradeButton(discord.ui.View):
+    def __init__(self, *,timeout= 30):
+        super().__init__(timeout=timeout)
+
+    @discord.ui.button(label="購買!",style=discord.ButtonStyle.green)
+    async def collection_trade_button(self,interaction,button: discord.ui.Button):
+        button.disabled = True
+        await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"debug:\nself.interaction:{self.interaction.user.name}\ninteraction:{interaction.user.name}",color=common.bot_color),view=self)
+        pass
 
 class AutofixButton(discord.ui.View):
     def __init__(self, *,timeout= 30):
