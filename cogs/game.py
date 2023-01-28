@@ -233,7 +233,7 @@ class MiningGame(commands.Cog):
 
     @mining.error
     @collection_trade.error
-    async def on_mining_error(self,interaction, error: app_commands.AppCommandError):
+    async def on_cooldown(self,interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CommandOnCooldown):
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"輸入太快了，妹妹頂不住!請在{int(error.retry_after)}秒後再試一次。",color=common.bot_error_color), ephemeral=True)
 
@@ -249,6 +249,7 @@ class CollectionTradeButton(discord.ui.View):
     @discord.ui.button(label="購買!",style=discord.ButtonStyle.green)
     async def collection_trade_button(self,interaction,button: discord.ui.Button):
         user_data = common.dataload()
+        selluserid = str(self.selluser.user.id)
         buyuserid = str(interaction.user.id)
         mining_data = MiningGame(self.bot).miningdata_read(buyuserid)
 
@@ -257,9 +258,23 @@ class CollectionTradeButton(discord.ui.View):
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"錯誤:你只有**{user_data[buyuserid]['cake']}**塊蛋糕。",color=common.bot_error_color),ephemeral=True)
             return
 
+        button.disabled = True
+        user_data[selluserid]["cake"] += self.price
+        user_data[buyuserid]["cake"] -= self.price
+        mining_data[selluserid]["collections"][self.collection_name] -= 1
+        if self.collection_name not in mining_data[buyuserid]["collections"]:
+            mining_data[buyuserid]["collections"][self.collection_name] = 0
+        mining_data[buyuserid]["collections"][self.collection_name] += 1
 
-        await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"debug:\nself.interaction:{self.selluser.user.name}\ninteraction:{interaction.user.name}",color=common.bot_color),view=self)
-        pass
+        common.datawrite(user_data)
+        common.datawrite(mining_data,"data/mining.json")
+
+        await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"此筆交易提案已完成。\n賣家:<@{selluserid}>\n買家:<@{buyuserid}>\n購買項目:**{self.collection_name}**",color=common.bot_color),view=self)
+    
+    async def interaction_check(self, interaction) -> bool:
+        if interaction.user == self.selluser.user:
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你不能向自己購買收藏品。",color=common.bot_error_color), ephemeral=True)
+        return
 
 class AutofixButton(discord.ui.View):
     def __init__(self, *,timeout= 30):
