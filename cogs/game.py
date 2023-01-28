@@ -2,8 +2,6 @@ import discord
 from discord import app_commands,Embed
 from discord.ext import commands
 from . import common
-from datetime import datetime, timezone, timedelta
-import json
 import random
 import asyncio
 
@@ -68,6 +66,7 @@ class MiningGame(commands.Cog):
 
         #確認礦鎬壞了沒
         if mining_data[userid]["pickaxe_health"] == 0:
+            #如果有開啟自動修理
             if mining_data[userid]["autofix"] == True:
                 mining_data[userid]["pickaxe_health"] = mining_data[userid]["pickaxe_maxhealth"]
                 #user_data[userid]["cake"] -= 10
@@ -182,8 +181,8 @@ class MiningGame(commands.Cog):
 
     @app_commands.command(name = "mining_info",description="挖礦資訊")
     async def mining_info(self,interaction):
-        mining_data = self.miningdata_read()
         userid = str(interaction.user.id)
+        mining_data = self.miningdata_read(userid)
 
         message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物",color=common.bot_color)
         message.add_field(name="我的礦鎬",value=f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}",inline=False)
