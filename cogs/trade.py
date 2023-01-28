@@ -74,7 +74,7 @@ class Trade(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你無法贈送給bot。",color=common.bot_error_color))
             return
         if amount <= 0:
-            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你輸入有效的數字。",color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:請輸入有效的數字。",color=common.bot_error_color))
             return
         if user_data[userid]["cake"] < amount:
             await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"錯誤:蛋糕不足，你只有**{user_data[userid]['cake']}**塊蛋糕。",color=common.bot_error_color))
