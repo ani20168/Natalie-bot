@@ -12,7 +12,7 @@ class MiningGame(commands.Cog):
         self.bot = client
         self.pickaxe_list = {
         "基本礦鎬": {"耐久度": 100, "需求等級": "無", "價格": "無"},
-        "石鎬": {"耐久度": 200, "需求等級": 3, "價格": 150},
+        "石鎬": {"耐久度": 200, "需求等級": 3, "價格": 1000},
         "鐵鎬": {"耐久度": 400, "需求等級": 6, "價格": 2000},
         "鑽石鎬": {"耐久度": 650, "需求等級": 10, "價格": 4500},
         "不要鎬": {"耐久度": 1000, "需求等級": 18, "價格": 10000}
@@ -24,6 +24,13 @@ class MiningGame(commands.Cog):
         "永世凍土": {"石頭": 0, "鐵礦": 0.2, "金礦": 0.4, "鈦晶": 0.3, "鑽石": 0.1},
         "熾熱火炎山": {"石頭": 0, "鐵礦": 0, "金礦": 0.4, "鈦晶": 0.3, "鑽石": 0.3}
         }
+        self.mine_levellimit = {
+            "森林礦坑": 1,
+            "荒野高原": 10,
+            "蛋糕仙境": 99,
+            "永世凍土": 99,
+            "熾熱火炎山": 99
+        }
         self.collection_list = {
         "森林礦坑": ["昆蟲化石", "遠古的妖精翅膀", "萬年神木之根", "古代陶器碎片"],
         "荒野高原": ["風的根源石", "儀式石碑", "被詛咒的匕首", "神祕骷髏項鍊"],
@@ -32,10 +39,10 @@ class MiningGame(commands.Cog):
         "熾熱火炎山": ["上古琥珀", "火龍遺骨", "地獄辣炒年糕"]
         }
         self.mineral_pricelist = {
-            "鐵礦": 10,
-            "金礦": 30,
-            "鈦晶": 70,
-            "鑽石": 150
+            "鐵礦": 5,
+            "金礦": 10,
+            "鈦晶": 20,
+            "鑽石": 50
         }
 
 
@@ -69,7 +76,7 @@ class MiningGame(commands.Cog):
             #如果有開啟自動修理
             if mining_data[userid]["autofix"] == True:
                 mining_data[userid]["pickaxe_health"] = mining_data[userid]["pickaxe_maxhealth"]
-                #user_data[userid]["cake"] -= 10
+                user_data[userid]["cake"] -= 10
             else:
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
                 return
@@ -129,7 +136,7 @@ class MiningGame(commands.Cog):
             return
         
         #修理要10蛋糕
-        #user_data[userid]["cake"] -= 10
+        user_data[userid]["cake"] -= 10
         mining_data[userid]["pickaxe_health"] = mining_data[userid]["pickaxe_maxhealth"]
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="修理完成",color=common.bot_color))
         common.datawrite(user_data)
@@ -182,7 +189,7 @@ class MiningGame(commands.Cog):
         userid = str(interaction.user.id)
         mining_data = self.miningdata_read(userid)
 
-        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物",color=common.bot_color)
+        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 販賣收藏品",color=common.bot_color)
         message.add_field(name="我的礦鎬",value=f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}",inline=False)
         message.add_field(name="礦場位置",value=f"{mining_data[userid]['mine']}",inline=False)
 
