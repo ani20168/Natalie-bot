@@ -61,6 +61,30 @@ class Trade(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description=f"兌換成功!你現在擁有《 **{rolename}** 》稱號。",color=common.bot_color))
             common.datawrite(data)
             
+    @app_commands.command(name = "cake_give", description = "贈送蛋糕")
+    @app_commands.describe(member="你想要給予的人(使用提及)",amount="給予的蛋糕數量")
+    @app_commands.rename(member="@用戶",amount="數量")
+    async def cake_give(self,interaction,member: discord.Member,amount: int):
+        userid = str(interaction.user.id)
+        user_data = common.dataload()
+        if interaction.user == member:
+            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你無法贈送給自己。",color=common.bot_error_color))
+            return
+        if member.bot:
+            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你無法贈送給bot。",color=common.bot_error_color))
+            return
+        if amount <= 0:
+            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你輸入有效的數字。",color=common.bot_error_color))
+            return
+        if user_data[userid]["cake"] < amount:
+            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"錯誤:蛋糕不足，你只有**{user_data[userid]['cake']}**塊蛋糕。",color=common.bot_error_color))
+            return
+
+        user_data[userid]["cake"] -= amount
+        user_data[str(member.id)]["cake"] += amount
+        common.datawrite(user_data)
+
+        await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"你給予了**{amount}**塊蛋糕給<@{str(member.id)}>",color=common.bot_color))
 
 
 async def setup(client:commands.Bot):
