@@ -63,7 +63,7 @@ class Trade(commands.Cog):
             
     @app_commands.command(name = "cake_give", description = "贈送蛋糕")
     @app_commands.describe(member_give="你想要給予的人(使用提及)",amount="給予的蛋糕數量")
-    @app_commands.rename(member_give="@用戶",amount="數量")
+    @app_commands.rename(member_give="提及用戶",amount="數量")
     async def cake_give(self,interaction,member_give: discord.Member,amount: int):
         userid = str(interaction.user.id)
         user_data = common.dataload()
