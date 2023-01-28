@@ -226,7 +226,7 @@ class MiningGame(commands.Cog):
         message = Embed(title="Natalie 挖礦",description=f"<@{userid}>正在販賣一項收藏品，有興趣的話請點擊下方的購買按鈕!\n交易提案有效時間為60秒。",color=common.bot_color)
         message.add_field(name="收藏品",value=f"**{collection_name}**",inline=False)
         message.add_field(name="價格",value=f"**{price}**塊蛋糕",inline=False)
-        await interaction.response.send_message(embed=message,view=CollectionTradeButton(selluser=interaction,collection_name=collection_name,price=price))
+        await interaction.response.send_message(embed=message,view=CollectionTradeButton(selluser=interaction,collection_name=collection_name,price=price,client=self.bot))
 
 
 
@@ -239,8 +239,9 @@ class MiningGame(commands.Cog):
 
 
 class CollectionTradeButton(discord.ui.View):
-    def __init__(self, *,timeout= 60,selluser,collection_name,price):
+    def __init__(self, *,timeout= 60,selluser,collection_name,price,client):
         super().__init__(timeout=timeout)
+        self.bot = client
         self.selluser = selluser
         self.collection_name = collection_name
         self.price = price
@@ -249,7 +250,7 @@ class CollectionTradeButton(discord.ui.View):
     async def collection_trade_button(self,interaction,button: discord.ui.Button):
         user_data = common.dataload()
         buyuserid = str(interaction.user.id)
-        mining_data = MiningGame().miningdata_read(buyuserid)
+        mining_data = MiningGame(self.bot).miningdata_read(buyuserid)
 
         #買家有沒有錢?
         if user_data[buyuserid]["cake"] < self.price:
