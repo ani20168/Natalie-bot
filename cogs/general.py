@@ -37,6 +37,7 @@ class General(commands.Cog):
             value='''
             /info -- 查看指令表及個人資料
             /eat -- 餵食Natalie
+            /mining_info 挖礦小遊戲資訊
             ''',
             inline=False)
         await interaction.response.send_message(embed=message)

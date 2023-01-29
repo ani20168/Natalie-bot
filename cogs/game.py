@@ -14,8 +14,8 @@ class MiningGame(commands.Cog):
         "基本礦鎬": {"耐久度": 100, "需求等級": "無", "價格": "無"},
         "石鎬": {"耐久度": 200, "需求等級": 3, "價格": 1000},
         "鐵鎬": {"耐久度": 400, "需求等級": 6, "價格": 2000},
-        "鑽石鎬": {"耐久度": 650, "需求等級": 10, "價格": 4500},
-        "不要鎬": {"耐久度": 1000, "需求等級": 18, "價格": 10000}
+        "鑽石鎬": {"耐久度": 650, "需求等級": 10, "價格": 3000},
+        "不要鎬": {"耐久度": 1000, "需求等級": 18, "價格": 5000}
         }
         self.mineral_chancelist = {
         "森林礦坑": {"石頭": 0.3, "鐵礦": 0.45, "金礦": 0.25, "鈦晶": 0, "鑽石": 0},
@@ -80,7 +80,10 @@ class MiningGame(commands.Cog):
         if mining_data[userid]["pickaxe_health"] == 0:
             #如果有開啟自動修理
             if mining_data[userid]["autofix"] == True:
-                mining_data[userid]["pickaxe_health"] = mining_data[userid]["pickaxe_maxhealth"]
+                if user_data[userid]['cake'] < 10:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!而且你的蛋糕也不足以修理礦鎬。",color=common.bot_error_color))
+                    return
+                mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
                 user_data[userid]["cake"] -= 10
             else:
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
@@ -144,7 +147,7 @@ class MiningGame(commands.Cog):
         
         #修理要10蛋糕
         user_data[userid]["cake"] -= 10
-        mining_data[userid]["pickaxe_health"] = mining_data[userid]["pickaxe_maxhealth"]
+        mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="修理完成",color=common.bot_color))
         common.datawrite(user_data)
         common.datawrite(mining_data,"data/mining.json")
@@ -196,9 +199,14 @@ class MiningGame(commands.Cog):
         userid = str(interaction.user.id)
         mining_data = self.miningdata_read(userid)
 
-        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 販賣收藏品",color=common.bot_color)
+        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 販賣收藏品\n/mine 更換礦場",color=common.bot_color)
         message.add_field(name="我的礦鎬",value=f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}",inline=False)
         message.add_field(name="礦場位置",value=f"{mining_data[userid]['mine']}",inline=False)
+
+        mine_limit_info = ""
+        for mine, mininglimit in mining_data["mine_mininglimit"].items():
+            mine_limit_info += f"{mine}: **{mininglimit}**\n"
+        message.add_field(name="礦場剩餘挖掘量(每天重置)",value=mine_limit_info,inline=False)
 
         #全部的收藏品列表
         collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
