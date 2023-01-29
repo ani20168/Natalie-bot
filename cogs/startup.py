@@ -13,12 +13,14 @@ class Startup(commands.Cog):
         self.clearstardoor.start()  
         self.userdata_initialization.start()
         self.give_cake_in_vc.start()
+        self.mine_mininglimit_reflash.start()
 
     #卸載cog時觸發
     async def cog_unload(self):
         self.clearstardoor.cancel()
         self.userdata_initialization.cancel()
         self.give_cake_in_vc.cancel()
+        self.mine_mininglimit_reflash.cancel()
 
         
     #自動鎖定過期的星門
@@ -49,7 +51,6 @@ class Startup(commands.Cog):
             for value in data["mine_mininglimit"]:
                 if value != 500:
                     value = 500
-            pass
         common.datawrite(data,"data/mining.json")
 
     #用戶資料初始化/檢查
@@ -98,6 +99,7 @@ class Startup(commands.Cog):
     @userdata_initialization.before_loop 
     @clearstardoor.before_loop    
     @give_cake_in_vc.before_loop
+    @mine_mininglimit_reflash.before_loop
     async def event_before_loop(self):
         await self.bot.wait_until_ready()
         

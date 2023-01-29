@@ -71,6 +71,11 @@ class MiningGame(commands.Cog):
         mining_data = self.miningdata_read(userid)
         userlevel = common.LevelSystem().read_info(userid)
 
+        #確認礦場是否已挖完?
+        if mining_data['mine_mininglimit'][mining_data[userid]['mine']] == 0:
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"**{mining_data[userid]['mine']}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color))
+            return
+
         #確認礦鎬壞了沒
         if mining_data[userid]["pickaxe_health"] == 0:
             #如果有開啟自動修理
@@ -81,6 +86,8 @@ class MiningGame(commands.Cog):
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
                 return
 
+
+        mining_data['mine_mininglimit'][mining_data[userid]['mine']] -= 1
         mining_data[userid]["pickaxe_health"] -=10
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
         await asyncio.sleep(15)
@@ -235,7 +242,32 @@ class MiningGame(commands.Cog):
         message.add_field(name="價格",value=f"**{price}**塊蛋糕",inline=False)
         await interaction.response.send_message(embed=message,view=CollectionTradeButton(selluser=interaction,collection_name=collection_name,price=price,client=self.bot))
 
+    @app_commands.command(name = "mine",description="更換礦場")
+    @app_commands.choices(choices=[
+        app_commands.Choice(name="森林礦坑  1等", value="森林礦坑"),
+        app_commands.Choice(name="荒野高原  10等", value="荒野高原"),
+        app_commands.Choice(name="蛋糕仙境  未開放", value="蛋糕仙境"),
+        app_commands.Choice(name="永世凍土  未開放", value="永世凍土"),
+        app_commands.Choice(name="熾熱火炎山  未開放", value="熾熱火炎山")
+        ])
+    async def mine(self,interaction,choices: app_commands.Choice[str]):
+        userid = str(interaction.user.id)
+        mining_data = self.miningdata_read(userid)
+        userlevel = common.LevelSystem().read_info(userid)
 
+        #確認是否選擇了目前待的礦場
+        if choices.value == mining_data[userid]['mine']:
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你目前已經在**{choices.value}**。",color=common.bot_error_color))
+            return
+        
+        #確認等級是否足夠?
+        if userlevel.level < self.mine_levellimit[choices.value]:
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"等級不足，**{choices.value}**礦場需要**{self.mine_levellimit[choices.value]}**等",color=common.bot_error_color))
+            return
+
+        mining_data[userid]['mine'] = choices.value
+        common.datawrite(mining_data,"data/mining.json")
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"以移動到**{choices.value}**礦場，當前礦場剩餘挖礦次數:**{mining_data['mine_mininglimit'][choices.value]}**",color=common.bot_color))
 
 
     @mining.error
