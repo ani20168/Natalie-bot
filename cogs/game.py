@@ -72,7 +72,7 @@ class MiningGame(commands.Cog):
         userlevel = common.LevelSystem().read_info(userid)
 
         #確認礦場是否已挖完?
-        if mining_data['mine_mininglimit'][mining_data[userid]['mine']] == 0:
+        if mining_data['mine_mininglimit'][mining_data[userid]['mine']] <= 0:
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"**{mining_data[userid]['mine']}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color))
             return
 
@@ -92,6 +92,7 @@ class MiningGame(commands.Cog):
 
         mining_data['mine_mininglimit'][mining_data[userid]['mine']] -= 1
         mining_data[userid]["pickaxe_health"] -=10
+        common.datawrite(mining_data,"data/mining.json")
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
         await asyncio.sleep(15)
 
