@@ -92,9 +92,8 @@ class MiningGame(commands.Cog):
 
         mining_data['mine_mininglimit'][mining_data[userid]['mine']] -= 1
         mining_data[userid]["pickaxe_health"] -=10
-        common.datawrite(mining_data,"data/mining.json")
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
-        await asyncio.sleep(15)
+        #await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
+        #await asyncio.sleep(15)
 
         #開始抽獎
         reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
@@ -127,7 +126,7 @@ class MiningGame(commands.Cog):
             mining_data[userid]["pickaxe_health"] = 0
             message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
-        await interaction.edit_original_response(embed=message)
+        await interaction.response.send_message(embed=message)
         common.datawrite(mining_data,"data/mining.json")
         common.datawrite(user_data)
 
