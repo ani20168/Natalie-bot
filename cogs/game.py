@@ -143,7 +143,7 @@ class MiningGame(commands.Cog):
             return
         #如果沒蛋糕
         if user_data[userid]["cake"] < 10:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你的蛋糕不足!(需要10塊，你目前只有{user_data[userid]['cake']}塊",color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你的蛋糕不足!(需要**10**塊，你目前只有**{user_data[userid]['cake']}**塊)",color=common.bot_error_color))
             return
         
         #修理要10蛋糕
