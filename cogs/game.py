@@ -11,7 +11,7 @@ class MiningGame(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
         self.pickaxe_list = {
-        "基本礦鎬": {"耐久度": 100, "需求等級": "無", "價格": "無"},
+        "基本礦鎬": {"耐久度": 100, "需求等級": 1, "價格": 0},
         "石鎬": {"耐久度": 200, "需求等級": 6, "價格": 500},
         "鐵鎬": {"耐久度": 400, "需求等級": 12, "價格": 2000},
         "鑽石鎬": {"耐久度": 650, "需求等級": 18, "價格": 3000},
@@ -256,6 +256,8 @@ class MiningGame(commands.Cog):
         await interaction.response.send_message(embed=message,view=CollectionTradeButton(selluser=interaction,collection_name=collection_name,price=price,client=self.bot))
 
     @app_commands.command(name = "mine",description="更換礦場")
+    @app_commands.describe(choices="要更換的礦場")
+    @app_commands.rename(choices="選擇礦場")
     @app_commands.choices(choices=[
         app_commands.Choice(name="森林礦坑  1等", value="森林礦坑"),
         app_commands.Choice(name="荒野高原  10等", value="荒野高原"),
@@ -282,6 +284,42 @@ class MiningGame(commands.Cog):
         common.datawrite(mining_data,"data/mining.json")
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"以移動到**{choices.value}**礦場，當前礦場剩餘挖礦次數:**{mining_data['mine_mininglimit'][choices.value]}**",color=common.bot_color))
 
+    @app_commands.command(name = "pickaxe_buy",description="購買礦鎬")
+    @app_commands.describe(choices="要購買的礦鎬")
+    @app_commands.rename(choices="選擇礦鎬")
+    @app_commands.choices(choices=[
+        app_commands.Choice(name="石鎬  耐久:200 需要6等 $500", value="石鎬"),
+        app_commands.Choice(name="鐵鎬  耐久:400 需要12等 $2000", value="鐵鎬"),
+        app_commands.Choice(name="鑽石鎬  耐久:650 需要18等 $3000", value="鑽石鎬"),
+        app_commands.Choice(name="不要鎬  耐久:1000 需要25等 $7000", value="不要鎬")
+        ])
+    async def pickaxe_buy(self,interaction,choices: app_commands.Choice[str]):
+        userid = str(interaction.user.id)
+        user_data = common.dataload()
+        mining_data = self.miningdata_read(userid)
+
+
+        if mining_data[userid]["pickaxe"] == choices.value:
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經擁有此礦鎬了!",color=common.bot_error_color))
+            return
+        if self.pickaxe_list[choices.value]['需求等級'] > user_data[userid]['level']:
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的等級不足以購買此礦鎬!",color=common.bot_error_color))
+            return
+        if self.pickaxe_list[choices.value]['需求等級'] < self.pickaxe_list[mining_data[userid]['pickaxe']]['需求等級']:
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你不能購買更劣質的礦鎬!",color=common.bot_error_color))
+            return
+        if user_data[userid]['cake'] < self.pickaxe_list[choices.value]['價格']:
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你沒有足夠的蛋糕購買此礦鎬!",color=common.bot_error_color))
+            return
+
+        # 允許購買
+        user_data[userid]['cake'] -= self.pickaxe_list[choices.value]['價格']
+        mining_data[userid]["pickaxe"] = choices.value
+        mining_data[userid]['pickaxe_maxhealth'] = self.pickaxe_list[choices.value]['耐久度']
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功! 你現在擁有了**{choices.value}**。",color=common.bot_color))
+        common.datawrite(user_data)
+        common.datawrite(mining_data,"data/mining.json")
+        
 
     @mining.error
     @collection_trade.error
