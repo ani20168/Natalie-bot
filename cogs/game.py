@@ -92,8 +92,13 @@ class MiningGame(commands.Cog):
 
         mining_data['mine_mininglimit'][mining_data[userid]['mine']] -= 1
         mining_data[userid]["pickaxe_health"] -=10
-        #await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
-        #await asyncio.sleep(15)
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
+        #寫入檔案防止回溯
+        common.datawrite(user_data)
+        common.datawrite(mining_data,"data/mining.json")
+        await asyncio.sleep(15)
+        #等待時間結束後再次讀取，防止回溯問題
+        mining_data = self.miningdata_read(userid)
 
         #開始抽獎
         reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
@@ -126,9 +131,9 @@ class MiningGame(commands.Cog):
             mining_data[userid]["pickaxe_health"] = 0
             message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
-        await interaction.response.send_message(embed=message)
+        await interaction.edit_original_response(embed=message)
         common.datawrite(mining_data,"data/mining.json")
-        common.datawrite(user_data)
+
 
     @app_commands.command(name = "pickaxe_fix", description = "修理礦鎬(需要10塊蛋糕)")
     async def pickaxe_fix(self,interaction):
