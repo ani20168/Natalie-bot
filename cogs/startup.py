@@ -48,9 +48,9 @@ class Startup(commands.Cog):
             "熾熱火炎山": 500
             }
         if nowtime.hour == 0:
-            for value in data["mine_mininglimit"]:
+            for key, value in data["mine_mininglimit"].items():
                 if value != 500:
-                    value = 500
+                    data["mine_mininglimit"][key] = 500
         common.datawrite(data,"data/mining.json")
 
     #用戶資料初始化/檢查
