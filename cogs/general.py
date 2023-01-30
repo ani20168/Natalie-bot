@@ -59,7 +59,7 @@ class General(commands.Cog):
         if cake >= eat_cake:
             cake -= eat_cake
             userlevel.level_exp += eat_cake
-            message = Embed(title='餵食Natalie',description=f"我吃飽啦!(獲得{eat_cake}點經驗值)",color=common.bot_color)
+            message = Embed(title='餵食Natalie',description=f"我吃飽啦!(獲得**{eat_cake}**點經驗值)",color=common.bot_color)
             #升級
             if userlevel.level_exp >= userlevel.level_next_exp:
                 while userlevel.level_exp >= userlevel.level_next_exp:
