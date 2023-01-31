@@ -309,7 +309,7 @@ class MiningGame(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你不能購買更劣質的礦鎬!",color=common.bot_error_color))
             return
         if user_data[userid]['cake'] < self.pickaxe_list[choices.value]['價格']:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{self.pickaxe_list[choices.value]['價格']}**，你只有{user_data[userid]['cake']}。",color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{self.pickaxe_list[choices.value]['價格']}**，你只有**{user_data[userid]['cake']}**)。",color=common.bot_error_color))
             return
 
         # 允許購買
