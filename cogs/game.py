@@ -204,7 +204,7 @@ class MiningGame(commands.Cog):
         userid = str(interaction.user.id)
         mining_data = self.miningdata_read(userid)
 
-        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 販賣收藏品\n/mine 更換礦場",color=common.bot_color)
+        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 販賣收藏品\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬",color=common.bot_color)
         message.add_field(name="我的礦鎬",value=f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}",inline=False)
         message.add_field(name="礦場位置",value=f"{mining_data[userid]['mine']}",inline=False)
 
@@ -309,7 +309,7 @@ class MiningGame(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你不能購買更劣質的礦鎬!",color=common.bot_error_color))
             return
         if user_data[userid]['cake'] < self.pickaxe_list[choices.value]['價格']:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你沒有足夠的蛋糕購買此礦鎬!",color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{self.pickaxe_list[choices.value]['價格']}**，你只有{user_data[userid]['cake']}。",color=common.bot_error_color))
             return
 
         # 允許購買
