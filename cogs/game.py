@@ -320,6 +320,11 @@ class MiningGame(commands.Cog):
         common.datawrite(user_data)
         common.datawrite(mining_data,"data/mining.json")
         
+    @app_commands.command(name = "redeem_collection_role",description="兌換收藏品稱號(需要每種收藏品各一個，兌換後會消耗掉)")
+    async def redeem_collection_role(self,interaction):
+        #全部的收藏品列表
+        collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
+        pass
 
     @mining.error
     @collection_trade.error
