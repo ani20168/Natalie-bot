@@ -322,9 +322,25 @@ class MiningGame(commands.Cog):
         
     @app_commands.command(name = "redeem_collection_role",description="兌換收藏品稱號(需要每種收藏品各一個，兌換後會消耗掉)")
     async def redeem_collection_role(self,interaction):
+        userid = str(interaction.user.id)
+        mining_data = self.miningdata_read(userid)
         #全部的收藏品列表
         collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
-        pass
+        #用戶收藏品
+        user_collections = mining_data[userid]["collections"]
+        for item in collection_confirm_list:
+            if item not in user_collections or user_collections[item] < 1:
+                await interaction.response.send_message(embed=Embed(title="兌換收藏品稱號",description=f"兌換失敗:你還缺**{1 - user_collections.get(item, 0)}**個",color=common.bot_error_color))
+                return
+            #清除用戶收藏品各一個
+            user_collections[item] -= 1
+
+        #允許獲得稱號
+        mining_data[userid]["collections"] = user_collections
+        common.datawrite(mining_data,"data/mining.json")
+        #獲取稱號
+        await interaction.user.add_roles(interaction.guild.get_role(1070206894288928798))
+        await interaction.response.send_message(embed=Embed(title="兌換收藏品稱號",description="成功兌換稱號!",color=common.bot_color))
 
     @mining.error
     @collection_trade.error
