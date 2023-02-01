@@ -38,6 +38,7 @@ class General(commands.Cog):
             /info -- 查看指令表及個人資料
             /eat -- 餵食Natalie
             /mining_info 挖礦小遊戲資訊
+            /level_leaderboard 等級排行榜
             ''',
             inline=False)
         await interaction.response.send_message(embed=message)
