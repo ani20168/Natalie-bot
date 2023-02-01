@@ -330,7 +330,7 @@ class MiningGame(commands.Cog):
         user_collections = mining_data[userid]["collections"]
         for item in collection_confirm_list:
             if item not in user_collections or user_collections[item] < 1:
-                await interaction.response.send_message(embed=Embed(title="兌換收藏品稱號",description=f"兌換失敗:你還缺**{1 - user_collections.get(item, 0)}**個",color=common.bot_error_color))
+                await interaction.response.send_message(embed=Embed(title="兌換收藏品稱號",description=f"兌換失敗:你還缺**{1 - user_collections.get(item, 0)}**個收藏品",color=common.bot_error_color))
                 return
             #清除用戶收藏品各一個
             user_collections[item] -= 1
