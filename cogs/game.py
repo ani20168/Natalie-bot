@@ -27,7 +27,7 @@ class MiningGame(commands.Cog):
         self.mine_levellimit = {
             "森林礦坑": 1,
             "荒野高原": 10,
-            "蛋糕仙境": 99,
+            "蛋糕仙境": 18,
             "永世凍土": 99,
             "熾熱火炎山": 99
         }
@@ -261,7 +261,7 @@ class MiningGame(commands.Cog):
     @app_commands.choices(choices=[
         app_commands.Choice(name="森林礦坑  1等", value="森林礦坑"),
         app_commands.Choice(name="荒野高原  10等", value="荒野高原"),
-        app_commands.Choice(name="蛋糕仙境  未開放", value="蛋糕仙境"),
+        app_commands.Choice(name="蛋糕仙境  18等", value="蛋糕仙境"),
         app_commands.Choice(name="永世凍土  未開放", value="永世凍土"),
         app_commands.Choice(name="熾熱火炎山  未開放", value="熾熱火炎山")
         ])

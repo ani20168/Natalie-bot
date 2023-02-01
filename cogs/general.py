@@ -38,6 +38,7 @@ class General(commands.Cog):
             /info -- 查看指令表及個人資料
             /eat -- 餵食Natalie
             /mining_info 挖礦小遊戲資訊
+            /level_leaderboard 等級排行榜
             ''',
             inline=False)
         await interaction.response.send_message(embed=message)
@@ -76,6 +77,29 @@ class General(commands.Cog):
         else:
             await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:蛋糕不足",color=common.bot_error_color))
             return
+
+    @app_commands.command(name = "level_leaderboard", description = "等級排行榜")
+    async def level_leaderboard(self,interaction):
+        userid = str(interaction.user.id)
+        data = common.dataload()
+        userlevel_info = common.LevelSystem().read_info(userid)
+        # 建立排名榜的列表，以經驗值為排序準則，並倒序排列
+        sorted_data = sorted([(user, user_data) for user, user_data in data.items() if "level_exp" in user_data], key=lambda x: x[1]["level_exp"], reverse=True)
+
+        message = ""
+        # 顯示排名榜前10名
+        for i, (user, user_data) in enumerate(sorted_data[:10]):
+            user_object = self.bot.get_user(int(user))
+            message += (f"%d.%s -- 等級:**%d** 經驗值:**%d**\n" % (i + 1, user_object.name, user_data['level'], user_data['level_exp']))
+
+        # 找出使用指令者的排名
+        for i, (user, user_data) in enumerate(sorted_data):
+            if user == userid:
+                message += ("\n您的排名為**%d**，等級:**%d** 經驗值:**%d**" % (i + 1, user_data['level'], user_data['level_exp']))
+                break
+
+        await interaction.response.send_message(embed=Embed(title="等級排行榜",description=message,color=common.bot_color))
+        
 
 
     @commands.Cog.listener()
