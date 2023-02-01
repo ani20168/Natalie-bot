@@ -77,6 +77,10 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:蛋糕不足",color=common.bot_error_color))
             return
 
+    @app_commands.command(name = "level_leaderboard", description = "等級排行榜")
+    async def level_leaderboard(self,interaction):
+        pass
+
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
