@@ -88,7 +88,7 @@ class General(commands.Cog):
         message = ""
         # 顯示排名榜前10名
         for i, (user, user_data) in enumerate(sorted_data[:10]):
-            user_object = self.bot.get_user(user)
+            user_object = self.bot.get_user(int(user))
             message += (f"%d.%s -- 等級:**%d** 經驗值:**%d**\n" % (i + 1, user_object.name, user_data['level'], user_data['level_exp']))
 
         # 找出使用指令者的排名
