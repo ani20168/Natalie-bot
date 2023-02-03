@@ -84,7 +84,7 @@ class General(commands.Cog):
         data = common.dataload()
         userlevel_info = common.LevelSystem().read_info(userid)
         # 建立排名榜的列表，以經驗值為排序準則，並倒序排列
-        sorted_data = sorted([(user, user_data) for user, user_data in data.items() if "level_exp" in user_data], key=lambda x: x[1]["level_exp"], reverse=True)
+        sorted_data = sorted([(user, user_data) for user, user_data in data.items() if "level_exp" in user_data],  key=lambda x: (x[1]["level_exp"], user), reverse=True)
 
 
         message = ""
