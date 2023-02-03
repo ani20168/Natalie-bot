@@ -89,7 +89,6 @@ class Startup(commands.Cog):
                 #直播獎勵
                 if str(member.id) in data and member.voice.self_stream == True:
                     data[str(member.id)]["cake"] += 1
-                    print(f"debug:{member.name}正在直播中。")
                         
 
         common.datawrite(data)
