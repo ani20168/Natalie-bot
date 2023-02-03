@@ -88,7 +88,7 @@ class Startup(commands.Cog):
                     data[str(member.id)]["cake"] += 1
                 #直播獎勵
                 if str(member.id) in data and member.voice.self_stream == True:
-                    data[str(member.id)]["cake"] += 1
+                    data[str(member.id)]["cake"] += 2
                         
 
         common.datawrite(data)
