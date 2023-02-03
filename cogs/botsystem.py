@@ -25,15 +25,16 @@ class BotSystem(commands.Cog):
     @app_commands.command(name = "restart", description = "重新載入所有模組")
     async def restart(self,interaction):
         if interaction.user.id == common.bot_owner_id:
-            #紀錄重啟的時間
             data = common.dataload()
-            data['restart_time'] = time.time()
-            common.datawrite(data)
 
             await interaction.response.send_message(embed=Embed(title="系統操作",description="正在重新載入...",color=common.bot_color))
             #如果15秒內有人使用過具等待時間的指令(EX:mining)，則等待15秒
             if time.time() - data['gaming_time'] <= 15:
+                #紀錄重啟的時間 
+                data['restart_time'] = time.time()
+                common.datawrite(data)
                 await asyncio.sleep(15)
+                
             for filename in os.listdir('./cogs'):
                 if filename.endswith('.py') and not(filename == 'common.py'):
                     await self.bot.reload_extension(f'cogs.{filename[:-3]}')
