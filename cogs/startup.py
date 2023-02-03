@@ -95,9 +95,8 @@ class Startup(commands.Cog):
                 if str(member.id) in data and any(role.id in [419185180134080513,605730134531637249] for role in member.roles):
                     data[str(member.id)]["cake"] += 1
                 #直播獎勵
-                if str(member.id) in data and member.activity:
-                    if member.activity.type == discord.ActivityType.streaming:
-                        data[str(member.id)]["cake"] += 1
+                if str(member.id) in data and member.voice.self_stream == True:
+                    data[str(member.id)]["cake"] += 1
                         
 
         common.datawrite(data)
