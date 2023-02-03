@@ -74,10 +74,10 @@ class MiningGame(commands.Cog):
         userlevel = common.LevelSystem().read_info(userid)
 
         #確認是否正在重啟保護狀態?
-        if time.time() - botsystem.BotSystem(self.bot).restart_time <= 15:
+        if time.time() - user_data['restart_time'] <= 15:
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="機器人正在重啟，請稍後在試一次。",color=common.bot_error_color))
             return
-        botsystem.BotSystem(self.bot).gaming_time = time.time()
+        user_data['gaming_time'] = time.time()
 
         #確認礦場是否已挖完?
         if mining_data['mine_mininglimit'][mining_data[userid]['mine']] <= 0:
