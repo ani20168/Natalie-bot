@@ -27,14 +27,16 @@ class BotSystem(commands.Cog):
         if interaction.user.id == common.bot_owner_id:
             data = common.dataload()
 
-            await interaction.response.send_message(embed=Embed(title="系統操作",description="正在重新載入...",color=common.bot_color))
             #如果15秒內有人使用過具等待時間的指令(EX:mining)，則等待15秒
             if time.time() - data['gaming_time'] <= 15:
                 #紀錄重啟的時間 
                 data['restart_time'] = time.time()
                 common.datawrite(data)
+                await interaction.response.send_message(embed=Embed(title="系統操作",description="15秒後重新載入...(正在等待其他指令執行完畢)",color=common.bot_color))
                 await asyncio.sleep(15)
-                
+            else:
+                await interaction.response.send_message(embed=Embed(title="系統操作",description="正在重新載入...",color=common.bot_color))
+
             for filename in os.listdir('./cogs'):
                 if filename.endswith('.py') and not(filename == 'common.py'):
                     await self.bot.reload_extension(f'cogs.{filename[:-3]}')
