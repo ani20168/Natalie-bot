@@ -17,7 +17,7 @@ class MiningGame(commands.Cog):
         "石鎬": {"耐久度": 200, "需求等級": 6, "價格": 500},
         "鐵鎬": {"耐久度": 400, "需求等級": 12, "價格": 2000},
         "鑽石鎬": {"耐久度": 650, "需求等級": 18, "價格": 3000},
-        "不要鎬": {"耐久度": 1000, "需求等級": 25, "價格": 7000}
+        "不要鎬": {"耐久度": 1000, "需求等級": 25, "價格": 5000}
         }
         self.mineral_chancelist = {
         "森林礦坑": {"石頭": 0.3, "鐵礦": 0.45, "金礦": 0.25, "鈦晶": 0, "鑽石": 0},
@@ -299,14 +299,13 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="石鎬  耐久:200 需要6等 $500", value="石鎬"),
         app_commands.Choice(name="鐵鎬  耐久:400 需要12等 $2000", value="鐵鎬"),
         app_commands.Choice(name="鑽石鎬  耐久:650 需要18等 $3000", value="鑽石鎬"),
-        app_commands.Choice(name="不要鎬  耐久:1000 需要25等 $7000", value="不要鎬")
+        app_commands.Choice(name="不要鎬  耐久:1000 需要25等 $5000", value="不要鎬")
         ])
     async def pickaxe_buy(self,interaction,choices: app_commands.Choice[str]):
         userid = str(interaction.user.id)
         user_data = common.dataload()
         mining_data = self.miningdata_read(userid)
-
-
+     
         if mining_data[userid]["pickaxe"] == choices.value:
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經擁有此礦鎬了!",color=common.bot_error_color))
             return
