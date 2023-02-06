@@ -40,14 +40,10 @@ class Startup(commands.Cog):
     async def mine_mininglimit_reflash(self):
         nowtime = datetime.now(timezone(timedelta(hours=8)))
         data = common.dataload("data/mining.json")
-        if "mine_mininglimit" not in data:
-            data["mine_mininglimit"] = {
-            "森林礦坑": 500,
-            "荒野高原": 500,
-            "蛋糕仙境": 500,
-            "永世凍土": 500,
-            "熾熱火炎山": 500
-            }
+        #增加新礦場
+        if "虛空洞穴" not in data["mine_mininglimit"]:
+            data['mine_mininglimit']['虛空洞穴'] = 500
+
         if nowtime.hour == 0:
             for key, value in data["mine_mininglimit"].items():
                 if value != 500:

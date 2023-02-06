@@ -21,24 +21,27 @@ class MiningGame(commands.Cog):
         }
         self.mineral_chancelist = {
         "森林礦坑": {"石頭": 0.3, "鐵礦": 0.45, "金礦": 0.25, "鈦晶": 0, "鑽石": 0},
-        "荒野高原": {"石頭": 0.1, "鐵礦": 0.4, "金礦": 0.3, "鈦晶": 0.2, "鑽石": 0},
-        "蛋糕仙境": {"石頭": 0, "鐵礦": 0.3, "金礦": 0.4, "鈦晶": 0.25, "鑽石": 0.05},
-        "永世凍土": {"石頭": 0, "鐵礦": 0.2, "金礦": 0.4, "鈦晶": 0.3, "鑽石": 0.1},
-        "熾熱火炎山": {"石頭": 0, "鐵礦": 0, "金礦": 0.4, "鈦晶": 0.3, "鑽石": 0.3}
+        "荒野高原": {"石頭": 0.1, "鐵礦": 0.45, "金礦": 0.25, "鈦晶": 0.2, "鑽石": 0},
+        "蛋糕仙境": {"石頭": 0, "鐵礦": 0.38, "金礦": 0.32, "鈦晶": 0.25, "鑽石": 0.05},
+        "永世凍土": {"石頭": 0, "鐵礦": 0.25, "金礦": 0.36, "鈦晶": 0.27, "鑽石": 0.12},
+        "熾熱火炎山": {"石頭": 0, "鐵礦": 0.1, "金礦": 0.4, "鈦晶": 0.3, "鑽石": 0.2},
+        "虛空洞穴": {"石頭": 0, "鐵礦": 0, "金礦": 0.4, "鈦晶": 0.32, "鑽石": 0.28}
         }
         self.mine_levellimit = {
             "森林礦坑": 1,
             "荒野高原": 10,
             "蛋糕仙境": 18,
-            "永世凍土": 99,
-            "熾熱火炎山": 99
+            "永世凍土": 26,
+            "熾熱火炎山": 99,
+            "虛空洞穴": 99
         }
         self.collection_list = {
         "森林礦坑": ["昆蟲化石", "遠古的妖精翅膀", "萬年神木之根", "古代陶器碎片"],
         "荒野高原": ["風的根源石", "儀式石碑", "被詛咒的匕首", "神祕骷髏項鍊"],
         "蛋糕仙境": ["不滅的蠟燭", "蛋糕製造機", "異界之門鑰匙"],
         "永世凍土": ["雪怪排泄物", "冰鎮草莓甜酒", "冰凍章魚觸手"],
-        "熾熱火炎山": ["上古琥珀", "火龍遺骨", "地獄辣炒年糕"]
+        "熾熱火炎山": ["上古琥珀", "火龍遺骨", "地獄辣炒年糕"],
+        "虛空洞穴": ["反物質研究手稿", "異星生物黏液", "深淵的彼岸花"]
         }
         self.mineral_pricelist = {
             "鐵礦": 5,
@@ -135,7 +138,7 @@ class MiningGame(commands.Cog):
 
         #高風險礦場機率爆裝
         random_num = random.random()
-        if random_num < 0.1 and mining_data[userid]["mine"] == "熾熱火炎山":
+        if random_num < 0.1 and (mining_data[userid]["mine"] == "熾熱火炎山" or mining_data[userid]["mine"] == "虛空洞穴"):
             mining_data[userid]["pickaxe_health"] = 0
             message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
@@ -270,8 +273,9 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="森林礦坑  1等", value="森林礦坑"),
         app_commands.Choice(name="荒野高原  10等", value="荒野高原"),
         app_commands.Choice(name="蛋糕仙境  18等", value="蛋糕仙境"),
-        app_commands.Choice(name="永世凍土  未開放", value="永世凍土"),
-        app_commands.Choice(name="熾熱火炎山  未開放", value="熾熱火炎山")
+        app_commands.Choice(name="永世凍土  26等", value="永世凍土"),
+        app_commands.Choice(name="熾熱火炎山  未開放", value="熾熱火炎山"),
+        app_commands.Choice(name="虛空洞穴  未開放", value="虛空洞穴")
         ])
     async def mine(self,interaction,choices: app_commands.Choice[str]):
         userid = str(interaction.user.id)
