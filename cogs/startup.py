@@ -61,12 +61,6 @@ class Startup(commands.Cog):
             if str(member.id) not in data:
                 data[str(member.id)] = {"cake": 0}
 
-        #暫時新增，待刪除
-        if "restart_time" not in data:
-            data["restart_time"] = time.time()
-
-        if "gaming_time" not in data:
-            data["gaming_time"] = time.time()
         
         common.datawrite(data)
 
