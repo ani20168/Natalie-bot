@@ -139,7 +139,7 @@ class MiningGame(commands.Cog):
 
                     if random.random() < bonus_probability:
                         mining_data[userid][reward] += bonus_mineral
-                        message.description += f"\n由於您持有的{mining_data[userid]['pickaxe']}，您還額外獲得了**{bonus_mineral}**個**{reward}**"
+                        message.description += f"\n你額外獲得了**{bonus_mineral}**個**{reward}**!"
                 break
 
         #開始抽收藏品(0.5%機會)
