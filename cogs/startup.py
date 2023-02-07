@@ -122,18 +122,18 @@ class Startup(commands.Cog):
             #如果用戶資料內有voice_active_minutes且>10分鐘
             sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
             #列出前三名，並給予獎勵
-            data['yesterday_voice_leaderboard'] = []
+            data['yesterday_voice_leaderboard'] = ""
             for i, (userid, userdata) in enumerate(sorted_data[:3]):
                 user = self.bot.get_user(int(userid))
                 if i == 0:
                     data[userid]['cake'] += 300
-                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得300塊蛋糕)")
+                    data['yesterday_voice_leaderboard'] += f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得300塊蛋糕)\n"
                 elif i == 1:
                     data[userid]['cake'] += 200
-                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得200塊蛋糕)")
+                    data['yesterday_voice_leaderboard'] += f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得200塊蛋糕)\n"
                 elif i == 2:
                     data[userid]['cake'] += 100
-                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得100塊蛋糕)")
+                    data['yesterday_voice_leaderboard'] += f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得100塊蛋糕)"
 
         common.datawrite(data)
 

@@ -113,12 +113,14 @@ class General(commands.Cog):
         # 顯示排名榜前10名
         for i, (userid, user_data) in enumerate(sorted_data[:10]):
             user = self.bot.get_user(int(userid))
-            leaderboard_message += f"{i+1}.{user.name} 語音分鐘數:**{user_data['voice_active_minutes']}**"
+            leaderboard_message += f"{i+1}.{user.name} 語音分鐘數:**{user_data['voice_active_minutes']}**\n"
+        message.description = leaderboard_message
 
         # 昨日排行榜
-            
+        if "yesterday_voice_leaderboard" in data:
+            message.add_field(name="昨日前三名",value=data['yesterday_voice_leaderboard'],inline=False)
 
-
+        await interaction.response.send_message(embed=message)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
