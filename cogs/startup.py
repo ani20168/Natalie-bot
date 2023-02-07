@@ -125,13 +125,17 @@ class Startup(commands.Cog):
             data['yesterday_voice_leaderboard'] = []
             for i, (userid, userdata) in enumerate(sorted_data[:3]):
                 user = self.bot.get_user(int(userid))
-                data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:{userdata['voice_active_minutes']}")
                 if i == 0:
                     data[userid]['cake'] += 300
+                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:{userdata['voice_active_minutes']} (獲得300塊蛋糕)")
                 elif i == 1:
                     data[userid]['cake'] += 200
+                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:{userdata['voice_active_minutes']} (獲得200塊蛋糕)")
                 elif i == 2:
                     data[userid]['cake'] += 100
+                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:{userdata['voice_active_minutes']} (獲得100塊蛋糕)")
+
+        common.datawrite(data)
 
     @userdata_initialization.before_loop 
     @clearstardoor.before_loop    

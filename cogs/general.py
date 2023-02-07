@@ -102,6 +102,17 @@ class General(commands.Cog):
 
         await interaction.response.send_message(embed=Embed(title="等級排行榜",description=message,color=common.bot_color))
         
+    @app_commands.command(name = "voice_leaderboard", description = "語音活躍排行榜")
+    async def voice_leaderboard(self,interaction):
+        data = common.dataload()
+         #如果用戶資料內有voice_active_minutes且>10分鐘
+        sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
+        message = ""
+        # 顯示排名榜前10名
+        for i, (userid, user_data) in enumerate(sorted_data[:10]):
+            user = self.bot.get_user(int(userid))
+            pass
+
 
 
     @commands.Cog.listener()
