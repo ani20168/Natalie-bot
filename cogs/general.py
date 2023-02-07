@@ -109,7 +109,7 @@ class General(commands.Cog):
         sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
        
         message = Embed(title="語音活躍排行榜",description="",color=common.bot_color)
-        leaderboard_message = ""
+        leaderboard_message = "注意:需要在語音內至少10分鐘才會記錄至排行榜。\n"
         # 顯示排名榜前10名
         for i, (userid, user_data) in enumerate(sorted_data[:10]):
             user = self.bot.get_user(int(userid))
