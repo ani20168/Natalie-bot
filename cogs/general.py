@@ -107,11 +107,16 @@ class General(commands.Cog):
         data = common.dataload()
          #如果用戶資料內有voice_active_minutes且>10分鐘
         sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
-        message = ""
+       
+        message = Embed(title="語音活躍排行榜",description="",color=common.bot_color)
+        leaderboard_message = ""
         # 顯示排名榜前10名
         for i, (userid, user_data) in enumerate(sorted_data[:10]):
             user = self.bot.get_user(int(userid))
-            pass
+            leaderboard_message += f"{i+1}.{user.name} 語音分鐘數:**{user_data['voice_active_minutes']}**"
+
+        # 昨日排行榜
+            
 
 
 

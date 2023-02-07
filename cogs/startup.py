@@ -127,13 +127,13 @@ class Startup(commands.Cog):
                 user = self.bot.get_user(int(userid))
                 if i == 0:
                     data[userid]['cake'] += 300
-                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:{userdata['voice_active_minutes']} (獲得300塊蛋糕)")
+                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得300塊蛋糕)")
                 elif i == 1:
                     data[userid]['cake'] += 200
-                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:{userdata['voice_active_minutes']} (獲得200塊蛋糕)")
+                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得200塊蛋糕)")
                 elif i == 2:
                     data[userid]['cake'] += 100
-                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:{userdata['voice_active_minutes']} (獲得100塊蛋糕)")
+                    data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得100塊蛋糕)")
 
         common.datawrite(data)
 
