@@ -96,7 +96,42 @@ class Startup(commands.Cog):
                         
         common.datawrite(data)
 
-
+    #紀錄會員在語音內的分鐘數，並給予前三名獎勵
+    @tasks.loop(minutes=1)
+    async def voice_active_record(self):
+        vclist = [
+            419108485435883535,
+            456422626567389206,
+            616238868164771861,
+            540856580325769226,
+            540856651805360148,
+            540856695992221706]
+        
+        data = common.dataload()
+        for channelid in vclist:
+            channel = self.bot.get_channel(channelid)
+            for member in channel.member:
+                if str(member.id) in data:
+                    if "voice_active_minutes" not in data[str(member.id)]:
+                        data[str(member.id)]['voice_active_minutes'] = 0
+                    data[str(member.id)]['voice_active_minutes'] += 1
+        
+        #每日結算
+        nowtime = datetime.now(timezone(timedelta(hours=8)))
+        if nowtime.hour == 0 and nowtime.minute == 0:
+            #如果用戶資料內有voice_active_minutes且>10分鐘
+            sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
+            #列出前三名，並給予獎勵
+            data['yesterday_voice_leaderboard'] = []
+            for i, (userid, userdata) in enumerate(sorted_data[:3]):
+                user = self.bot.get_user(int(userid))
+                data['yesterday_voice_leaderboard'].append(f"{i + 1}.{user.name} 語音分鐘數:{userdata['voice_active_minutes']}")
+                if i == 0:
+                    data[userid]['cake'] += 300
+                elif i == 1:
+                    data[userid]['cake'] += 200
+                elif i == 2:
+                    data[userid]['cake'] += 100
 
     @userdata_initialization.before_loop 
     @clearstardoor.before_loop    
