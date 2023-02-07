@@ -87,14 +87,13 @@ class Startup(commands.Cog):
                 #如果資料內有用戶ID(正常都會有)，並且非機器人
                 if str(member.id) in data and member.bot == False:
                     data[str(member.id)]["cake"] += 1
-                #VIP和MOD獎勵
-                if str(member.id) in data and any(role.id in [419185180134080513,605730134531637249] for role in member.roles):
+                #VIP、MOD、ADMIN獎勵
+                if str(member.id) in data and any(role.id in [419185180134080513,605730134531637249,419185995078959104] for role in member.roles):
                     data[str(member.id)]["cake"] += 1
                 #直播獎勵
                 if str(member.id) in data and member.voice.self_stream == True:
                     data[str(member.id)]["cake"] += 2
                         
-
         common.datawrite(data)
 
 
