@@ -15,6 +15,7 @@ class Startup(commands.Cog):
         self.userdata_initialization.start()
         self.give_cake_in_vc.start()
         self.mine_mininglimit_reflash.start()
+        self.voice_active_record.start()
 
     #卸載cog時觸發
     async def cog_unload(self):
@@ -22,6 +23,7 @@ class Startup(commands.Cog):
         self.userdata_initialization.cancel()
         self.give_cake_in_vc.cancel()
         self.mine_mininglimit_reflash.cancel()
+        self.voice_active_record.cancel()
 
         
     #自動鎖定過期的星門
@@ -141,6 +143,7 @@ class Startup(commands.Cog):
     @clearstardoor.before_loop    
     @give_cake_in_vc.before_loop
     @mine_mininglimit_reflash.before_loop
+    @voice_active_record.before_loop
     async def event_before_loop(self):
         await self.bot.wait_until_ready()
         
