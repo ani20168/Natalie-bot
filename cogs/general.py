@@ -102,7 +102,25 @@ class General(commands.Cog):
 
         await interaction.response.send_message(embed=Embed(title="等級排行榜",description=message,color=common.bot_color))
         
+    @app_commands.command(name = "voice_leaderboard", description = "語音活躍排行榜")
+    async def voice_leaderboard(self,interaction):
+        data = common.dataload()
+         #如果用戶資料內有voice_active_minutes且>10分鐘
+        sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
+       
+        message = Embed(title="語音活躍排行榜",description="",color=common.bot_color)
+        leaderboard_message = "注意:需要在語音內至少10分鐘才會記錄至排行榜。\n"
+        # 顯示排名榜前10名
+        for i, (userid, user_data) in enumerate(sorted_data[:10]):
+            user = self.bot.get_user(int(userid))
+            leaderboard_message += f"{i+1}.{user.name} 語音分鐘數:**{user_data['voice_active_minutes']}**\n"
+        message.description = leaderboard_message
 
+        # 昨日排行榜
+        if "yesterday_voice_leaderboard" in data:
+            message.add_field(name="昨日前三名",value=data['yesterday_voice_leaderboard'],inline=False)
+
+        await interaction.response.send_message(embed=message)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):

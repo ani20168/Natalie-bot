@@ -15,6 +15,7 @@ class Startup(commands.Cog):
         self.userdata_initialization.start()
         self.give_cake_in_vc.start()
         self.mine_mininglimit_reflash.start()
+        self.voice_active_record.start()
 
     #卸載cog時觸發
     async def cog_unload(self):
@@ -22,6 +23,7 @@ class Startup(commands.Cog):
         self.userdata_initialization.cancel()
         self.give_cake_in_vc.cancel()
         self.mine_mininglimit_reflash.cancel()
+        self.voice_active_record.cancel()
 
         
     #自動鎖定過期的星門
@@ -87,22 +89,61 @@ class Startup(commands.Cog):
                 #如果資料內有用戶ID(正常都會有)，並且非機器人
                 if str(member.id) in data and member.bot == False:
                     data[str(member.id)]["cake"] += 1
-                #VIP和MOD獎勵
-                if str(member.id) in data and any(role.id in [419185180134080513,605730134531637249] for role in member.roles):
+                #VIP、MOD、ADMIN獎勵
+                if str(member.id) in data and any(role.id in [419185180134080513,605730134531637249,419185995078959104] for role in member.roles):
                     data[str(member.id)]["cake"] += 1
                 #直播獎勵
                 if str(member.id) in data and member.voice.self_stream == True:
                     data[str(member.id)]["cake"] += 2
                         
-
         common.datawrite(data)
 
+    #紀錄會員在語音內的分鐘數，並給予前三名獎勵
+    @tasks.loop(minutes=1)
+    async def voice_active_record(self):
+        vclist = [
+            419108485435883535,
+            456422626567389206,
+            616238868164771861,
+            540856580325769226,
+            540856651805360148,
+            540856695992221706]
+        
+        data = common.dataload()
+        for channelid in vclist:
+            channel = self.bot.get_channel(channelid)
+            for member in channel.members:
+                if str(member.id) in data:
+                    if "voice_active_minutes" not in data[str(member.id)]:
+                        data[str(member.id)]['voice_active_minutes'] = 0
+                    data[str(member.id)]['voice_active_minutes'] += 1
+        
+        #每日結算
+        nowtime = datetime.now(timezone(timedelta(hours=8)))
+        if nowtime.hour == 0 and nowtime.minute == 0:
+            #如果用戶資料內有voice_active_minutes且>10分鐘
+            sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
+            #列出前三名，並給予獎勵
+            data['yesterday_voice_leaderboard'] = ""
+            for i, (userid, userdata) in enumerate(sorted_data[:3]):
+                user = self.bot.get_user(int(userid))
+                if i == 0:
+                    data[userid]['cake'] += 300
+                    data['yesterday_voice_leaderboard'] += f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得300塊蛋糕)\n"
+                elif i == 1:
+                    data[userid]['cake'] += 200
+                    data['yesterday_voice_leaderboard'] += f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得200塊蛋糕)\n"
+                elif i == 2:
+                    data[userid]['cake'] += 100
+                    data['yesterday_voice_leaderboard'] += f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得100塊蛋糕)"
 
+        common.datawrite(data)
 
     @userdata_initialization.before_loop 
     @clearstardoor.before_loop    
     @give_cake_in_vc.before_loop
     @mine_mininglimit_reflash.before_loop
+    @voice_active_record.before_loop
     async def event_before_loop(self):
         await self.bot.wait_until_ready()
         
