@@ -130,7 +130,10 @@ class Startup(commands.Cog):
                 elif i == 2:
                     data[userid]['cake'] += 100
                     data['yesterday_voice_leaderboard'] += f"{i + 1}.{user.name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得100塊蛋糕)"
-
+            #隔日重置        
+            for userid, userdata in data.items():
+                if isinstance(userdata, dict) and 'voice_active_minutes' in userdata:
+                    data[userid]['voice_active_minutes'] = 0
         common.datawrite(data)
 
     @userdata_initialization.before_loop 
