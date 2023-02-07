@@ -120,11 +120,26 @@ class MiningGame(commands.Cog):
             current_probability += probability
             if random_num < current_probability:
                 #抽出礦物
-                message = Embed(title="Natalie 挖礦",description=f"你挖到了{reward}",color=common.bot_color)
+                message = Embed(title="Natalie 挖礦",description=f"你挖到了**{reward}**",color=common.bot_color)
                 if reward != "石頭":
                     if reward not in mining_data[userid]:
                         mining_data[userid][reward] = 0
-                    mining_data[userid][reward] +=1
+                    mining_data[userid][reward] += 1
+
+                    # bonus minerals
+                    if mining_data[userid]['pickaxe'] == "鑽石鎬":
+                        bonus_probability = 0.1
+                        bonus_mineral = 1
+                    elif mining_data[userid]['pickaxe'] == "不要鎬":
+                        bonus_probability = 0.15
+                        bonus_mineral = 1
+                    else:
+                        bonus_probability = 0
+                        bonus_mineral = 0
+
+                    if random.random() < bonus_probability:
+                        mining_data[userid][reward] += bonus_mineral
+                        message.description += f"\n由於您持有的{mining_data[userid]['pickaxe']}，您還額外獲得了**{bonus_mineral}**個**{reward}**"
                 break
 
         #開始抽收藏品(0.5%機會)
