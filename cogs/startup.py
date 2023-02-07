@@ -112,7 +112,7 @@ class Startup(commands.Cog):
         data = common.dataload()
         for channelid in vclist:
             channel = self.bot.get_channel(channelid)
-            for member in channel.member:
+            for member in channel.members:
                 if str(member.id) in data:
                     if "voice_active_minutes" not in data[str(member.id)]:
                         data[str(member.id)]['voice_active_minutes'] = 0
