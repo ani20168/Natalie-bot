@@ -32,7 +32,7 @@ class MiningGame(commands.Cog):
             "荒野高原": 10,
             "蛋糕仙境": 18,
             "永世凍土": 26,
-            "熾熱火炎山": 99,
+            "熾熱火炎山": 34,
             "虛空洞穴": 99
         }
         self.collection_list = {
@@ -289,7 +289,7 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="荒野高原  10等", value="荒野高原"),
         app_commands.Choice(name="蛋糕仙境  18等", value="蛋糕仙境"),
         app_commands.Choice(name="永世凍土  26等", value="永世凍土"),
-        app_commands.Choice(name="熾熱火炎山  未開放", value="熾熱火炎山"),
+        app_commands.Choice(name="熾熱火炎山  34等", value="熾熱火炎山"),
         app_commands.Choice(name="虛空洞穴  未開放", value="虛空洞穴")
         ])
     async def mine(self,interaction,choices: app_commands.Choice[str]):
