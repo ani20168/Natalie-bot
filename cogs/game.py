@@ -309,7 +309,7 @@ class MiningGame(commands.Cog):
 
         mining_data[userid]['mine'] = choices.value
         common.datawrite(mining_data,"data/mining.json")
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"以移動到**{choices.value}**礦場，當前礦場剩餘挖礦次數:**{mining_data['mine_mininglimit'][choices.value]}**",color=common.bot_color))
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"已移動到**{choices.value}**礦場，當前礦場剩餘挖礦次數:**{mining_data['mine_mininglimit'][choices.value]}**",color=common.bot_color))
 
     @app_commands.command(name = "pickaxe_buy",description="購買礦鎬")
     @app_commands.describe(choices="要購買的礦鎬")
