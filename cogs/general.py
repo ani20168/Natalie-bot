@@ -3,6 +3,7 @@ from discord.ext import commands
 from . import common
 from datetime import datetime, timezone, timedelta
 import json
+import discord
 
 
 
@@ -122,6 +123,20 @@ class General(commands.Cog):
             message.add_field(name="昨日前三名",value=data['yesterday_voice_leaderboard'],inline=False)
 
         await interaction.response.send_message(embed=message)
+
+    @app_commands.command(name = "cake_add", description = "增加蛋糕")
+    @app_commands.describe(member = "選擇一個成員",amount = "數量(扣除蛋糕加上負號)")
+    async def cake_add(self,interaction,member: discord.Member,amount:int):
+        if interaction.user.id != common.bot_owner_id:
+            await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description="權限不足。",color=common.bot_error_color))
+            return
+        
+        data = common.dataload()
+        cake_before = data[str(member.id)]['cake']
+        data[str(member.id)]['cake'] += amount
+        common.datawrite(data)
+        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description=f"<@{member.id}>資料變更...\n原始{cake_emoji}:**{cake_before}**\n增加了**{amount}**塊{cake_emoji}\n現在有**{data[str(member.id)]['cake']}**塊{cake_emoji}",color=common.bot_color))
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
