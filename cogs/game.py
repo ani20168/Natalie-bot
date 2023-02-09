@@ -222,7 +222,7 @@ class MiningGame(commands.Cog):
         userdata = common.dataload()
         userdata[userid]["cake"] += total_price
         common.datawrite(userdata)
-        message.add_field(name=f"你獲得了{total_price}塊蛋糕",value="",inline=False)
+        message.add_field(name=f"你獲得了{total_price}塊{self.bot.get_emoji(common.cake_emoji_id)}",value="",inline=False)
         await interaction.response.send_message(embed=message)
 
     @app_commands.command(name = "mining_info",description="挖礦資訊")
