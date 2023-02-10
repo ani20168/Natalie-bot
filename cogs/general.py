@@ -138,6 +138,8 @@ class General(commands.Cog):
         common.datawrite(data)
         cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
         await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description=f"<@{member.id}>資料變更...\n原始{cake_emoji}:**{cake_before}**\n增加了**{amount}**塊{cake_emoji}\n現在有**{data[str(member.id)]['cake']}**塊{cake_emoji}",color=common.bot_color))
+        #test command
+        await interaction.user.add_roles(interaction.guild.get_role(675586536808382495))
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
