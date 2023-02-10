@@ -375,6 +375,17 @@ class MiningGame(commands.Cog):
         if isinstance(error, app_commands.CommandOnCooldown):
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"輸入太快了，妹妹頂不住!請在{int(error.retry_after)}秒後再試一次。",color=common.bot_error_color), ephemeral=True)
 
+class BlackJack(commands.Cog):
+    def __init__(self, client:commands.Bot):
+        self.bot = client
+
+    @app_commands.command(name = "blackjack", description = "21點!")
+    @app_commands.describe(bet="要下多少賭注?(支援all以及輸入蛋糕數量)")
+    @app_commands.rename(bet="賭注")
+    async def blackjack(self,interaction,bet: str):
+        pass
+
+    
 
 class CollectionTradeButton(discord.ui.View):
     def __init__(self, *,timeout= 60,selluser,collection_name,price,client):
@@ -429,3 +440,4 @@ class AutofixButton(discord.ui.View):
 
 async def setup(client:commands.Bot):
     await client.add_cog(MiningGame(client))
+    await client.add_cog(BlackJack(client))
