@@ -377,6 +377,12 @@ class MiningGame(commands.Cog):
 class BlackJack(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
+        self.deck = [{"2": 2}, {"3": 3}, {"4": 4}, {"5": 5}, {"6": 6}, {"7": 7}, {"8": 8}, {"9": 9}, {"10": 10}, {"J": 10}, {"Q": 10}, {"K": 10}, {"A": 11}] * 4
+
+    #加牌
+    def deal_card(self,deck, recipient):
+        card = deck.pop()
+        recipient.append(card)
 
     @app_commands.command(name = "blackjack", description = "21點!")
     @app_commands.describe(bet="要下多少賭注?(支援all以及輸入蛋糕數量)")
@@ -393,13 +399,25 @@ class BlackJack(commands.Cog):
                 await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"你現在沒有任何{cake_emoji}，無法下注!",color=common.bot_error_color))
                 return
         elif bet.isdigit() and int(bet) >= 1:
-            # 執行B事件
-            print("執行B事件")
+            bet = int(bet)
         else:
             await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"無效的數據。(輸入想賭注的{cake_emoji}數量，或者輸入all下注全部的{cake_emoji})",color=common.bot_error_color))
             return
 
-    
+        #檢查蛋糕是否足夠
+        if data[userid]['cake'] < bet:
+            await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"{cake_emoji}不足，無法下注!",color=common.bot_error_color))
+            return
+        #data[userid]['cake'] -= bet
+
+        #初始化牌堆
+        playing_deck = self.deck.copy()
+        random.shuffle(playing_deck)
+        player_cards = []
+        bot_cards = []
+
+        self.deal_card(self, playing_deck, player_cards)
+        await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"debug:playing_deck:{playing_deck}\nplaying_card:{player_cards}",color=common.bot_error_color))
 
 class CollectionTradeButton(discord.ui.View):
     def __init__(self, *,timeout= 60,selluser,collection_name,price,client):
