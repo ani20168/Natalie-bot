@@ -5,7 +5,6 @@ from . import common
 import random
 import asyncio
 import time
-import re
 
 
 
@@ -384,7 +383,21 @@ class BlackJack(commands.Cog):
     @app_commands.rename(bet="賭注")
     async def blackjack(self,interaction,bet: str):
         data = common.dataload()
-        pass
+        userid = str(interaction.user.id)
+        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        #檢查要下注的數據
+        if bet == "all":
+            if data[userid]['cake'] >= 1:
+                bet = data[userid]['cake']
+            else:
+                await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"你現在沒有任何{cake_emoji}，無法下注!",color=common.bot_error_color))
+                return
+        elif bet.isdigit() and int(bet) >= 1:
+            # 執行B事件
+            print("執行B事件")
+        else:
+            await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"無效的數據。(輸入想賭注的{cake_emoji}數量，或者輸入all下注全部的{cake_emoji})",color=common.bot_error_color))
+            return
 
     
 
