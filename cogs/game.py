@@ -6,6 +6,7 @@ import random
 import asyncio
 from . import botsystem
 import time
+import re
 
 
 
@@ -383,6 +384,7 @@ class BlackJack(commands.Cog):
     @app_commands.describe(bet="要下多少賭注?(支援all以及輸入蛋糕數量)")
     @app_commands.rename(bet="賭注")
     async def blackjack(self,interaction,bet: str):
+        data = common.dataload()
         pass
 
     
