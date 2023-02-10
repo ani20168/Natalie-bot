@@ -4,7 +4,6 @@ from discord.ext import commands
 from . import common
 import random
 import asyncio
-from . import botsystem
 import time
 import re
 
