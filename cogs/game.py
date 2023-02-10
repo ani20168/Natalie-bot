@@ -380,8 +380,8 @@ class BlackJack(commands.Cog):
         self.deck = [{"2": 2}, {"3": 3}, {"4": 4}, {"5": 5}, {"6": 6}, {"7": 7}, {"8": 8}, {"9": 9}, {"10": 10}, {"J": 10}, {"Q": 10}, {"K": 10}, {"A": 11}] * 4
 
     #加牌
-    def deal_card(self,interaction,deck, recipient):
-        card = deck.pop()
+    def deal_card(self,interaction,playing_deck, recipient):
+        card = playing_deck.pop()
         recipient.append(card)
 
     @app_commands.command(name = "blackjack", description = "21點!")
@@ -417,7 +417,10 @@ class BlackJack(commands.Cog):
         bot_cards = []
 
         self.deal_card(self, playing_deck, player_cards)
-        await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"debug:playing_deck:{playing_deck}\nplaying_card:{player_cards}",color=common.bot_error_color))
+        self.deal_card(self, playing_deck, bot_cards)
+        self.deal_card(self, playing_deck, player_cards)
+        self.deal_card(self, playing_deck, bot_cards)
+        await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"debug:bot_deck:{bot_cards}\nplaying_card:{player_cards}",color=common.bot_error_color))
 
 class CollectionTradeButton(discord.ui.View):
     def __init__(self, *,timeout= 60,selluser,collection_name,price,client):
