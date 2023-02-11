@@ -443,7 +443,7 @@ class BlackJack(commands.Cog):
         message.add_field(name=f"你的手牌點數:**{self.calculate_point(self,player_cards)}**",value=f"{self.show_cards(self,player_cards)}",inline=False)
         message.add_field(name=f"Natalie的手牌點數:**{display_bot_points}**",value=f"{display_bot_cards}",inline=False)
         #玩家如果是blackjack(持有兩張牌且點數剛好為21)
-        if self.calculate_point(player_cards) == 21:
+        if self.calculate_point(self,player_cards) == 21:
             data[userid]['cake'] += bet + (bet*1.5)
             message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{bet*1.5}**塊{cake_emoji}(blackjack! x 1.5)\n你現在有{data[userid]['cake']}塊{cake_emoji}",inline=False)
             common.datawrite(data)
