@@ -437,7 +437,7 @@ class BlackJack(commands.Cog):
         hidden_card = list(bot_cards[1].keys())[0]
         display_bot_cards = f"{list(bot_cards[0].keys())[0]} + ?"
         display_bot_points = f"{sum(bot_cards[0].values())} + ?"
-        await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"實際手牌:{self.show_cards(bot_cards)}\n莊家手牌點數:{display_bot_points}\n莊家手牌:{display_bot_cards}",color=common.bot_color))
+        await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"實際手牌:{self.show_cards(self,bot_cards)}\n莊家手牌點數:{display_bot_points}\n莊家手牌:{display_bot_cards}",color=common.bot_color))
 
 
 class CollectionTradeButton(discord.ui.View):
