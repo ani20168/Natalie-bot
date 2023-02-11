@@ -430,15 +430,46 @@ class BlackJack(commands.Cog):
         player_cards = []
         bot_cards = []
 
+        #發牌，玩家莊家各兩張
         self.deal_card(self, playing_deck, player_cards)
         self.deal_card(self, playing_deck, bot_cards)
         self.deal_card(self, playing_deck, player_cards)
         self.deal_card(self, playing_deck, bot_cards)
-        display_bot_cards = f"{list(bot_cards[0].keys())[0]} + ?"
+        #隱藏莊家的第二張牌(蓋牌)
+        display_bot_cards = f"{list(bot_cards[0].keys())[0]}、?"
         display_bot_points = f"{sum(bot_cards[0].values())} + ?"
-        message = Embed(title="Natalie 21點",description=f"",color=common.bot_color)
-        await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"實際手牌:{self.show_cards(self,bot_cards)}\n莊家手牌點數:{display_bot_points}\n莊家手牌:{display_bot_cards}",color=common.bot_color))
 
+        message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+        message.add_field(name=f"你的手牌點數:**{self.calculate_point(self,player_cards)}**",value=f"{self.show_cards(self,player_cards)}",inline=False)
+        message.add_field(name=f"Natalie的手牌點數:**{display_bot_points}**",value=f"{display_bot_cards}",inline=False)
+        #玩家如果是blackjack(持有兩張牌且點數剛好為21)
+        if self.calculate_point(player_cards) == 21:
+            data[userid]['cake'] += bet + (bet*1.5)
+            message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{bet*1.5}**塊{cake_emoji}(blackjack! x 1.5)\n你現在有{data[userid]['cake']}塊{cake_emoji}",inline=False)
+            common.datawrite(data)
+            await interaction.response.send_message(embed=message)
+            return
+        
+        #選項給予
+        await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,embed=message))
+
+
+class BlackJackButton(discord.ui.View):
+    def __init__(self, *,timeout= 60,user,embed):
+        super().__init__(timeout=timeout)
+        self.command_interaction = user
+        self.message = embed
+
+    @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green)
+    async def collection_trade_button(self,interaction,button: discord.ui.Button):
+        self.message.description = "test"
+        await interaction.response.edit_message(embed=self.message,view=self)
+        pass
+
+    async def interaction_check(self, interaction) -> bool:
+        if interaction.user != self.command_interaction.user:
+            await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="你不能遊玩別人建立的遊戲。\n(請使用/blackjack遊玩21點)",color=common.bot_error_color), ephemeral=True)
+        return
 
 class CollectionTradeButton(discord.ui.View):
     def __init__(self, *,timeout= 60,selluser,collection_name,price,client):
