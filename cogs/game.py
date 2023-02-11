@@ -384,6 +384,16 @@ class BlackJack(commands.Cog):
         card = playing_deck.pop()
         recipient.append(card)
 
+    #計算手牌點數
+    def calculate_point(player_cards):
+        hand_points = sum(card.values() for card in player_cards)
+        for card in player_cards:
+            if hand_points > 21 and 11 in card.values():
+                hand_points -= 10
+                break
+        return hand_points
+
+
     @app_commands.command(name = "blackjack", description = "21點!")
     @app_commands.describe(bet="要下多少賭注?(支援all以及輸入蛋糕數量)")
     @app_commands.rename(bet="賭注")
@@ -420,7 +430,7 @@ class BlackJack(commands.Cog):
         self.deal_card(self, playing_deck, bot_cards)
         self.deal_card(self, playing_deck, player_cards)
         self.deal_card(self, playing_deck, bot_cards)
-        await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"debug:bot_deck:{bot_cards}\nplaying_card:{player_cards}",color=common.bot_error_color))
+        await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"debug:bot_deck:{bot_cards}\nplaying_card:{player_cards}\n玩家手牌點數:{self.calculate_point(player_cards)}",color=common.bot_error_color))
 
 class CollectionTradeButton(discord.ui.View):
     def __init__(self, *,timeout= 60,selluser,collection_name,price,client):
