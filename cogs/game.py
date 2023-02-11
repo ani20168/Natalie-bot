@@ -385,7 +385,7 @@ class BlackJack(commands.Cog):
         recipient.append(card)
 
     #計算手牌點數
-    def calculate_point(self,player_cards):
+    def calculate_point(self,interaction,player_cards):
         hand_points = sum(card.values() for card in player_cards)
         for card in player_cards:
             if hand_points > 21 and 11 in card.values():
