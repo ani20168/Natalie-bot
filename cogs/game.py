@@ -434,8 +434,10 @@ class BlackJack(commands.Cog):
         self.deal_card(self, playing_deck, bot_cards)
         self.deal_card(self, playing_deck, player_cards)
         self.deal_card(self, playing_deck, bot_cards)
-        self.deal_card(self, playing_deck, player_cards)#暫時數據
-        await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"debug:playing_card:{player_cards}\n玩家手牌點數:{self.calculate_point(self,player_cards)}手牌:{self.show_cards(self,player_cards)}",color=common.bot_error_color))
+        hidden_card = list(bot_cards[1].keys())[0]
+        display_bot_cards = f"{list(bot_cards[0].keys())[0]} + ?"
+        await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"莊家手牌點數:{self.calculate_point(bot_cards[:2])} 莊家手牌:{display_bot_cards}",color=common.bot_color))
+
 
 class CollectionTradeButton(discord.ui.View):
     def __init__(self, *,timeout= 60,selluser,collection_name,price,client):
