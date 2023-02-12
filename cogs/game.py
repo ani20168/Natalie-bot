@@ -481,10 +481,12 @@ class BlackJackButton(discord.ui.View):
         #如果非本人遊玩
         if interaction.user != self.command_interaction.user:
             await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="你不能遊玩別人建立的遊戲。\n(請使用/blackjack遊玩21點)",color=common.bot_error_color), ephemeral=True)
-            return
+            return False
         
         if data[str(interaction.user.id)]['cake'] < self.bet:
             self.double_button.disabled = True
+
+        return True
 
 class CollectionTradeButton(discord.ui.View):
     def __init__(self, *,timeout= 60,selluser,collection_name,price,client):
@@ -522,7 +524,8 @@ class CollectionTradeButton(discord.ui.View):
     async def interaction_check(self, interaction) -> bool:
         if interaction.user == self.selluser.user:
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你不能向自己購買收藏品。",color=common.bot_error_color), ephemeral=True)
-        return
+            return False
+        return True
 
 class AutofixButton(discord.ui.View):
     def __init__(self, *,timeout= 30):
