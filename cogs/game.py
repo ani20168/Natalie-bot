@@ -451,25 +451,43 @@ class BlackJack(commands.Cog):
             return
         
         #選項給予
-        await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,embed=message))
+        await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet))
+        common.datawrite(data)
 
 
 class BlackJackButton(discord.ui.View):
-    def __init__(self, *,timeout= 60,user,embed):
+    def __init__(self, *,timeout= 60,user,bet):
         super().__init__(timeout=timeout)
         self.command_interaction = user
-        self.message = embed
+        self.bet = bet
 
     @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green)
-    async def collection_trade_button(self,interaction,button: discord.ui.Button):
-        self.message.description = "test"
-        await interaction.response.edit_message(embed=self.message,view=self)
+    async def hit_button(self,interaction,button: discord.ui.Button):
+        message = Embed(title="Natalie 21點",description="測試:拿牌!",color=common.bot_color)
+        await interaction.response.edit_message(embed=message,view=self)
+        pass
+
+    @discord.ui.button(label="停牌!",style=discord.ButtonStyle.red)
+    async def stand_button(self,interaction,button: discord.ui.Button):
+        message = Embed(title="Natalie 21點",description="測試:停牌!",color=common.bot_color)
+        await interaction.response.edit_message(embed=message,view=self)
+        pass
+
+    @discord.ui.button(label="雙倍下注!",style=discord.ButtonStyle.gray)
+    async def double_button(self,interaction,button: discord.ui.Button):
+        message = Embed(title="Natalie 21點",description="測試:雙倍下注!",color=common.bot_color)
+        await interaction.response.edit_message(embed=message,view=self)
         pass
 
     async def interaction_check(self, interaction) -> bool:
+        data = common.dataload()
+        #如果非本人遊玩
         if interaction.user != self.command_interaction.user:
             await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="你不能遊玩別人建立的遊戲。\n(請使用/blackjack遊玩21點)",color=common.bot_error_color), ephemeral=True)
-        return
+            return
+        
+        if data[str(interaction.user.id)]['cake'] < self.bet:
+            self.double_button.disabled = True
 
 class CollectionTradeButton(discord.ui.View):
     def __init__(self, *,timeout= 60,selluser,collection_name,price,client):
