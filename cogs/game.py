@@ -465,19 +465,16 @@ class BlackJackButton(discord.ui.View):
     async def hit_button(self,interaction,button: discord.ui.Button):
         message = Embed(title="Natalie 21點",description="測試:拿牌!",color=common.bot_color)
         await interaction.response.edit_message(embed=message,view=self)
-        pass
 
     @discord.ui.button(label="停牌!",style=discord.ButtonStyle.red)
     async def stand_button(self,interaction,button: discord.ui.Button):
         message = Embed(title="Natalie 21點",description="測試:停牌!",color=common.bot_color)
         await interaction.response.edit_message(embed=message,view=self)
-        pass
 
     @discord.ui.button(label="雙倍下注!",style=discord.ButtonStyle.gray)
     async def double_button(self,interaction,button: discord.ui.Button):
         message = Embed(title="Natalie 21點",description="測試:雙倍下注!",color=common.bot_color)
         await interaction.response.edit_message(embed=message,view=self)
-        pass
 
     async def interaction_check(self, interaction) -> bool:
         data = common.dataload()
