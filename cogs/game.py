@@ -385,7 +385,7 @@ class BlackJack(commands.Cog):
         recipient.append(card)
 
     #計算手牌點數
-    def calculate_point(self,interaction,player_cards):
+    def calculate_point(self,player_cards) -> int:
         hand_points = sum(list(card.values())[0] for card in player_cards)
         for card in player_cards:
             if hand_points > 21 and 11 in card.values():
@@ -394,7 +394,7 @@ class BlackJack(commands.Cog):
         return hand_points
 
     #顯示牌面
-    def show_cards(self,interaction,player_cards):
+    def show_cards(self,player_cards):
         return '、'.join([list(card.keys())[0] for card in player_cards])
 
 
@@ -440,10 +440,10 @@ class BlackJack(commands.Cog):
         display_bot_points = f"{sum(bot_cards[0].values())} + ?"
 
         message = Embed(title="Natalie 21點",description="",color=common.bot_color)
-        message.add_field(name=f"你的手牌點數:**{self.calculate_point(self,player_cards)}**",value=f"{self.show_cards(self,player_cards)}",inline=False)
+        message.add_field(name=f"你的手牌點數:**{self.calculate_point(player_cards)}**",value=f"{self.show_cards(player_cards)}",inline=False)
         message.add_field(name=f"Natalie的手牌點數:**{display_bot_points}**",value=f"{display_bot_cards}",inline=False)
         #玩家如果是blackjack(持有兩張牌且點數剛好為21)
-        if self.calculate_point(self,player_cards) == 21:
+        if self.calculate_point(player_cards) == 21:
             data[userid]['cake'] += int(bet + (bet*1.5))
             message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{int(bet*1.5)}**塊{cake_emoji}(blackjack! x 1.5)\n你現在有{data[userid]['cake']}塊{cake_emoji}",inline=False)
             common.datawrite(data)
