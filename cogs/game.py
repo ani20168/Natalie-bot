@@ -539,6 +539,7 @@ class BlackJackButton(discord.ui.View):
         #如果賭注不足以使用雙倍下注
         if data[str(interaction.user.id)]['cake'] < self.bet:
             self.double_button.disabled = True
+            await interaction.response.edit_message(view=self)
             return
         #關閉所有按鈕
         self.double_button.disabled = True
@@ -595,9 +596,9 @@ class BlackJackButton(discord.ui.View):
             await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="你不能遊玩別人建立的遊戲。\n(請使用/blackjack遊玩21點)",color=common.bot_error_color), ephemeral=True)
             return False
         #如果賭注不足以使用雙倍下注
-        if data[str(interaction.user.id)]['cake'] < self.bet:
-            self.double_button.disabled = True
-            await interaction.response.edit_message(view=self)
+        #if data[str(interaction.user.id)]['cake'] < self.bet:
+        #    self.double_button.disabled = True
+        #   await interaction.response.edit_message(view=self)
 
         return True
 
