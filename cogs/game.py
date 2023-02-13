@@ -463,7 +463,7 @@ class BlackJack(commands.Cog):
 
 
 class BlackJackButton(discord.ui.View):
-    def __init__(self, *,timeout= 60,user,bet,player_cards,bot_cards,playing_deck,client,display_bot_points,display_bot_cards):
+    def __init__(self, *,timeout= 120,user,bet,player_cards,bot_cards,playing_deck,client,display_bot_points,display_bot_cards):
         super().__init__(timeout=timeout)
         self.command_interaction = user
         self.bet = bet
@@ -535,13 +535,58 @@ class BlackJackButton(discord.ui.View):
 
     @discord.ui.button(label="雙倍下注!",style=discord.ButtonStyle.gray)
     async def double_button(self,interaction,button: discord.ui.Button):
+        data = common.dataload()
+        #如果賭注不足以使用雙倍下注
+        if data[str(interaction.user.id)]['cake'] < self.bet:
+            self.double_button.disabled = True
+            return
         #關閉所有按鈕
         self.double_button.disabled = True
         self.hit_button.disabled = True
         self.stand_button.disabled = True
 
-        message = Embed(title="Natalie 21點",description="測試:雙倍下注!",color=common.bot_color)
+        #雙倍下注要扣的蛋糕
+        data[str(interaction.user.id)]['cake'] -= self.bet
+        #加牌
+        BlackJack(self.bot).deal_card(self,self.playing_deck,self.player_cards)
+
+        message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+        message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
+
+        #玩家爆牌
+        if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
+            message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
+            message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+            await interaction.response.edit_message(embed=message,view=self)
+            data[str(interaction.user.id)]["blackjack_playing"] = False
+            common.datawrite(data)
+            self.stop()
+            return
+        
+        #莊家點數未達17點的話，則加牌直到點數>=17點
+        while BlackJack(self.bot).calculate_point(self.bot_cards) < 16:
+            BlackJack(self.bot).deal_card(self,self.playing_deck,self.bot_cards)
+
+        message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
+
+        #莊家爆牌或者莊家點數比玩家小
+        if BlackJack(self.bot).calculate_point(self.bot_cards) > 21 or (BlackJack(self.bot).calculate_point(self.bot_cards) < BlackJack(self.bot).calculate_point(self.player_cards)):
+            data[str(interaction.user.id)]['cake'] += self.bet * 4
+            message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+        
+        #莊家的牌比玩家大
+        if (BlackJack(self.bot).calculate_point(self.bot_cards) > BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
+            message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+
+        #平手
+        if (BlackJack(self.bot).calculate_point(self.bot_cards) == BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
+            data[str(interaction.user.id)]['cake'] += self.bet * 2
+            message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+        
         await interaction.response.edit_message(embed=message,view=self)
+        data[str(interaction.user.id)]["blackjack_playing"] = False
+        common.datawrite(data)
+        self.stop()
 
     async def interaction_check(self, interaction) -> bool:
         data = common.dataload()
@@ -565,7 +610,7 @@ class BlackJackButton(discord.ui.View):
         if data[str(self.command_interaction.user.id)]["blackjack_playing"] == True:
             data[str(self.command_interaction.user.id)]["blackjack_playing"] = False
         common.datawrite(data)
-        print("debug:view timeout!")
+        
         
 
 
