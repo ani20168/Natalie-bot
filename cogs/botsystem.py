@@ -27,7 +27,7 @@ class BotSystem(commands.Cog):
         if interaction.user.id == common.bot_owner_id:
             data = common.dataload()
 
-
+            #如果有玩家正在玩blackjack
             blackjack_playing_status_message = ""
             for member_id, member_info in data.items():
                 if isinstance(member_info, dict) and member_info.get("blackjack_playing") == True:
