@@ -597,6 +597,7 @@ class BlackJackButton(discord.ui.View):
         #如果賭注不足以使用雙倍下注
         if data[str(interaction.user.id)]['cake'] < self.bet:
             self.double_button.disabled = True
+            await interaction.response.edit_message(view=self)
 
         return True
 
