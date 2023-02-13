@@ -451,23 +451,34 @@ class BlackJack(commands.Cog):
             return
         
         #選項給予
-        await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet))
+        await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot))
         common.datawrite(data)
 
 
 class BlackJackButton(discord.ui.View):
-    def __init__(self, *,timeout= 60,user,bet):
+    def __init__(self, *,timeout= 60,user,bet,player_cards,bot_cards,playing_deck,client):
         super().__init__(timeout=timeout)
         self.command_interaction = user
         self.bet = bet
+        self.player_cards = player_cards
+        self.bot_cards = bot_cards
+        self.playing_deck = playing_deck
+        self.bot = client
 
     @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green)
     async def hit_button(self,interaction,button: discord.ui.Button):
-        message = Embed(title="Natalie 21點",description="測試:拿牌!",color=common.bot_color)
+        self.double_button.disabled = True
+        BlackJack(self.bot).deal_card(self,self.playing_deck,self.player_cards)
+        message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+        message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).self.calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).self.show_cards(self.player_cards)}",inline=False)
+        # message.add_field(name=f"Natalie的手牌點數:**{display_bot_points}**",value=f"{display_bot_cards}",inline=False)
         await interaction.response.edit_message(embed=message,view=self)
 
     @discord.ui.button(label="停牌!",style=discord.ButtonStyle.red)
     async def stand_button(self,interaction,button: discord.ui.Button):
+        self.double_button.disabled = True
+        self.hit_button.disabled = True
+        self.stand_button.disabled = True
         message = Embed(title="Natalie 21點",description="測試:停牌!",color=common.bot_color)
         await interaction.response.edit_message(embed=message,view=self)
 
