@@ -428,7 +428,7 @@ class BlackJack(commands.Cog):
         if data[userid]['cake'] < bet:
             await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"{cake_emoji}不足，無法下注!",color=common.bot_error_color))
             return
-        #data[userid]['cake'] -= bet
+        data[userid]['cake'] -= bet
 
         #初始化牌堆
         playing_deck = self.deck.copy()
@@ -489,7 +489,7 @@ class BlackJackButton(discord.ui.View):
 
         #爆牌
         if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
-            message.add_field(name="結果",value=f"你輸了!\n你損失了**{self.bet}**塊{self.cake_emoji}",inline=False)
+            message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
             self.hit_button.disabled = True
             self.stand_button.disabled = True
             data[str(interaction.user.id)]["blackjack_playing"] = False
@@ -511,11 +511,23 @@ class BlackJackButton(discord.ui.View):
             BlackJack(self.bot).deal_card(self,self.playing_deck,self.bot_cards)
         
         message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+        message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
+        message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
+
         #莊家爆牌或者莊家點數比玩家小
         if BlackJack(self.bot).calculate_point(self.bot_cards) > 21 or (BlackJack(self.bot).calculate_point(self.bot_cards) < BlackJack(self.bot).calculate_point(self.player_cards)):
             data[str(interaction.user.id)]['cake'] += self.bet * 2
             message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-            
+        
+        #莊家的牌比玩家大
+        if (BlackJack(self.bot).calculate_point(self.bot_cards) > BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
+            message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+
+        #平手
+        if (BlackJack(self.bot).calculate_point(self.bot_cards) == BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
+            data[str(interaction.user.id)]['cake'] += self.bet
+            message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+        
         data[str(interaction.user.id)]["blackjack_playing"] = False
         await interaction.response.edit_message(embed=message,view=self)
         common.datawrite(data)
