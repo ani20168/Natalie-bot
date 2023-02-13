@@ -466,7 +466,7 @@ class BlackJackButton(discord.ui.View):
         self.bot = client
         self.display_bot_points = display_bot_points
         self.display_bot_cards = display_bot_cards
-        self.cake_emoji_id = common.cake_emoji_id
+        self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
 
     @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green)
     async def hit_button(self,interaction,button: discord.ui.Button):
@@ -481,8 +481,10 @@ class BlackJackButton(discord.ui.View):
 
         #爆牌
         if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
-            message.add_field(name="結果",value=f"你輸了\n你損失了{self.bet}塊",inline=False)
-            pass
+            message.add_field(name="結果",value=f"你輸了\n你損失了{self.bet}塊{self.cake_emoji}",inline=False)
+            self.hit_button.disabled = True
+            self.stand_button.disabled = True
+
         await interaction.response.edit_message(embed=message,view=self)
 
     @discord.ui.button(label="停牌!",style=discord.ButtonStyle.red)
