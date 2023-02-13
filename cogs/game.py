@@ -378,7 +378,6 @@ class BlackJack(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
         self.deck = [{"2": 2}, {"3": 3}, {"4": 4}, {"5": 5}, {"6": 6}, {"7": 7}, {"8": 8}, {"9": 9}, {"10": 10}, {"J": 10}, {"Q": 10}, {"K": 10}, {"A": 11}] * 4
-        self.playing_status_pool = []
 
     #加牌
     def deal_card(self,interaction,playing_deck, recipient):
@@ -406,6 +405,12 @@ class BlackJack(commands.Cog):
         data = common.dataload()
         userid = str(interaction.user.id)
         cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        
+        #檢查上一局遊戲有沒有玩完
+        if "blackjack_playing" in data[userid] and data[userid]["blackjack_playing"] == True:
+            await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="你現在有進行中的遊戲!",color=common.bot_error_color))
+            return
+
         #檢查要下注的數據
         if bet == "all":
             if data[userid]['cake'] >= 1:
@@ -453,7 +458,7 @@ class BlackJack(commands.Cog):
         
         #選項給予
         await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
-        self.playing_status_pool.append(userid)
+        data[userid]["blackjack_playing"] = True
         common.datawrite(data)
 
 
@@ -472,6 +477,7 @@ class BlackJackButton(discord.ui.View):
 
     @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green)
     async def hit_button(self,interaction,button: discord.ui.Button):
+        data = common.dataload(data)
         cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
         #關閉雙倍下注
         self.double_button.disabled = True
@@ -487,9 +493,10 @@ class BlackJackButton(discord.ui.View):
             message.add_field(name="結果",value=f"你輸了\n你損失了{self.bet}塊{cake_emoji}",inline=False)
             self.hit_button.disabled = True
             self.stand_button.disabled = True
-            BlackJack(self.bot).playing_status_pool.remove(str(interaction.user.id))
+            data[str(interaction.user.id)]["blackjack_playing"] = False
 
         await interaction.response.edit_message(embed=message,view=self)
+        common.datawrite(data)
 
     @discord.ui.button(label="停牌!",style=discord.ButtonStyle.red)
     async def stand_button(self,interaction,button: discord.ui.Button):
