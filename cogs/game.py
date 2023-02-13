@@ -451,7 +451,7 @@ class BlackJack(commands.Cog):
         #玩家如果是blackjack(持有兩張牌且點數剛好為21)
         if self.calculate_point(player_cards) == 21:
             data[userid]['cake'] += int(bet + (bet*1.5))
-            message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{int(bet*1.5)}**塊{cake_emoji}(blackjack! x 1.5)\n你現在有{data[userid]['cake']}塊{cake_emoji}",inline=False)
+            message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{int(bet*1.5)}**塊{cake_emoji}(blackjack! x 1.5)\n你現在有**{data[userid]['cake']}**塊{cake_emoji}",inline=False)
             common.datawrite(data)
             await interaction.response.send_message(embed=message)
             return
