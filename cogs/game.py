@@ -473,12 +473,11 @@ class BlackJackButton(discord.ui.View):
         self.bot = client
         self.display_bot_points = display_bot_points
         self.display_bot_cards = display_bot_cards
-        #self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
 
     @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green)
     async def hit_button(self,interaction,button: discord.ui.Button):
         data = common.dataload()
-        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
         #關閉雙倍下注
         self.double_button.disabled = True
         #加牌
@@ -490,23 +489,37 @@ class BlackJackButton(discord.ui.View):
 
         #爆牌
         if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
-            message.add_field(name="結果",value=f"你輸了\n你損失了{self.bet}塊{cake_emoji}",inline=False)
+            message.add_field(name="結果",value=f"你輸了!\n你損失了**{self.bet}**塊{self.cake_emoji}",inline=False)
             self.hit_button.disabled = True
             self.stand_button.disabled = True
             data[str(interaction.user.id)]["blackjack_playing"] = False
+            self.stop()
 
         await interaction.response.edit_message(embed=message,view=self)
         common.datawrite(data)
 
     @discord.ui.button(label="停牌!",style=discord.ButtonStyle.red)
     async def stand_button(self,interaction,button: discord.ui.Button):
+        data = common.dataload()
         #關閉所有按鈕
         self.double_button.disabled = True
         self.hit_button.disabled = True
         self.stand_button.disabled = True
 
-        message = Embed(title="Natalie 21點",description="測試:停牌!",color=common.bot_color)
+        #莊家點數未達17點的話，則加牌直到點數>=17點
+        while BlackJack(self.bot).calculate_point(self.bot_cards) < 16:
+            BlackJack(self.bot).deal_card(self,self.playing_deck,self.bot_cards)
+        
+        message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+        #莊家爆牌或者莊家點數比玩家小
+        if BlackJack(self.bot).calculate_point(self.bot_cards) > 21 or (BlackJack(self.bot).calculate_point(self.bot_cards) < BlackJack(self.bot).calculate_point(self.player_cards)):
+            data[str(interaction.user.id)]['cake'] += self.bet * 2
+            message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+            
+        data[str(interaction.user.id)]["blackjack_playing"] = False
         await interaction.response.edit_message(embed=message,view=self)
+        common.datawrite(data)
+        self.stop()
 
     @discord.ui.button(label="雙倍下注!",style=discord.ButtonStyle.gray)
     async def double_button(self,interaction,button: discord.ui.Button):
@@ -529,6 +542,20 @@ class BlackJackButton(discord.ui.View):
             self.double_button.disabled = True
 
         return True
+
+    async def on_timeout(self) -> None:
+        data = common.dataload()
+        #關閉所有按鈕
+        self.double_button.disabled = True
+        self.hit_button.disabled = True
+        self.stand_button.disabled = True
+        
+        if data[str(self.command_interaction.user.id)]["blackjack_playing"] == True:
+            data[str(self.command_interaction.user.id)]["blackjack_playing"] = False
+        common.datawrite(data)
+        print("debug:view timeout!")
+        
+
 
 class CollectionTradeButton(discord.ui.View):
     def __init__(self, *,timeout= 60,selluser,collection_name,price,client):
