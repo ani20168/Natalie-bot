@@ -461,6 +461,17 @@ class BlackJack(commands.Cog):
         data[userid]["blackjack_playing"] = True
         common.datawrite(data)
 
+    @app_commands.command(name = "blackjack_player_status", description = "手動更改玩家狀態")
+    @app_commands.describe(member="要變更的成員")
+    @app_commands.rename(member="成員")
+    async def blackjack_player_status(self,interaction,member:discord.Member):
+        if interaction.user.id != common.bot_owner_id:
+            await interaction.response.send_message(embed=Embed(title="系統操作",description = "權限不足",color=common.bot_error_color))
+            return
+        data = common.dataload()
+        data[str(member.id)]["blackjack_playing"] = False
+        common.datawrite(data)
+        await interaction.response.send_message(embed=Embed(title="系統操作",description =f"修改<@{member.id}>的blackjack_playing變數為False。",color=common.bot_color))
 
 class BlackJackButton(discord.ui.View):
     def __init__(self, *,timeout= 120,user,bet,player_cards,bot_cards,playing_deck,client,display_bot_points,display_bot_cards):
