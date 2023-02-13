@@ -470,7 +470,7 @@ class BlackJackButton(discord.ui.View):
         self.double_button.disabled = True
         BlackJack(self.bot).deal_card(self,self.playing_deck,self.player_cards)
         message = Embed(title="Natalie 21點",description="",color=common.bot_color)
-        message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).self.calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).self.show_cards(self.player_cards)}",inline=False)
+        message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
         # message.add_field(name=f"Natalie的手牌點數:**{display_bot_points}**",value=f"{display_bot_cards}",inline=False)
         await interaction.response.edit_message(embed=message,view=self)
 
