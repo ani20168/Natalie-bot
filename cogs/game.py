@@ -477,7 +477,7 @@ class BlackJackButton(discord.ui.View):
 
     @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green)
     async def hit_button(self,interaction,button: discord.ui.Button):
-        data = common.dataload(data)
+        data = common.dataload()
         cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
         #關閉雙倍下注
         self.double_button.disabled = True
