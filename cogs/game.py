@@ -507,7 +507,7 @@ class BlackJackButton(discord.ui.View):
         self.stand_button.disabled = True
 
         #莊家點數未達17點的話，則加牌直到點數>=17點
-        while BlackJack(self.bot).calculate_point(self.bot_cards) < 16:
+        while BlackJack(self.bot).calculate_point(self.bot_cards) < 17:
             BlackJack(self.bot).deal_card(self,self.playing_deck,self.bot_cards)
         
         message = Embed(title="Natalie 21點",description="",color=common.bot_color)
@@ -567,7 +567,7 @@ class BlackJackButton(discord.ui.View):
             return
         
         #莊家點數未達17點的話，則加牌直到點數>=17點
-        while BlackJack(self.bot).calculate_point(self.bot_cards) < 16:
+        while BlackJack(self.bot).calculate_point(self.bot_cards) < 17:
             BlackJack(self.bot).deal_card(self,self.playing_deck,self.bot_cards)
 
         message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
