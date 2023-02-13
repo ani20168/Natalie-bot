@@ -378,6 +378,7 @@ class BlackJack(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
         self.deck = [{"2": 2}, {"3": 3}, {"4": 4}, {"5": 5}, {"6": 6}, {"7": 7}, {"8": 8}, {"9": 9}, {"10": 10}, {"J": 10}, {"Q": 10}, {"K": 10}, {"A": 11}] * 4
+        self.playing_status_pool = []
 
     #加牌
     def deal_card(self,interaction,playing_deck, recipient):
@@ -452,6 +453,7 @@ class BlackJack(commands.Cog):
         
         #選項給予
         await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
+        self.playing_status_pool.append(userid)
         common.datawrite(data)
 
 
@@ -466,10 +468,11 @@ class BlackJackButton(discord.ui.View):
         self.bot = client
         self.display_bot_points = display_bot_points
         self.display_bot_cards = display_bot_cards
-        self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        #self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
 
     @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green)
     async def hit_button(self,interaction,button: discord.ui.Button):
+        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
         #關閉雙倍下注
         self.double_button.disabled = True
         #加牌
@@ -481,9 +484,10 @@ class BlackJackButton(discord.ui.View):
 
         #爆牌
         if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
-            message.add_field(name="結果",value=f"你輸了\n你損失了{self.bet}塊{self.cake_emoji}",inline=False)
+            message.add_field(name="結果",value=f"你輸了\n你損失了{self.bet}塊{cake_emoji}",inline=False)
             self.hit_button.disabled = True
             self.stand_button.disabled = True
+            BlackJack(self.bot).playing_status_pool.remove(str(interaction.user.id))
 
         await interaction.response.edit_message(embed=message,view=self)
 
