@@ -368,6 +368,12 @@ class MiningGame(commands.Cog):
         await interaction.user.add_roles(interaction.guild.get_role(1070206894288928798))
         await interaction.response.send_message(embed=Embed(title="兌換收藏品稱號",description="成功兌換稱號!",color=common.bot_color))
 
+    @app_commands.command(name = "mining_machine_info",description="自動挖礦機資訊...")
+    async def mining_machine_info(self,interaction):
+        userid = str(interaction.user.id)
+        mining_data = self.miningdata_read(userid)
+        pass
+
     @mining.error
     @collection_trade.error
     async def on_cooldown(self,interaction, error: app_commands.AppCommandError):
