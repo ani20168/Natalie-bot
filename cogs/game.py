@@ -613,10 +613,6 @@ class BlackJackButton(discord.ui.View):
 
     async def on_timeout(self) -> None:
         data = common.dataload()
-        #關閉所有按鈕
-        self.double_button.disabled = True
-        self.hit_button.disabled = True
-        self.stand_button.disabled = True
         
         if data[str(self.command_interaction.user.id)]["blackjack_playing"] == True:
             data[str(self.command_interaction.user.id)]["blackjack_playing"] = False
