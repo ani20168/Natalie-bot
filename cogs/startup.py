@@ -60,7 +60,7 @@ class Startup(commands.Cog):
         for member in self.bot.get_all_members():
             if str(member.id) not in data:
                 data[str(member.id)] = {"cake": 0}
-
+            data[str(member.id)]["blackjack_playing"] = False
         
         common.datawrite(data)
 
