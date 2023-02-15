@@ -42,6 +42,7 @@ class General(commands.Cog):
             /mining_info 挖礦小遊戲資訊
             /level_leaderboard 等級排行榜
             /voice_leaderboard 語音活躍排行榜
+            /blackjack 21點遊戲
             ''',
             inline=False)
         await interaction.response.send_message(embed=message)
