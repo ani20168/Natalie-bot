@@ -372,6 +372,7 @@ class MiningGame(commands.Cog):
     async def mining_machine_info(self,interaction):
         userid = str(interaction.user.id)
         mining_data = self.miningdata_read(userid)
+        message = Embed(title="自動挖礦機",description="玩家可以透過購買自動挖礦機來挖掘礦物，每小時會挖掘一次，挖到的礦物會直接列入玩家礦物清單。\n注意!!由於挖礦機火力太強，會破壞掉珍貴的收藏品，因此自動挖掘時'不會'獲得任何收藏品",color=common.bot_color))
         pass
 
     @mining.error
