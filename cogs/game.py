@@ -64,6 +64,12 @@ class MiningGame(commands.Cog):
                 }
             common.datawrite(data,"data/mining.json")
 
+        #新增自動挖礦機的資料
+        if "machine_amount" not in data[userid]:
+            data[userid]["machine_amount"] = 0
+            data[userid]["machine_mine"] = "森林礦坑"
+            common.datawrite(data,"data/mining.json")
+
         return data
 
 
