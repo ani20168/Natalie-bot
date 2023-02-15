@@ -390,7 +390,6 @@ class BlackJack(commands.Cog):
         for card in player_cards:
             if hand_points > 21 and 11 in card.values():
                 hand_points -= 10
-                break
         return hand_points
 
     #顯示牌面
