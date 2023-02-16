@@ -387,6 +387,36 @@ class MiningGame(commands.Cog):
         message.add_field(name="挖礦機所在的礦場",value=f"**{mining_data[userid]['machine_mine']}** (使用`/mining_machine_mine`更換礦場)",inline=False)
         await interaction.response.send_message(embed=message)
 
+    @app_commands.command(name = "mining_machine_mine",description="選擇自動挖礦機的礦場")
+    @app_commands.describe(choices="要更換的礦場")
+    @app_commands.rename(choices="選擇礦場")
+    @app_commands.choices(choices=[
+        app_commands.Choice(name="森林礦坑  1等", value="森林礦坑"),
+        app_commands.Choice(name="荒野高原  10等", value="荒野高原"),
+        app_commands.Choice(name="蛋糕仙境  18等", value="蛋糕仙境"),
+        app_commands.Choice(name="永世凍土  26等", value="永世凍土"),
+        app_commands.Choice(name="熾熱火炎山  34等", value="熾熱火炎山"),
+        app_commands.Choice(name="虛空洞穴  未開放", value="虛空洞穴")
+        ])
+    async def mining_machine_mine(self,interaction,choices: app_commands.Choice[str]):
+        userid = str(interaction.user.id)
+        mining_data = self.miningdata_read(userid)
+        userlevel = common.LevelSystem().read_info(userid)
+
+        #確認是否選擇了目前待的礦場
+        if choices.value == mining_data[userid]['machine_mine']:
+            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"你的挖礦機目前已經在**{choices.value}**。",color=common.bot_error_color))
+            return
+
+        #確認等級是否足夠?
+        if userlevel.level < self.mine_levellimit[choices.value]:
+            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"等級不足，**{choices.value}**礦場需要**{self.mine_levellimit[choices.value]}**等",color=common.bot_error_color))
+            return
+        
+        mining_data[userid]['machine_mine'] = choices.value
+        common.datawrite(mining_data,"data/mining.json")
+        await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"礦機已移動到**{choices.value}**礦場。",color=common.bot_color))
+
     @mining.error
     @collection_trade.error
     async def on_cooldown(self,interaction, error: app_commands.AppCommandError):
