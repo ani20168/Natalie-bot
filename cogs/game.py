@@ -417,6 +417,17 @@ class MiningGame(commands.Cog):
         common.datawrite(mining_data,"data/mining.json")
         await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"礦機已移動到**{choices.value}**礦場。",color=common.bot_color))
 
+    @app_commands.command(name = "mining_machine_buy",description="購買挖礦機")
+    async def mining_machine_buy(self,interaction):
+        userid = str(interaction.user.id)
+        data = common.dataload()
+        mining_data = self.miningdata_read(userid)
+        price = mining_data[userid]['machine_amount'] *1000
+
+        if data[userid]['cake'] < price:
+            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"{self.bot.get_emoji(common.cake_emoji_id)}不足，**{choices.value}**礦場需要**{self.mine_levellimit[choices.value]}**等",color=common.bot_error_color))
+            return
+
     @mining.error
     @collection_trade.error
     async def on_cooldown(self,interaction, error: app_commands.AppCommandError):
