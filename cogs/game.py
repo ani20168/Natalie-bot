@@ -422,11 +422,25 @@ class MiningGame(commands.Cog):
         userid = str(interaction.user.id)
         data = common.dataload()
         mining_data = self.miningdata_read(userid)
+        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
         price = mining_data[userid]['machine_amount'] *1000
 
+        #蛋糕不足
         if data[userid]['cake'] < price:
-            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"{self.bot.get_emoji(common.cake_emoji_id)}不足，**{choices.value}**礦場需要**{self.mine_levellimit[choices.value]}**等",color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"{cake_emoji}不足，購買挖礦機需要**{price}**塊{cake_emoji}，而你只有**{data[userid]['cake']}**塊{cake_emoji}",color=common.bot_error_color))
             return
+        #暫時性的限制:目前一位使用者最多購買10台
+        if mining_data[userid]['machine_amount'] >= 10:
+            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description="你目前只能擁有最多**10**台挖礦機。\n是否開放上限請等待後續更新。",color=common.bot_error_color))
+            return
+        
+        data[userid]['cake'] -= price
+        mining_data[userid]['machine_amount'] += 1
+        common.datawrite(data)
+        common.datawrite(mining_data,"data/mining.json")
+        await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"購買完成，你現在擁有**{mining_data[userid]['machine_amount']}**台挖礦機。",color=common.bot_color))
+
+
 
     @mining.error
     @collection_trade.error
