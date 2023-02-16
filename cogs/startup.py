@@ -37,7 +37,7 @@ class Startup(commands.Cog):
                     if any( tag.name == "星門" for tag in thread.applied_tags):
                         await thread.edit(archived=True,locked=True,reason="自動鎖定過期的星門")
 
-    #挖礦遊戲刷新礦場總挖礦次數
+    #挖礦遊戲-刷新礦場總挖礦次數
     @tasks.loop(hours=1)
     async def mine_mininglimit_reflash(self):
         nowtime = datetime.now(timezone(timedelta(hours=8)))
@@ -51,6 +51,12 @@ class Startup(commands.Cog):
                 if value != 500:
                     data["mine_mininglimit"][key] = 500
         common.datawrite(data,"data/mining.json")
+
+    #挖礦遊戲-自動挖礦機的挖礦流程
+    @tasks.loop(hours=1)
+    async def mining_machine_work(self):
+        data = common.dataload("data/mining.json")
+        pass
 
     #用戶資料初始化/檢查
     @tasks.loop(seconds=5,count=1)
