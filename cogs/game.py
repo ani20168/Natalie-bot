@@ -70,94 +70,99 @@ class MiningGame(commands.Cog):
     @app_commands.command(name = "mining", description = "挖礦!")
     @app_commands.checks.cooldown(1, 15)
     async def mining(self,interaction):
-        userid = str(interaction.user.id)
-        user_data = common.dataload()
-        mining_data = self.miningdata_read(userid)
-        userlevel = common.LevelSystem().read_info(userid)
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            user_data = common.dataload()
+            mining_data = self.miningdata_read(userid)
+            userlevel = common.LevelSystem().read_info(userid)
 
-        #確認是否正在重啟保護狀態?
-        if time.time() - user_data['restart_time'] <= 15:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="機器人正在重啟，請稍後在試一次。",color=common.bot_error_color))
-            return
-        user_data['gaming_time'] = time.time()
+            #確認是否正在重啟保護狀態?
+            if time.time() - user_data['restart_time'] <= 15:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="機器人正在重啟，請稍後在試一次。",color=common.bot_error_color))
+                return
+            user_data['gaming_time'] = time.time()
 
-        #確認礦場是否已挖完?
-        if mining_data['mine_mininglimit'][mining_data[userid]['mine']] <= 0:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"**{mining_data[userid]['mine']}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color))
-            return
-
-        #確認礦鎬壞了沒
-        if mining_data[userid]["pickaxe_health"] == 0:
-            #如果有開啟自動修理
-            if mining_data[userid]["autofix"] == True:
-                if user_data[userid]['cake'] < 10:
-                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!而且你的蛋糕也不足以修理礦鎬。",color=common.bot_error_color))
-                    return
-                mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
-                user_data[userid]["cake"] -= 10
-            else:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
+            #確認礦場是否已挖完?
+            if mining_data['mine_mininglimit'][mining_data[userid]['mine']] <= 0:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"**{mining_data[userid]['mine']}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color))
                 return
 
+            #確認礦鎬壞了沒
+            if mining_data[userid]["pickaxe_health"] == 0:
+                #如果有開啟自動修理
+                if mining_data[userid]["autofix"] == True:
+                    if user_data[userid]['cake'] < 10:
+                        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!而且你的蛋糕也不足以修理礦鎬。",color=common.bot_error_color))
+                        return
+                    mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
+                    user_data[userid]["cake"] -= 10
+                else:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
+                    return
 
-        mining_data['mine_mininglimit'][mining_data[userid]['mine']] -= 1
-        mining_data[userid]["pickaxe_health"] -=10
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
-        #寫入檔案防止回溯
-        common.datawrite(user_data)
-        common.datawrite(mining_data,"data/mining.json")
+
+            mining_data['mine_mininglimit'][mining_data[userid]['mine']] -= 1
+            mining_data[userid]["pickaxe_health"] -=10
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
+            #寫入檔案防止回溯
+            common.datawrite(user_data)
+            common.datawrite(mining_data,"data/mining.json")
+
+        #挖礦時間15秒
         await asyncio.sleep(15)
-        #等待時間結束後再次讀取，防止回溯問題
-        mining_data = self.miningdata_read(userid)
 
-        #開始抽獎
-        reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
-        random_num = random.random()
-        current_probability = 0
-        for reward, probability in reward_probabilities.items():
-            
-            current_probability += probability
-            if random_num < current_probability:
-                #抽出礦物
-                message = Embed(title="Natalie 挖礦",description=f"你挖到了**{reward}**!",color=common.bot_color)
-                if reward != "石頭":
-                    if reward not in mining_data[userid]:
-                        mining_data[userid][reward] = 0
-                    mining_data[userid][reward] += 1
+        async with common.jsonio_lock:
+            #等待時間結束後再次讀取，防止回溯問題
+            mining_data = self.miningdata_read(userid)
 
-                    # bonus minerals
-                    if mining_data[userid]['pickaxe'] == "鑽石鎬":
-                        bonus_probability = 0.1
-                        bonus_mineral = 1
-                    elif mining_data[userid]['pickaxe'] == "不要鎬":
-                        bonus_probability = 0.15
-                        bonus_mineral = 1
-                    else:
-                        bonus_probability = 0
-                        bonus_mineral = 0
+            #開始抽獎
+            reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
+            random_num = random.random()
+            current_probability = 0
+            for reward, probability in reward_probabilities.items():
+                
+                current_probability += probability
+                if random_num < current_probability:
+                    #抽出礦物
+                    message = Embed(title="Natalie 挖礦",description=f"你挖到了**{reward}**!",color=common.bot_color)
+                    if reward != "石頭":
+                        if reward not in mining_data[userid]:
+                            mining_data[userid][reward] = 0
+                        mining_data[userid][reward] += 1
 
-                    if random.random() < bonus_probability:
-                        mining_data[userid][reward] += bonus_mineral
-                        message.description += f"\n你額外獲得了**{bonus_mineral}**個**{reward}**!"
-                break
+                        # bonus minerals
+                        if mining_data[userid]['pickaxe'] == "鑽石鎬":
+                            bonus_probability = 0.1
+                            bonus_mineral = 1
+                        elif mining_data[userid]['pickaxe'] == "不要鎬":
+                            bonus_probability = 0.15
+                            bonus_mineral = 1
+                        else:
+                            bonus_probability = 0
+                            bonus_mineral = 0
 
-        #開始抽收藏品(0.5%機會)
-        random_num = random.random()
-        if random_num < 0.005:
-            collection = random.choice(self.collection_list[mining_data[userid]["mine"]])
-            if collection not in mining_data[userid]["collections"]:
-                mining_data[userid]["collections"][collection] = 0
-            mining_data[userid]["collections"][collection] += 1
-            message.add_field(name="找到收藏品!",value=f"獲得**{collection}**!",inline= False)
+                        if random.random() < bonus_probability:
+                            mining_data[userid][reward] += bonus_mineral
+                            message.description += f"\n你額外獲得了**{bonus_mineral}**個**{reward}**!"
+                    break
 
-        #高風險礦場機率爆裝
-        random_num = random.random()
-        if random_num < 0.05 and (mining_data[userid]["mine"] == "熾熱火炎山" or mining_data[userid]["mine"] == "虛空洞穴"):
-            mining_data[userid]["pickaxe_health"] = 0
-            message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
+            #開始抽收藏品(0.5%機會)
+            random_num = random.random()
+            if random_num < 0.005:
+                collection = random.choice(self.collection_list[mining_data[userid]["mine"]])
+                if collection not in mining_data[userid]["collections"]:
+                    mining_data[userid]["collections"][collection] = 0
+                mining_data[userid]["collections"][collection] += 1
+                message.add_field(name="找到收藏品!",value=f"獲得**{collection}**!",inline= False)
 
-        await interaction.edit_original_response(embed=message)
-        common.datawrite(mining_data,"data/mining.json")
+            #高風險礦場機率爆裝
+            random_num = random.random()
+            if random_num < 0.05 and (mining_data[userid]["mine"] == "熾熱火炎山" or mining_data[userid]["mine"] == "虛空洞穴"):
+                mining_data[userid]["pickaxe_health"] = 0
+                message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
+
+            await interaction.edit_original_response(embed=message)
+            common.datawrite(mining_data,"data/mining.json")
 
 
     @app_commands.command(name = "pickaxe_fix", description = "修理礦鎬(需要10塊蛋糕)")
