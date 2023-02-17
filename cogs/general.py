@@ -17,35 +17,36 @@ class General(commands.Cog):
 
     @app_commands.command(name = "info", description = "關於Natalie...")
     async def info(self,interaction):
-        #讀取檔案
-        data = common.dataload()
-        userid = str(interaction.user.id)
+        async with common.jsonio_lock:
+            #讀取檔案
+            data = common.dataload()
+            userid = str(interaction.user.id)
 
-        #蛋糕查詢
-        if "cake" in data[userid]:
-            cake = data[userid]["cake"]
-        else:
-            data[userid]["cake"] = 0
-            cake = data[userid]["cake"]
-            common.datawrite(data)
+            #蛋糕查詢
+            if "cake" in data[userid]:
+                cake = data[userid]["cake"]
+            else:
+                data[userid]["cake"] = 0
+                cake = data[userid]["cake"]
+                common.datawrite(data)
 
-        userlevel = common.LevelSystem().read_info(userid)
-        description = "你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。"
-        message = Embed(title="我是Natalie!",description=description,color=common.bot_color)
-        message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有**{cake}**塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
-        message.add_field(
-            name="指令表",
-            value=f'''
-            /info -- 查看指令表及個人資料
-            /eat -- 餵食Natalie
-            /cake_give 給予他人{self.bot.get_emoji(common.cake_emoji_id)}
-            /mining_info 挖礦小遊戲資訊
-            /level_leaderboard 等級排行榜
-            /voice_leaderboard 語音活躍排行榜
-            /blackjack 21點遊戲
-            ''',
-            inline=False)
-        await interaction.response.send_message(embed=message)
+            userlevel = common.LevelSystem().read_info(userid)
+            description = "你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。"
+            message = Embed(title="我是Natalie!",description=description,color=common.bot_color)
+            message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有**{cake}**塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
+            message.add_field(
+                name="指令表",
+                value=f'''
+                /info -- 查看指令表及個人資料
+                /eat -- 餵食Natalie
+                /cake_give 給予他人{self.bot.get_emoji(common.cake_emoji_id)}
+                /mining_info 挖礦小遊戲資訊
+                /level_leaderboard 等級排行榜
+                /voice_leaderboard 語音活躍排行榜
+                /blackjack 21點遊戲
+                ''',
+                inline=False)
+            await interaction.response.send_message(embed=message)
 
     @app_commands.command(name = "eat", description = "餵食Natalie!")
     @app_commands.describe(eat_cake="要餵食的蛋糕數量，1蛋糕=1經驗值")
@@ -55,38 +56,40 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:請輸入有效的數量",color=common.bot_error_color))
             return
 
-        data = common.dataload()
-        userid = str(interaction.user.id)
-        userlevel = common.LevelSystem().read_info(userid)
-        
-        cake = data[userid]["cake"]
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(interaction.user.id)
+            userlevel = common.LevelSystem().read_info(userid)
+            
+            cake = data[userid]["cake"]
 
-        if cake >= eat_cake:
-            cake -= eat_cake
-            userlevel.level_exp += eat_cake
-            message = Embed(title='餵食Natalie',description=f"我吃飽啦!(獲得**{eat_cake}**點經驗值)",color=common.bot_color)
-            #升級
-            if userlevel.level_exp >= userlevel.level_next_exp:
-                while userlevel.level_exp >= userlevel.level_next_exp:
-                    userlevel.level += 1
-                    userlevel.level_next_exp = userlevel.level * (userlevel.level+1)*30
-                message.add_field(name="升級!",value=f"你現在{userlevel.level}等了。",inline=False)
+            if cake >= eat_cake:
+                cake -= eat_cake
+                userlevel.level_exp += eat_cake
+                message = Embed(title='餵食Natalie',description=f"我吃飽啦!(獲得**{eat_cake}**點經驗值)",color=common.bot_color)
+                #升級
+                if userlevel.level_exp >= userlevel.level_next_exp:
+                    while userlevel.level_exp >= userlevel.level_next_exp:
+                        userlevel.level += 1
+                        userlevel.level_next_exp = userlevel.level * (userlevel.level+1)*30
+                    message.add_field(name="升級!",value=f"你現在{userlevel.level}等了。",inline=False)
 
-            data[userid]["level"] = userlevel.level
-            data[userid]["level_exp"] = userlevel.level_exp
-            data[userid]["level_next_exp"] = userlevel.level_next_exp
-            data[userid]["cake"] = cake
-            common.datawrite(data)
-            await interaction.response.send_message(embed=message)
-        else:
-            await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:蛋糕不足",color=common.bot_error_color))
-            return
+                data[userid]["level"] = userlevel.level
+                data[userid]["level_exp"] = userlevel.level_exp
+                data[userid]["level_next_exp"] = userlevel.level_next_exp
+                data[userid]["cake"] = cake
+                common.datawrite(data)
+                await interaction.response.send_message(embed=message)
+            else:
+                await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:蛋糕不足",color=common.bot_error_color))
+                return
 
     @app_commands.command(name = "level_leaderboard", description = "等級排行榜")
     async def level_leaderboard(self,interaction):
         userid = str(interaction.user.id)
         data = common.dataload()
-        userlevel_info = common.LevelSystem().read_info(userid)
+        async with common.jsonio_lock:
+            userlevel_info = common.LevelSystem().read_info(userid)
         # 建立排名榜的列表，以經驗值為排序準則，並倒序排列
         sorted_data = sorted([(user, user_data) for user, user_data in data.items() if isinstance(user_data, dict) and "level_exp" in user_data], key=lambda x: x[1]["level_exp"], reverse=True)
 
@@ -132,13 +135,13 @@ class General(commands.Cog):
         if interaction.user.id != common.bot_owner_id:
             await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description="權限不足。",color=common.bot_error_color))
             return
-        
-        data = common.dataload()
-        cake_before = data[str(member.id)]['cake']
-        data[str(member.id)]['cake'] += amount
-        common.datawrite(data)
-        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
-        await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description=f"<@{member.id}>資料變更...\n原始{cake_emoji}:**{cake_before}**\n增加了**{amount}**塊{cake_emoji}\n現在有**{data[str(member.id)]['cake']}**塊{cake_emoji}",color=common.bot_color))
+        async with common.jsonio_lock:
+            data = common.dataload()
+            cake_before = data[str(member.id)]['cake']
+            data[str(member.id)]['cake'] += amount
+            common.datawrite(data)
+            cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+            await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description=f"<@{member.id}>資料變更...\n原始{cake_emoji}:**{cake_before}**\n增加了**{amount}**塊{cake_emoji}\n現在有**{data[str(member.id)]['cake']}**塊{cake_emoji}",color=common.bot_color))
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
@@ -166,12 +169,13 @@ class General(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self,member):  
-        data = common.dataload()
+        async with common.jsonio_lock:
+            data = common.dataload()
 
-        if str(member.id) not in data:
-            data[str(member.id)] = {"cake": 0}
+            if str(member.id) not in data:
+                data[str(member.id)] = {"cake": 0}
 
-        common.datawrite(data)
+            common.datawrite(data)
 
     @commands.Cog.listener()
     async def on_message(self,message):
@@ -180,9 +184,10 @@ class General(commands.Cog):
             now = datetime.now()
             # 如果成員還沒有獲得過蛋糕，或者已經過了冷卻時間
             if memberid not in self.last_cake_time or now - self.last_cake_time[memberid] > self.cake_cooldown:
-                data = common.dataload()
-                data[memberid]["cake"] += 1
-                common.datawrite(data)
+                async with common.jsonio_lock:
+                    data = common.dataload()
+                    data[memberid]["cake"] += 1
+                    common.datawrite(data)
                 # 更新最後一次獲得蛋糕的時間
                 self.last_cake_time[memberid] = datetime.now()
 
