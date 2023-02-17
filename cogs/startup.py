@@ -42,17 +42,16 @@ class Startup(commands.Cog):
                         await thread.edit(archived=True,locked=True,reason="自動鎖定過期的星門")
 
     #挖礦遊戲-刷新礦場總挖礦次數
-    @tasks.loop(hours=1)
+    @tasks.loop(minutes=1)
     async def mine_mininglimit_reflash(self):
         nowtime = datetime.now(timezone(timedelta(hours=8)))
-        async with common.jsonio_lock:
-            data = common.dataload("data/mining.json")
-
-            if nowtime.hour == 0:
+        if nowtime.hour == 0 and nowtime.minute == 0:
+            async with common.jsonio_lock:
+                data = common.dataload("data/mining.json")
                 for key, value in data["mine_mininglimit"].items():
                     if value != 500:
                         data["mine_mininglimit"][key] = 500
-            common.datawrite(data,"data/mining.json")
+                common.datawrite(data,"data/mining.json")
 
     #挖礦遊戲-自動挖礦機的挖礦流程
     @tasks.loop(hours=1)
