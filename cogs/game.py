@@ -409,7 +409,7 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="蛋糕仙境  18等", value="蛋糕仙境"),
         app_commands.Choice(name="永世凍土  26等", value="永世凍土"),
         app_commands.Choice(name="熾熱火炎山  34等", value="熾熱火炎山"),
-        app_commands.Choice(name="虛空洞穴  未開放", value="虛空洞穴")
+        app_commands.Choice(name="虛空洞穴  42等", value="虛空洞穴")
         ])
     async def mining_machine_mine(self,interaction,choices: app_commands.Choice[str]):
         userid = str(interaction.user.id)
