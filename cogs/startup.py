@@ -2,7 +2,9 @@ import discord
 from discord import app_commands,Embed
 from discord.ext import commands,tasks
 from . import common
+from . import game
 import time
+import random
 from datetime import datetime,timezone,timedelta
 
 
@@ -16,6 +18,7 @@ class Startup(commands.Cog):
         self.give_cake_in_vc.start()
         self.mine_mininglimit_reflash.start()
         self.voice_active_record.start()
+        self.mining_machine_work.start()
 
     #卸載cog時觸發
     async def cog_unload(self):
@@ -24,6 +27,7 @@ class Startup(commands.Cog):
         self.give_cake_in_vc.cancel()
         self.mine_mininglimit_reflash.cancel()
         self.voice_active_record.cancel()
+        self.mining_machine_work.cancel()
 
         
     #自動鎖定過期的星門
@@ -53,8 +57,31 @@ class Startup(commands.Cog):
     #挖礦遊戲-自動挖礦機的挖礦流程
     @tasks.loop(hours=1)
     async def mining_machine_work(self):
-        data = common.dataload("data/mining.json")
-        pass
+        async with common.jsonio_lock:
+            data = common.dataload("data/mining.json")
+            for userid, user_data in data.items():
+                if isinstance(user_data, dict) and "machine_amount" in user_data and user_data["machine_amount"] >= 1:
+                    #開始抽獎
+                    reward_probabilities = game.MiningGame(self.bot).mineral_chancelist[user_data["machine_mine"]]
+                    #有幾台礦機就挖幾次
+                    for i in range(user_data["machine_amount"]):
+                        #確認礦場是否已挖完?
+                         if data['mine_mininglimit'][user_data['machine_mine']] != 0:
+                            data['mine_mininglimit'][user_data['machine_mine']] -= 1
+                            random_num = random.random()
+                            current_probability = 0
+                            for reward, probability in reward_probabilities.items():
+                                current_probability += probability
+                                if random_num < current_probability:
+                                    #抽出礦物
+                                    if reward != "石頭":
+                                        if reward not in data[userid]:
+                                            data[userid][reward] = 0
+                                        data[userid][reward] += 1
+
+                                    break
+            common.datawrite(data,"data/mining.json")
+            
 
     #用戶資料初始化/檢查
     @tasks.loop(seconds=5,count=1)
@@ -148,6 +175,7 @@ class Startup(commands.Cog):
     @give_cake_in_vc.before_loop
     @mine_mininglimit_reflash.before_loop
     @voice_active_record.before_loop
+    @mining_machine_work.before_loop
     async def event_before_loop(self):
         await self.bot.wait_until_ready()
         
