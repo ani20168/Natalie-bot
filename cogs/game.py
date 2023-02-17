@@ -389,8 +389,9 @@ class MiningGame(commands.Cog):
     @app_commands.command(name = "mining_machine_info",description="自動挖礦機資訊...")
     async def mining_machine_info(self,interaction):
         userid = str(interaction.user.id)
-        mining_data = self.miningdata_read(userid)
-        message = Embed(title="自動挖礦機",description="你可以透過購買自動挖礦機來挖掘礦物，每小時會挖掘一次，挖到的礦物會直接列入玩家礦物清單。\n注意!!由於挖礦機火力太強，會破壞掉珍貴的收藏品，因此自動挖掘時'不會'獲得任何收藏品",color=common.bot_color))
+        async with common.jsonio_lock:
+            mining_data = self.miningdata_read(userid)
+        message = Embed(title="自動挖礦機",description="你可以透過購買自動挖礦機來挖掘礦物，每小時會挖掘一次，挖到的礦物會直接列入玩家礦物清單。\n注意!!由於挖礦機火力太強，會破壞掉珍貴的收藏品，因此自動挖掘時'不會'獲得任何收藏品",color=common.bot_color)
         message.add_field(name="目前持有的挖礦機數量",value=f"**{mining_data[userid]['machine_amount']}**",inline=False)
         if (mining_data[userid]['machine_amount'])*1000 == 0:
             message.add_field(name="購買價格 ***(第一台挖礦機為免費)***",value=f"**{(mining_data[userid]['machine_amount'])*1000}** (使用`/mining_machine_buy`購買挖礦機)",inline=False)
@@ -412,45 +413,47 @@ class MiningGame(commands.Cog):
         ])
     async def mining_machine_mine(self,interaction,choices: app_commands.Choice[str]):
         userid = str(interaction.user.id)
-        mining_data = self.miningdata_read(userid)
-        userlevel = common.LevelSystem().read_info(userid)
+        async with common.jsonio_lock:
+            mining_data = self.miningdata_read(userid)
+            userlevel = common.LevelSystem().read_info(userid)
 
-        #確認是否選擇了目前待的礦場
-        if choices.value == mining_data[userid]['machine_mine']:
-            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"你的挖礦機目前已經在**{choices.value}**。",color=common.bot_error_color))
-            return
+            #確認是否選擇了目前待的礦場
+            if choices.value == mining_data[userid]['machine_mine']:
+                await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"你的挖礦機目前已經在**{choices.value}**。",color=common.bot_error_color))
+                return
 
-        #確認等級是否足夠?
-        if userlevel.level < self.mine_levellimit[choices.value]:
-            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"等級不足，**{choices.value}**礦場需要**{self.mine_levellimit[choices.value]}**等",color=common.bot_error_color))
-            return
-        
-        mining_data[userid]['machine_mine'] = choices.value
-        common.datawrite(mining_data,"data/mining.json")
-        await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"礦機已移動到**{choices.value}**礦場。",color=common.bot_color))
+            #確認等級是否足夠?
+            if userlevel.level < self.mine_levellimit[choices.value]:
+                await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"等級不足，**{choices.value}**礦場需要**{self.mine_levellimit[choices.value]}**等",color=common.bot_error_color))
+                return
+            
+            mining_data[userid]['machine_mine'] = choices.value
+            common.datawrite(mining_data,"data/mining.json")
+            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"礦機已移動到**{choices.value}**礦場。",color=common.bot_color))
 
     @app_commands.command(name = "mining_machine_buy",description="購買挖礦機")
     async def mining_machine_buy(self,interaction):
         userid = str(interaction.user.id)
-        data = common.dataload()
-        mining_data = self.miningdata_read(userid)
-        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
-        price = mining_data[userid]['machine_amount'] *1000
+        async with common.jsonio_lock:
+            data = common.dataload()
+            mining_data = self.miningdata_read(userid)
+            cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+            price = mining_data[userid]['machine_amount'] *1000
 
-        #蛋糕不足
-        if data[userid]['cake'] < price:
-            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"{cake_emoji}不足，購買挖礦機需要**{price}**塊{cake_emoji}，而你只有**{data[userid]['cake']}**塊{cake_emoji}",color=common.bot_error_color))
-            return
-        #暫時性的限制:目前一位使用者最多購買10台
-        if mining_data[userid]['machine_amount'] >= 10:
-            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description="你目前只能擁有最多**10**台挖礦機。\n是否開放上限請等待後續更新。",color=common.bot_error_color))
-            return
-        
-        data[userid]['cake'] -= price
-        mining_data[userid]['machine_amount'] += 1
-        common.datawrite(data)
-        common.datawrite(mining_data,"data/mining.json")
-        await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"購買完成，你現在擁有**{mining_data[userid]['machine_amount']}**台挖礦機。",color=common.bot_color))
+            #蛋糕不足
+            if data[userid]['cake'] < price:
+                await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"{cake_emoji}不足，購買挖礦機需要**{price}**塊{cake_emoji}，而你只有**{data[userid]['cake']}**塊{cake_emoji}",color=common.bot_error_color))
+                return
+            #暫時性的限制:目前一位使用者最多購買10台
+            if mining_data[userid]['machine_amount'] >= 10:
+                await interaction.response.send_message(embed=Embed(title="自動挖礦機",description="你目前只能擁有最多**10**台挖礦機。\n是否開放上限請等待後續更新。",color=common.bot_error_color))
+                return
+            
+            data[userid]['cake'] -= price
+            mining_data[userid]['machine_amount'] += 1
+            common.datawrite(data)
+            common.datawrite(mining_data,"data/mining.json")
+            await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"購買完成，你現在擁有**{mining_data[userid]['machine_amount']}**台挖礦機。",color=common.bot_color))
 
 
 
