@@ -32,7 +32,7 @@ class MiningGame(commands.Cog):
             "蛋糕仙境": 18,
             "永世凍土": 26,
             "熾熱火炎山": 34,
-            "虛空洞穴": 99
+            "虛空洞穴": 42
         }
         self.collection_list = {
         "森林礦坑": ["昆蟲化石", "遠古的妖精翅膀", "萬年神木之根", "古代陶器碎片"],
@@ -76,164 +76,173 @@ class MiningGame(commands.Cog):
     @app_commands.command(name = "mining", description = "挖礦!")
     @app_commands.checks.cooldown(1, 15)
     async def mining(self,interaction):
-        userid = str(interaction.user.id)
-        user_data = common.dataload()
-        mining_data = self.miningdata_read(userid)
-        userlevel = common.LevelSystem().read_info(userid)
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            user_data = common.dataload()
+            mining_data = self.miningdata_read(userid)
+            userlevel = common.LevelSystem().read_info(userid)
 
-        #確認是否正在重啟保護狀態?
-        if time.time() - user_data['restart_time'] <= 15:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="機器人正在重啟，請稍後在試一次。",color=common.bot_error_color))
-            return
-        user_data['gaming_time'] = time.time()
+            #確認是否正在重啟保護狀態?
+            if time.time() - user_data['restart_time'] <= 15:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="機器人正在重啟，請稍後在試一次。",color=common.bot_error_color))
+                return
+            user_data['gaming_time'] = time.time()
 
-        #確認礦場是否已挖完?
-        if mining_data['mine_mininglimit'][mining_data[userid]['mine']] <= 0:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"**{mining_data[userid]['mine']}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color))
-            return
-
-        #確認礦鎬壞了沒
-        if mining_data[userid]["pickaxe_health"] == 0:
-            #如果有開啟自動修理
-            if mining_data[userid]["autofix"] == True:
-                if user_data[userid]['cake'] < 10:
-                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!而且你的蛋糕也不足以修理礦鎬。",color=common.bot_error_color))
-                    return
-                mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
-                user_data[userid]["cake"] -= 10
-            else:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
+            #確認礦場是否已挖完?
+            if mining_data['mine_mininglimit'][mining_data[userid]['mine']] <= 0:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"**{mining_data[userid]['mine']}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color))
                 return
 
+            #確認礦鎬壞了沒
+            if mining_data[userid]["pickaxe_health"] == 0:
+                #如果有開啟自動修理
+                if mining_data[userid]["autofix"] == True:
+                    if user_data[userid]['cake'] < 10:
+                        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!而且你的蛋糕也不足以修理礦鎬。",color=common.bot_error_color))
+                        return
+                    mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
+                    user_data[userid]["cake"] -= 10
+                else:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
+                    return
 
-        mining_data['mine_mininglimit'][mining_data[userid]['mine']] -= 1
-        mining_data[userid]["pickaxe_health"] -=10
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
-        #寫入檔案防止回溯
-        common.datawrite(user_data)
-        common.datawrite(mining_data,"data/mining.json")
+
+            mining_data['mine_mininglimit'][mining_data[userid]['mine']] -= 1
+            mining_data[userid]["pickaxe_health"] -=10
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
+            #寫入檔案防止回溯
+            common.datawrite(user_data)
+            common.datawrite(mining_data,"data/mining.json")
+
+        #挖礦時間15秒
         await asyncio.sleep(15)
-        #等待時間結束後再次讀取，防止回溯問題
-        mining_data = self.miningdata_read(userid)
 
-        #開始抽獎
-        reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
-        random_num = random.random()
-        current_probability = 0
-        for reward, probability in reward_probabilities.items():
-            
-            current_probability += probability
-            if random_num < current_probability:
-                #抽出礦物
-                message = Embed(title="Natalie 挖礦",description=f"你挖到了**{reward}**!",color=common.bot_color)
-                if reward != "石頭":
-                    if reward not in mining_data[userid]:
-                        mining_data[userid][reward] = 0
-                    mining_data[userid][reward] += 1
+        async with common.jsonio_lock:
+            #等待時間結束後再次讀取，防止回溯問題
+            mining_data = self.miningdata_read(userid)
 
-                    # bonus minerals
-                    if mining_data[userid]['pickaxe'] == "鑽石鎬":
-                        bonus_probability = 0.1
-                        bonus_mineral = 1
-                    elif mining_data[userid]['pickaxe'] == "不要鎬":
-                        bonus_probability = 0.15
-                        bonus_mineral = 1
-                    else:
-                        bonus_probability = 0
-                        bonus_mineral = 0
+            #開始抽獎
+            reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
+            random_num = random.random()
+            current_probability = 0
+            for reward, probability in reward_probabilities.items():
+                
+                current_probability += probability
+                if random_num < current_probability:
+                    #抽出礦物
+                    message = Embed(title="Natalie 挖礦",description=f"你挖到了**{reward}**!",color=common.bot_color)
+                    if reward != "石頭":
+                        if reward not in mining_data[userid]:
+                            mining_data[userid][reward] = 0
+                        mining_data[userid][reward] += 1
 
-                    if random.random() < bonus_probability:
-                        mining_data[userid][reward] += bonus_mineral
-                        message.description += f"\n你額外獲得了**{bonus_mineral}**個**{reward}**!"
-                break
+                        # bonus minerals
+                        if mining_data[userid]['pickaxe'] == "鑽石鎬":
+                            bonus_probability = 0.1
+                            bonus_mineral = 1
+                        elif mining_data[userid]['pickaxe'] == "不要鎬":
+                            bonus_probability = 0.15
+                            bonus_mineral = 1
+                        else:
+                            bonus_probability = 0
+                            bonus_mineral = 0
 
-        #開始抽收藏品(0.5%機會)
-        random_num = random.random()
-        if random_num < 0.005:
-            collection = random.choice(self.collection_list[mining_data[userid]["mine"]])
-            if collection not in mining_data[userid]["collections"]:
-                mining_data[userid]["collections"][collection] = 0
-            mining_data[userid]["collections"][collection] += 1
-            message.add_field(name="找到收藏品!",value=f"獲得**{collection}**!",inline= False)
+                        if random.random() < bonus_probability:
+                            mining_data[userid][reward] += bonus_mineral
+                            message.description += f"\n你額外獲得了**{bonus_mineral}**個**{reward}**!"
+                    break
 
-        #高風險礦場機率爆裝
-        random_num = random.random()
-        if random_num < 0.05 and (mining_data[userid]["mine"] == "熾熱火炎山" or mining_data[userid]["mine"] == "虛空洞穴"):
-            mining_data[userid]["pickaxe_health"] = 0
-            message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
+            #開始抽收藏品(0.5%機會)
+            random_num = random.random()
+            if random_num < 0.005:
+                collection = random.choice(self.collection_list[mining_data[userid]["mine"]])
+                if collection not in mining_data[userid]["collections"]:
+                    mining_data[userid]["collections"][collection] = 0
+                mining_data[userid]["collections"][collection] += 1
+                message.add_field(name="找到收藏品!",value=f"獲得**{collection}**!",inline= False)
 
-        await interaction.edit_original_response(embed=message)
-        common.datawrite(mining_data,"data/mining.json")
+            #高風險礦場機率爆裝
+            random_num = random.random()
+            if random_num < 0.05 and (mining_data[userid]["mine"] == "熾熱火炎山" or mining_data[userid]["mine"] == "虛空洞穴"):
+                mining_data[userid]["pickaxe_health"] = 0
+                message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
+
+            await interaction.edit_original_response(embed=message)
+            common.datawrite(mining_data,"data/mining.json")
 
 
     @app_commands.command(name = "pickaxe_fix", description = "修理礦鎬(需要10塊蛋糕)")
     async def pickaxe_fix(self,interaction):
-        #讀資料
-        userid = str(interaction.user.id)
-        mining_data = self.miningdata_read(userid)
-        user_data = common.dataload()
-        #如果沒壞
-        if mining_data[userid]["pickaxe_health"] != 0:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬還沒壞!",color=common.bot_error_color))
-            return
-        #如果沒蛋糕
-        if user_data[userid]["cake"] < 10:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你的蛋糕不足!(需要**10**塊，你目前只有**{user_data[userid]['cake']}**塊)",color=common.bot_error_color))
-            return
-        
-        #修理要10蛋糕
-        user_data[userid]["cake"] -= 10
-        mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="修理完成",color=common.bot_color))
-        common.datawrite(user_data)
-        common.datawrite(mining_data,"data/mining.json")
+        async with common.jsonio_lock:
+            #讀資料
+            userid = str(interaction.user.id)
+            mining_data = self.miningdata_read(userid)
+            user_data = common.dataload()
+            #如果沒壞
+            if mining_data[userid]["pickaxe_health"] != 0:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬還沒壞!",color=common.bot_error_color))
+                return
+            #如果沒蛋糕
+            if user_data[userid]["cake"] < 10:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你的蛋糕不足!(需要**10**塊，你目前只有**{user_data[userid]['cake']}**塊)",color=common.bot_error_color))
+                return
+            
+            #修理要10蛋糕
+            user_data[userid]["cake"] -= 10
+            mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="修理完成",color=common.bot_color))
+            common.datawrite(user_data)
+            common.datawrite(mining_data,"data/mining.json")
         
     @app_commands.command(name = "pickaxe_autofix", description = "自動修理礦鎬設置(預設關閉)")
     async def pickaxe_autofix(self,interaction):
-        userid = str(interaction.user.id)
-        data = self.miningdata_read(userid)
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            data = self.miningdata_read(userid)
 
-        if not "autofix" in data[userid] or data[userid]["autofix"] == False:
-            data[userid]["autofix"] = True
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="自動修理已開啟。\n在耐久不足時會自動消耗蛋糕進行修理。",color=common.bot_color))
-            common.datawrite(data,"data/mining.json")
-            return
+            if not "autofix" in data[userid] or data[userid]["autofix"] == False:
+                data[userid]["autofix"] = True
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="自動修理已開啟。\n在耐久不足時會自動消耗蛋糕進行修理。",color=common.bot_color))
+                common.datawrite(data,"data/mining.json")
+                return
 
-        if data[userid]["autofix"] == True:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經開啟了自動修理礦鎬。",color=common.bot_color),ephemeral=True,view=AutofixButton())
+            if data[userid]["autofix"] == True:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經開啟了自動修理礦鎬。",color=common.bot_color),ephemeral=True,view=AutofixButton())
 
     @app_commands.command(name = "mineral_sell",description="賣出所有礦物")
     async def mineral_sell(self,interaction):
-        userid = str(interaction.user.id)
-        mining_data = self.miningdata_read(userid)
-        message = Embed(title="Natalie 挖礦",color=common.bot_color)
-        #計算賣出價
-        total_price = 0
-        mineral_sellinfo_show = ""
-        for mineral, quantity in mining_data[userid].items():
-            if mineral in self.mineral_pricelist:
-                total_price += self.mineral_pricelist[mineral] * quantity
-                if quantity != 0:
-                    mineral_sellinfo_show += f"{mineral}:**{quantity}**個\n"
-        message.add_field(name="你總共賣出了...",value=mineral_sellinfo_show,inline=False)
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            mining_data = self.miningdata_read(userid)
+            message = Embed(title="Natalie 挖礦",color=common.bot_color)
+            #計算賣出價
+            total_price = 0
+            mineral_sellinfo_show = ""
+            for mineral, quantity in mining_data[userid].items():
+                if mineral in self.mineral_pricelist:
+                    total_price += self.mineral_pricelist[mineral] * quantity
+                    if quantity != 0:
+                        mineral_sellinfo_show += f"{mineral}:**{quantity}**個\n"
+            message.add_field(name="你總共賣出了...",value=mineral_sellinfo_show,inline=False)
 
-        #清除礦物
-        for mineral in self.mineral_pricelist.keys():
-            if mineral in mining_data[userid]:
-                mining_data[userid][mineral] = 0
-        common.datawrite(mining_data,"data/mining.json")
+            #清除礦物
+            for mineral in self.mineral_pricelist.keys():
+                if mineral in mining_data[userid]:
+                    mining_data[userid][mineral] = 0
+            common.datawrite(mining_data,"data/mining.json")
 
-        #顯示
-        userdata = common.dataload()
-        userdata[userid]["cake"] += total_price
-        common.datawrite(userdata)
-        message.add_field(name=f"你獲得了{total_price}塊{self.bot.get_emoji(common.cake_emoji_id)}",value="",inline=False)
-        await interaction.response.send_message(embed=message)
+            #顯示
+            userdata = common.dataload()
+            userdata[userid]["cake"] += total_price
+            common.datawrite(userdata)
+            message.add_field(name=f"你獲得了{total_price}塊{self.bot.get_emoji(common.cake_emoji_id)}",value="",inline=False)
+            await interaction.response.send_message(embed=message)
 
     @app_commands.command(name = "mining_info",description="挖礦資訊")
     async def mining_info(self,interaction):
         userid = str(interaction.user.id)
-        mining_data = self.miningdata_read(userid)
+        async with common.jsonio_lock:
+            mining_data = self.miningdata_read(userid)
 
         message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 收藏品交易\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)",color=common.bot_color)
         message.add_field(name="我的礦鎬",value=f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}",inline=False)
@@ -295,26 +304,27 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="蛋糕仙境  18等", value="蛋糕仙境"),
         app_commands.Choice(name="永世凍土  26等", value="永世凍土"),
         app_commands.Choice(name="熾熱火炎山  34等", value="熾熱火炎山"),
-        app_commands.Choice(name="虛空洞穴  未開放", value="虛空洞穴")
+        app_commands.Choice(name="虛空洞穴  42等", value="虛空洞穴")
         ])
     async def mine(self,interaction,choices: app_commands.Choice[str]):
-        userid = str(interaction.user.id)
-        mining_data = self.miningdata_read(userid)
-        userlevel = common.LevelSystem().read_info(userid)
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            mining_data = self.miningdata_read(userid)
+            userlevel = common.LevelSystem().read_info(userid)
 
-        #確認是否選擇了目前待的礦場
-        if choices.value == mining_data[userid]['mine']:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你目前已經在**{choices.value}**。",color=common.bot_error_color))
-            return
-        
-        #確認等級是否足夠?
-        if userlevel.level < self.mine_levellimit[choices.value]:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"等級不足，**{choices.value}**礦場需要**{self.mine_levellimit[choices.value]}**等",color=common.bot_error_color))
-            return
+            #確認是否選擇了目前待的礦場
+            if choices.value == mining_data[userid]['mine']:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你目前已經在**{choices.value}**。",color=common.bot_error_color))
+                return
+            
+            #確認等級是否足夠?
+            if userlevel.level < self.mine_levellimit[choices.value]:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"等級不足，**{choices.value}**礦場需要**{self.mine_levellimit[choices.value]}**等",color=common.bot_error_color))
+                return
 
-        mining_data[userid]['mine'] = choices.value
-        common.datawrite(mining_data,"data/mining.json")
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"已移動到**{choices.value}**礦場，當前礦場剩餘挖礦次數:**{mining_data['mine_mininglimit'][choices.value]}**",color=common.bot_color))
+            mining_data[userid]['mine'] = choices.value
+            common.datawrite(mining_data,"data/mining.json")
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"已移動到**{choices.value}**礦場，當前礦場剩餘挖礦次數:**{mining_data['mine_mininglimit'][choices.value]}**",color=common.bot_color))
 
     @app_commands.command(name = "pickaxe_buy",description="購買礦鎬")
     @app_commands.describe(choices="要購買的礦鎬")
@@ -326,53 +336,55 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="不要鎬  耐久:1000 需要25等 $5000", value="不要鎬")
         ])
     async def pickaxe_buy(self,interaction,choices: app_commands.Choice[str]):
-        userid = str(interaction.user.id)
-        user_data = common.dataload()
-        mining_data = self.miningdata_read(userid)
-     
-        if mining_data[userid]["pickaxe"] == choices.value:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經擁有此礦鎬了!",color=common.bot_error_color))
-            return
-        if self.pickaxe_list[choices.value]['需求等級'] > user_data[userid]['level']:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的等級不足以購買此礦鎬!",color=common.bot_error_color))
-            return
-        if self.pickaxe_list[choices.value]['需求等級'] < self.pickaxe_list[mining_data[userid]['pickaxe']]['需求等級']:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你不能購買更劣質的礦鎬!",color=common.bot_error_color))
-            return
-        if user_data[userid]['cake'] < self.pickaxe_list[choices.value]['價格']:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{self.pickaxe_list[choices.value]['價格']}**，你只有**{user_data[userid]['cake']}**)。",color=common.bot_error_color))
-            return
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            user_data = common.dataload()
+            mining_data = self.miningdata_read(userid)
+        
+            if mining_data[userid]["pickaxe"] == choices.value:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經擁有此礦鎬了!",color=common.bot_error_color))
+                return
+            if self.pickaxe_list[choices.value]['需求等級'] > user_data[userid]['level']:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的等級不足以購買此礦鎬!",color=common.bot_error_color))
+                return
+            if self.pickaxe_list[choices.value]['需求等級'] < self.pickaxe_list[mining_data[userid]['pickaxe']]['需求等級']:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你不能購買更劣質的礦鎬!",color=common.bot_error_color))
+                return
+            if user_data[userid]['cake'] < self.pickaxe_list[choices.value]['價格']:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{self.pickaxe_list[choices.value]['價格']}**，你只有**{user_data[userid]['cake']}**)。",color=common.bot_error_color))
+                return
 
-        # 允許購買
-        user_data[userid]['cake'] -= self.pickaxe_list[choices.value]['價格']
-        mining_data[userid]["pickaxe"] = choices.value
-        mining_data[userid]['pickaxe_maxhealth'] = self.pickaxe_list[choices.value]['耐久度']
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功! 你現在擁有了**{choices.value}**。",color=common.bot_color))
-        common.datawrite(user_data)
-        common.datawrite(mining_data,"data/mining.json")
+            # 允許購買
+            user_data[userid]['cake'] -= self.pickaxe_list[choices.value]['價格']
+            mining_data[userid]["pickaxe"] = choices.value
+            mining_data[userid]['pickaxe_maxhealth'] = self.pickaxe_list[choices.value]['耐久度']
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功! 你現在擁有了**{choices.value}**。",color=common.bot_color))
+            common.datawrite(user_data)
+            common.datawrite(mining_data,"data/mining.json")
         
     @app_commands.command(name = "redeem_collection_role",description="兌換收藏品稱號(需要每種收藏品各一個，兌換後會消耗掉)")
     async def redeem_collection_role(self,interaction):
-        userid = str(interaction.user.id)
-        mining_data = self.miningdata_read(userid)
-        #全部的收藏品列表
-        collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
-        #用戶收藏品
-        user_collections = mining_data[userid]["collections"]
-        #缺少的收藏品清單
-        missing_collections = [item for item in collection_confirm_list if item not in user_collections or user_collections[item] < 1]
-        if missing_collections:
-            await interaction.response.send_message(embed=Embed(title="兌換收藏品稱號", description=f"兌換失敗:你還缺**{len(missing_collections)}**種收藏品。", color=common.bot_error_color))
-            return
-        for item in collection_confirm_list:
-            user_collections[item] -= 1
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            mining_data = self.miningdata_read(userid)
+            #全部的收藏品列表
+            collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
+            #用戶收藏品
+            user_collections = mining_data[userid]["collections"]
+            #缺少的收藏品清單
+            missing_collections = [item for item in collection_confirm_list if item not in user_collections or user_collections[item] < 1]
+            if missing_collections:
+                await interaction.response.send_message(embed=Embed(title="兌換收藏品稱號", description=f"兌換失敗:你還缺**{len(missing_collections)}**種收藏品。", color=common.bot_error_color))
+                return
+            for item in collection_confirm_list:
+                user_collections[item] -= 1
 
-        #允許獲得稱號
-        mining_data[userid]["collections"] = user_collections
-        common.datawrite(mining_data,"data/mining.json")
-        #獲取稱號
-        await interaction.user.add_roles(interaction.guild.get_role(1070206894288928798))
-        await interaction.response.send_message(embed=Embed(title="兌換收藏品稱號",description="成功兌換稱號!",color=common.bot_color))
+            #允許獲得稱號
+            mining_data[userid]["collections"] = user_collections
+            common.datawrite(mining_data,"data/mining.json")
+            #獲取稱號
+            await interaction.user.add_roles(interaction.guild.get_role(1070206894288928798))
+            await interaction.response.send_message(embed=Embed(title="兌換收藏品稱號",description="成功兌換稱號!",color=common.bot_color))
 
     @app_commands.command(name = "mining_machine_info",description="自動挖礦機資訊...")
     async def mining_machine_info(self,interaction):
@@ -475,76 +487,78 @@ class BlackJack(commands.Cog):
     @app_commands.describe(bet="要下多少賭注?(支援all以及輸入蛋糕數量)")
     @app_commands.rename(bet="賭注")
     async def blackjack(self,interaction,bet: str):
-        data = common.dataload()
-        userid = str(interaction.user.id)
-        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
-        
-        #檢查上一局遊戲有沒有玩完
-        if "blackjack_playing" in data[userid] and data[userid]["blackjack_playing"] == True:
-            await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="你現在有進行中的遊戲!",color=common.bot_error_color))
-            return
-
-        #檢查要下注的數據
-        if bet == "all":
-            if data[userid]['cake'] >= 1:
-                bet = data[userid]['cake']
-            else:
-                await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"你現在沒有任何{cake_emoji}，無法下注!",color=common.bot_error_color))
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(interaction.user.id)
+            cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+            
+            #檢查上一局遊戲有沒有玩完
+            if "blackjack_playing" in data[userid] and data[userid]["blackjack_playing"] == True:
+                await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="你現在有進行中的遊戲!",color=common.bot_error_color))
                 return
-        elif bet.isdigit() and int(bet) >= 1:
-            bet = int(bet)
-        else:
-            await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"無效的數據。(輸入想賭注的{cake_emoji}數量，或者輸入all下注全部的{cake_emoji})",color=common.bot_error_color))
-            return
 
-        #檢查蛋糕是否足夠
-        if data[userid]['cake'] < bet:
-            await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"{cake_emoji}不足，無法下注!",color=common.bot_error_color))
-            return
-        data[userid]['cake'] -= bet
+            #檢查要下注的數據
+            if bet == "all":
+                if data[userid]['cake'] >= 1:
+                    bet = data[userid]['cake']
+                else:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"你現在沒有任何{cake_emoji}，無法下注!",color=common.bot_error_color))
+                    return
+            elif bet.isdigit() and int(bet) >= 1:
+                bet = int(bet)
+            else:
+                await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"無效的數據。(輸入想賭注的{cake_emoji}數量，或者輸入all下注全部的{cake_emoji})",color=common.bot_error_color))
+                return
 
-        #初始化牌堆
-        playing_deck = self.deck.copy()
-        random.shuffle(playing_deck)
-        player_cards = []
-        bot_cards = []
+            #檢查蛋糕是否足夠
+            if data[userid]['cake'] < bet:
+                await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"{cake_emoji}不足，無法下注!",color=common.bot_error_color))
+                return
+            data[userid]['cake'] -= bet
 
-        #發牌，玩家莊家各兩張
-        self.deal_card(self, playing_deck, player_cards)
-        self.deal_card(self, playing_deck, bot_cards)
-        self.deal_card(self, playing_deck, player_cards)
-        self.deal_card(self, playing_deck, bot_cards)
-        #隱藏莊家的第二張牌(蓋牌)
-        display_bot_cards = f"{list(bot_cards[0].keys())[0]}、?"
-        display_bot_points = f"{sum(bot_cards[0].values())} + ?"
+            #初始化牌堆
+            playing_deck = self.deck.copy()
+            random.shuffle(playing_deck)
+            player_cards = []
+            bot_cards = []
 
-        message = Embed(title="Natalie 21點",description="",color=common.bot_color)
-        message.add_field(name=f"你的手牌點數:**{self.calculate_point(player_cards)}**",value=f"{self.show_cards(player_cards)}",inline=False)
-        message.add_field(name=f"Natalie的手牌點數:**{display_bot_points}**",value=f"{display_bot_cards}",inline=False)
-        #玩家如果是blackjack(持有兩張牌且點數剛好為21)
-        if self.calculate_point(player_cards) == 21:
-            data[userid]['cake'] += int(bet + (bet*1.5))
-            message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{int(bet*1.5)}**塊{cake_emoji}(blackjack! x 1.5)\n你現在有**{data[userid]['cake']}**塊{cake_emoji}",inline=False)
+            #發牌，玩家莊家各兩張
+            self.deal_card(self, playing_deck, player_cards)
+            self.deal_card(self, playing_deck, bot_cards)
+            self.deal_card(self, playing_deck, player_cards)
+            self.deal_card(self, playing_deck, bot_cards)
+            #隱藏莊家的第二張牌(蓋牌)
+            display_bot_cards = f"{list(bot_cards[0].keys())[0]}、?"
+            display_bot_points = f"{sum(bot_cards[0].values())} + ?"
+
+            message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+            message.add_field(name=f"你的手牌點數:**{self.calculate_point(player_cards)}**",value=f"{self.show_cards(player_cards)}",inline=False)
+            message.add_field(name=f"Natalie的手牌點數:**{display_bot_points}**",value=f"{display_bot_cards}",inline=False)
+            #玩家如果是blackjack(持有兩張牌且點數剛好為21)
+            if self.calculate_point(player_cards) == 21:
+                data[userid]['cake'] += int(bet + (bet*1.5))
+                message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{int(bet*1.5)}**塊{cake_emoji}(blackjack! x 1.5)\n你現在有**{data[userid]['cake']}**塊{cake_emoji}",inline=False)
+                common.datawrite(data)
+                await interaction.response.send_message(embed=message)
+                return
+            
+            #選項給予
+            await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
+            data[userid]["blackjack_playing"] = True
             common.datawrite(data)
-            await interaction.response.send_message(embed=message)
-            return
-        
-        #選項給予
-        await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
-        data[userid]["blackjack_playing"] = True
-        common.datawrite(data)
 
     @app_commands.command(name = "blackjack_player_status", description = "手動更改玩家狀態")
     @app_commands.describe(member="要變更的成員")
     @app_commands.rename(member="成員")
     async def blackjack_player_status(self,interaction,member:discord.Member):
-        if interaction.user.id != common.bot_owner_id:
-            await interaction.response.send_message(embed=Embed(title="系統操作",description = "權限不足",color=common.bot_error_color))
-            return
-        data = common.dataload()
-        data[str(member.id)]["blackjack_playing"] = False
-        common.datawrite(data)
-        await interaction.response.send_message(embed=Embed(title="系統操作",description =f"修改<@{member.id}>的blackjack_playing變數為False。",color=common.bot_color))
+        async with common.jsonio_lock:
+            if interaction.user.id != common.bot_owner_id:
+                await interaction.response.send_message(embed=Embed(title="系統操作",description = "權限不足",color=common.bot_error_color))
+                return
+            data = common.dataload()
+            data[str(member.id)]["blackjack_playing"] = False
+            common.datawrite(data)
+            await interaction.response.send_message(embed=Embed(title="系統操作",description =f"修改<@{member.id}>的blackjack_playing變數為False。",color=common.bot_color))
 
 class BlackJackButton(discord.ui.View):
     def __init__(self, *,timeout= 120,user,bet,player_cards,bot_cards,playing_deck,client,display_bot_points,display_bot_cards):
@@ -561,119 +575,122 @@ class BlackJackButton(discord.ui.View):
 
     @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green)
     async def hit_button(self,interaction,button: discord.ui.Button):
-        data = common.dataload()
-        #關閉雙倍下注
-        self.double_button.disabled = True
-        #加牌
-        BlackJack(self.bot).deal_card(self,self.playing_deck,self.player_cards)
+        async with common.jsonio_lock:
+            data = common.dataload()
+            #關閉雙倍下注
+            self.double_button.disabled = True
+            #加牌
+            BlackJack(self.bot).deal_card(self,self.playing_deck,self.player_cards)
 
-        message = Embed(title="Natalie 21點",description="",color=common.bot_color)
-        message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
-        message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
+            message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+            message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
+            message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
 
-        #爆牌
-        if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
-            message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-            self.hit_button.disabled = True
-            self.stand_button.disabled = True
-            data[str(interaction.user.id)]["blackjack_playing"] = False
-            self.stop()
+            #爆牌
+            if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
+                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+                self.hit_button.disabled = True
+                self.stand_button.disabled = True
+                data[str(interaction.user.id)]["blackjack_playing"] = False
+                self.stop()
 
-        await interaction.response.edit_message(embed=message,view=self)
-        common.datawrite(data)
+            await interaction.response.edit_message(embed=message,view=self)
+            common.datawrite(data)
 
     @discord.ui.button(label="停牌!",style=discord.ButtonStyle.red)
     async def stand_button(self,interaction,button: discord.ui.Button):
-        data = common.dataload()
-        #關閉所有按鈕
-        self.double_button.disabled = True
-        self.hit_button.disabled = True
-        self.stand_button.disabled = True
+        async with common.jsonio_lock:
+            data = common.dataload()
+            #關閉所有按鈕
+            self.double_button.disabled = True
+            self.hit_button.disabled = True
+            self.stand_button.disabled = True
 
-        #莊家點數未達17點的話，則加牌直到點數>=17點
-        while BlackJack(self.bot).calculate_point(self.bot_cards) < 17:
-            BlackJack(self.bot).deal_card(self,self.playing_deck,self.bot_cards)
-        
-        message = Embed(title="Natalie 21點",description="",color=common.bot_color)
-        message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
-        message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
+            #莊家點數未達17點的話，則加牌直到點數>=17點
+            while BlackJack(self.bot).calculate_point(self.bot_cards) < 17:
+                BlackJack(self.bot).deal_card(self,self.playing_deck,self.bot_cards)
+            
+            message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+            message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
+            message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
 
-        #莊家爆牌或者莊家點數比玩家小
-        if BlackJack(self.bot).calculate_point(self.bot_cards) > 21 or (BlackJack(self.bot).calculate_point(self.bot_cards) < BlackJack(self.bot).calculate_point(self.player_cards)):
-            data[str(interaction.user.id)]['cake'] += self.bet * 2
-            message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-        
-        #莊家的牌比玩家大
-        if (BlackJack(self.bot).calculate_point(self.bot_cards) > BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
-            message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+            #莊家爆牌或者莊家點數比玩家小
+            if BlackJack(self.bot).calculate_point(self.bot_cards) > 21 or (BlackJack(self.bot).calculate_point(self.bot_cards) < BlackJack(self.bot).calculate_point(self.player_cards)):
+                data[str(interaction.user.id)]['cake'] += self.bet * 2
+                message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+            
+            #莊家的牌比玩家大
+            if (BlackJack(self.bot).calculate_point(self.bot_cards) > BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
+                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
 
-        #平手
-        if (BlackJack(self.bot).calculate_point(self.bot_cards) == BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
-            data[str(interaction.user.id)]['cake'] += self.bet
-            message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-        
-        data[str(interaction.user.id)]["blackjack_playing"] = False
-        await interaction.response.edit_message(embed=message,view=self)
-        common.datawrite(data)
-        self.stop()
+            #平手
+            if (BlackJack(self.bot).calculate_point(self.bot_cards) == BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
+                data[str(interaction.user.id)]['cake'] += self.bet
+                message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+            
+            data[str(interaction.user.id)]["blackjack_playing"] = False
+            await interaction.response.edit_message(embed=message,view=self)
+            common.datawrite(data)
+            self.stop()
 
     @discord.ui.button(label="雙倍下注!",style=discord.ButtonStyle.gray)
     async def double_button(self,interaction,button: discord.ui.Button):
-        data = common.dataload()
-        #如果賭注不足以使用雙倍下注
-        if data[str(interaction.user.id)]['cake'] < self.bet:
+        async with common.jsonio_lock:
+            data = common.dataload()
+            #如果賭注不足以使用雙倍下注
+            if data[str(interaction.user.id)]['cake'] < self.bet:
+                self.double_button.disabled = True
+                self.double_button.label = "雙倍下注!(蛋糕不足)"
+                await interaction.response.edit_message(view=self)
+                return
+
+            #關閉所有按鈕
             self.double_button.disabled = True
-            self.double_button.label = "雙倍下注!(蛋糕不足)"
-            await interaction.response.edit_message(view=self)
-            return
+            self.hit_button.disabled = True
+            self.stand_button.disabled = True
 
-        #關閉所有按鈕
-        self.double_button.disabled = True
-        self.hit_button.disabled = True
-        self.stand_button.disabled = True
+            #雙倍下注要扣的蛋糕
+            data[str(interaction.user.id)]['cake'] -= self.bet
+            #加牌
+            BlackJack(self.bot).deal_card(self,self.playing_deck,self.player_cards)
 
-        #雙倍下注要扣的蛋糕
-        data[str(interaction.user.id)]['cake'] -= self.bet
-        #加牌
-        BlackJack(self.bot).deal_card(self,self.playing_deck,self.player_cards)
+            message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+            message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
 
-        message = Embed(title="Natalie 21點",description="",color=common.bot_color)
-        message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
+            #玩家爆牌
+            if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
+                message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
+                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+                await interaction.response.edit_message(embed=message,view=self)
+                data[str(interaction.user.id)]["blackjack_playing"] = False
+                common.datawrite(data)
+                self.stop()
+                return
+            
+            #莊家點數未達17點的話，則加牌直到點數>=17點
+            while BlackJack(self.bot).calculate_point(self.bot_cards) < 17:
+                BlackJack(self.bot).deal_card(self,self.playing_deck,self.bot_cards)
 
-        #玩家爆牌
-        if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
-            message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
-            message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+            message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
+
+            #莊家爆牌或者莊家點數比玩家小
+            if BlackJack(self.bot).calculate_point(self.bot_cards) > 21 or (BlackJack(self.bot).calculate_point(self.bot_cards) < BlackJack(self.bot).calculate_point(self.player_cards)):
+                data[str(interaction.user.id)]['cake'] += self.bet * 4
+                message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+            
+            #莊家的牌比玩家大
+            if (BlackJack(self.bot).calculate_point(self.bot_cards) > BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
+                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+
+            #平手
+            if (BlackJack(self.bot).calculate_point(self.bot_cards) == BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
+                data[str(interaction.user.id)]['cake'] += self.bet * 2
+                message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+            
             await interaction.response.edit_message(embed=message,view=self)
             data[str(interaction.user.id)]["blackjack_playing"] = False
             common.datawrite(data)
             self.stop()
-            return
-        
-        #莊家點數未達17點的話，則加牌直到點數>=17點
-        while BlackJack(self.bot).calculate_point(self.bot_cards) < 17:
-            BlackJack(self.bot).deal_card(self,self.playing_deck,self.bot_cards)
-
-        message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
-
-        #莊家爆牌或者莊家點數比玩家小
-        if BlackJack(self.bot).calculate_point(self.bot_cards) > 21 or (BlackJack(self.bot).calculate_point(self.bot_cards) < BlackJack(self.bot).calculate_point(self.player_cards)):
-            data[str(interaction.user.id)]['cake'] += self.bet * 4
-            message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-        
-        #莊家的牌比玩家大
-        if (BlackJack(self.bot).calculate_point(self.bot_cards) > BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
-            message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-
-        #平手
-        if (BlackJack(self.bot).calculate_point(self.bot_cards) == BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
-            data[str(interaction.user.id)]['cake'] += self.bet * 2
-            message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-        
-        await interaction.response.edit_message(embed=message,view=self)
-        data[str(interaction.user.id)]["blackjack_playing"] = False
-        common.datawrite(data)
-        self.stop()
 
     async def interaction_check(self, interaction) -> bool:
         data = common.dataload()
@@ -685,11 +702,12 @@ class BlackJackButton(discord.ui.View):
         return True
 
     async def on_timeout(self) -> None:
-        data = common.dataload()
-        
-        if data[str(self.command_interaction.user.id)]["blackjack_playing"] == True:
-            data[str(self.command_interaction.user.id)]["blackjack_playing"] = False
-        common.datawrite(data)
+        async with common.jsonio_lock:
+            data = common.dataload()
+            
+            if data[str(self.command_interaction.user.id)]["blackjack_playing"] == True:
+                data[str(self.command_interaction.user.id)]["blackjack_playing"] = False
+            common.datawrite(data)
         
         
 
@@ -704,28 +722,29 @@ class CollectionTradeButton(discord.ui.View):
 
     @discord.ui.button(label="購買!",style=discord.ButtonStyle.green)
     async def collection_trade_button(self,interaction,button: discord.ui.Button):
-        user_data = common.dataload()
-        selluserid = str(self.selluser.user.id)
-        buyuserid = str(interaction.user.id)
-        mining_data = MiningGame(self.bot).miningdata_read(buyuserid)
+        async with common.jsonio_lock:
+            user_data = common.dataload()
+            selluserid = str(self.selluser.user.id)
+            buyuserid = str(interaction.user.id)
+            mining_data = MiningGame(self.bot).miningdata_read(buyuserid)
 
-        #買家有沒有錢?
-        if user_data[buyuserid]["cake"] < self.price:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"錯誤:你只有**{user_data[buyuserid]['cake']}**塊蛋糕。",color=common.bot_error_color),ephemeral=True)
-            return
+            #買家有沒有錢?
+            if user_data[buyuserid]["cake"] < self.price:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"錯誤:你只有**{user_data[buyuserid]['cake']}**塊蛋糕。",color=common.bot_error_color),ephemeral=True)
+                return
 
-        button.disabled = True
-        user_data[selluserid]["cake"] += self.price
-        user_data[buyuserid]["cake"] -= self.price
-        mining_data[selluserid]["collections"][self.collection_name] -= 1
-        if self.collection_name not in mining_data[buyuserid]["collections"]:
-            mining_data[buyuserid]["collections"][self.collection_name] = 0
-        mining_data[buyuserid]["collections"][self.collection_name] += 1
+            button.disabled = True
+            user_data[selluserid]["cake"] += self.price
+            user_data[buyuserid]["cake"] -= self.price
+            mining_data[selluserid]["collections"][self.collection_name] -= 1
+            if self.collection_name not in mining_data[buyuserid]["collections"]:
+                mining_data[buyuserid]["collections"][self.collection_name] = 0
+            mining_data[buyuserid]["collections"][self.collection_name] += 1
 
-        common.datawrite(user_data)
-        common.datawrite(mining_data,"data/mining.json")
+            common.datawrite(user_data)
+            common.datawrite(mining_data,"data/mining.json")
 
-        await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"此筆交易提案已完成。\n賣家:<@{selluserid}>\n買家:<@{buyuserid}>\n購買項目:**{self.collection_name}**",color=common.bot_color),view=self)
+            await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"此筆交易提案已完成。\n賣家:<@{selluserid}>\n買家:<@{buyuserid}>\n購買項目:**{self.collection_name}**",color=common.bot_color),view=self)
     
     async def interaction_check(self, interaction) -> bool:
         if interaction.user == self.selluser.user:
@@ -739,12 +758,13 @@ class AutofixButton(discord.ui.View):
     
     @discord.ui.button(label="關閉自動修理",style=discord.ButtonStyle.danger)
     async def autofix_button(self,interaction,button: discord.ui.Button):
-        userid = str(interaction.user.id)
-        data = common.dataload("data/mining.json")
-        data[userid]["autofix"] = False
-        common.datawrite(data,"data/mining.json")
-        button.disabled = True
-        await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description="自動修理已關閉。",color=common.bot_color),view=self)
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            data = common.dataload("data/mining.json")
+            data[userid]["autofix"] = False
+            common.datawrite(data,"data/mining.json")
+            button.disabled = True
+            await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description="自動修理已關閉。",color=common.bot_color),view=self)
 
 async def setup(client:commands.Bot):
     await client.add_cog(MiningGame(client))

@@ -33,59 +33,60 @@ class Trade(commands.Cog):
                 await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description="兌換失敗:與現有身分組重複或相似。",color=common.bot_error_color))
                 return
                 
+            async with common.jsonio_lock:
+                now = datetime.now()
+                data = common.dataload()
+                memberid = str(interaction.user.id)
+                if "redeem member role interval" in data[memberid]:
+                    last_redeem = datetime.strptime(data[memberid]['redeem member role interval'], '%Y-%m-%d %H:%M')
+                    #如果有資料，則進行天數比對
+                    if now - last_redeem >=timedelta(days=30):
+                        data[memberid]['redeem member role interval'] = now.strftime('%Y-%m-%d %H:%M')
+                    else:
+                        #不符合資格(尚在兌換冷卻期)
+                        remaining_time = last_redeem + timedelta(days=30) - now
+                        remaining_days, remaining_seconds = divmod(remaining_time.days * 24 * 60 * 60 + remaining_time.seconds, 86400)
+                        remaining_hours, remaining_seconds = divmod(remaining_seconds, 3600)
+                        await interaction.response.send_message(embed=Embed(
+                                title="兌換自訂稱號",
+                                description=f"兌換失敗:你每個月只能兌換一次，距離下次兌換還有**{remaining_days}**天**{remaining_hours}**小時。",
+                                color=common.bot_error_color))
+                        return
 
-            now = datetime.now()
-            data = common.dataload()
-            memberid = str(interaction.user.id)
-            if "redeem member role interval" in data[memberid]:
-                last_redeem = datetime.strptime(data[memberid]['redeem member role interval'], '%Y-%m-%d %H:%M')
-                #如果有資料，則進行天數比對
-                if now - last_redeem >=timedelta(days=30):
-                    data[memberid]['redeem member role interval'] = now.strftime('%Y-%m-%d %H:%M')
+                #如果沒有資料
                 else:
-                    #不符合資格(尚在兌換冷卻期)
-                    remaining_time = last_redeem + timedelta(days=30) - now
-                    remaining_days, remaining_seconds = divmod(remaining_time.days * 24 * 60 * 60 + remaining_time.seconds, 86400)
-                    remaining_hours, remaining_seconds = divmod(remaining_seconds, 3600)
-                    await interaction.response.send_message(embed=Embed(
-                            title="兌換自訂稱號",
-                            description=f"兌換失敗:你每個月只能兌換一次，距離下次兌換還有**{remaining_days}**天**{remaining_hours}**小時。",
-                            color=common.bot_error_color))
-                    return
-
-            #如果沒有資料
-            else:
-                data[memberid]['redeem member role interval'] = now.strftime('%Y-%m-%d %H:%M')
-            #添加身分組
-            await interaction.guild.create_role(name=rolename,color=colorhex,reason="Nitro Booster兌換每月自訂稱號")
-            await interaction.user.add_roles(discord.utils.get(interaction.guild.roles,name=rolename))
-            await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description=f"兌換成功!你現在擁有《 **{rolename}** 》稱號。",color=common.bot_color))
-            common.datawrite(data)
+                    data[memberid]['redeem member role interval'] = now.strftime('%Y-%m-%d %H:%M')
+                #添加身分組
+                await interaction.guild.create_role(name=rolename,color=colorhex,reason="Nitro Booster兌換每月自訂稱號")
+                await interaction.user.add_roles(discord.utils.get(interaction.guild.roles,name=rolename))
+                await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description=f"兌換成功!你現在擁有《 **{rolename}** 》稱號。",color=common.bot_color))
+                common.datawrite(data)
             
     @app_commands.command(name = "cake_give", description = "贈送蛋糕")
     @app_commands.describe(member_give="你想要給予的人(使用提及)",amount="給予的蛋糕數量")
     @app_commands.rename(member_give="提及用戶",amount="數量")
     async def cake_give(self,interaction,member_give: discord.Member,amount: int):
         userid = str(interaction.user.id)
-        user_data = common.dataload()
-        if interaction.user == member_give:
-            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你無法贈送給自己。",color=common.bot_error_color))
-            return
-        if member_give.bot:
-            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你無法贈送給bot。",color=common.bot_error_color))
-            return
-        if amount <= 0:
-            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:請輸入有效的數字。",color=common.bot_error_color))
-            return
-        if user_data[userid]["cake"] < amount:
-            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"錯誤:蛋糕不足，你只有**{user_data[userid]['cake']}**塊蛋糕。",color=common.bot_error_color))
-            return
+        async with common.jsonio_lock:
+            user_data = common.dataload()
+            if interaction.user == member_give:
+                await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你無法贈送給自己。",color=common.bot_error_color))
+                return
+            if member_give.bot:
+                await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你無法贈送給bot。",color=common.bot_error_color))
+                return
+            if amount <= 0:
+                await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:請輸入有效的數字。",color=common.bot_error_color))
+                return
+            if user_data[userid]["cake"] < amount:
+                await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"錯誤:蛋糕不足，你只有**{user_data[userid]['cake']}**塊蛋糕。",color=common.bot_error_color))
+                return
 
-        user_data[userid]["cake"] -= amount
-        user_data[str(member_give.id)]["cake"] += amount
-        common.datawrite(user_data)
+            user_data[userid]["cake"] -= amount
+            user_data[str(member_give.id)]["cake"] += amount
+            common.datawrite(user_data)
 
-        await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"你給予了**{amount}**塊蛋糕給<@{str(member_give.id)}>",color=common.bot_color))
+            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"你給予了**{amount}**塊蛋糕給<@{str(member_give.id)}>",color=common.bot_color))
 
 
 async def setup(client:commands.Bot):
