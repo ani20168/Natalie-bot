@@ -32,7 +32,7 @@ class MiningGame(commands.Cog):
             "蛋糕仙境": 18,
             "永世凍土": 26,
             "熾熱火炎山": 34,
-            "虛空洞穴": 99
+            "虛空洞穴": 42
         }
         self.collection_list = {
         "森林礦坑": ["昆蟲化石", "遠古的妖精翅膀", "萬年神木之根", "古代陶器碎片"],
@@ -235,7 +235,8 @@ class MiningGame(commands.Cog):
     @app_commands.command(name = "mining_info",description="挖礦資訊")
     async def mining_info(self,interaction):
         userid = str(interaction.user.id)
-        mining_data = self.miningdata_read(userid)
+        async with common.jsonio_lock:
+            mining_data = self.miningdata_read(userid)
 
         message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 收藏品交易\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)",color=common.bot_color)
         message.add_field(name="我的礦鎬",value=f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}",inline=False)
@@ -297,7 +298,7 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="蛋糕仙境  18等", value="蛋糕仙境"),
         app_commands.Choice(name="永世凍土  26等", value="永世凍土"),
         app_commands.Choice(name="熾熱火炎山  34等", value="熾熱火炎山"),
-        app_commands.Choice(name="虛空洞穴  未開放", value="虛空洞穴")
+        app_commands.Choice(name="虛空洞穴  42等", value="虛空洞穴")
         ])
     async def mine(self,interaction,choices: app_commands.Choice[str]):
         async with common.jsonio_lock:
