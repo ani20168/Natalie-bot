@@ -622,7 +622,7 @@ class BlackJack(commands.Cog):
 
         #指令輸入者的勝率
         interaction_user_win_rate = (data[userid]["blackjack_win_rate"] + data[userid]["blackjack_tie"] *0.5) / data[userid]["blackjack_round"]
-        await interaction.response.send_message(embed=Embed(title="21點勝率排行榜",description=f"注意:需要遊玩至少50場才會記錄至排行榜。\n{message}\n你的勝率為:**{interaction_user_win_rate:.1%}** 總場數:**{data[userid]['blackjack_round']}**"))
+        await interaction.response.send_message(embed=Embed(title="21點勝率排行榜",description=f"注意:需要遊玩至少50場才會記錄至排行榜。\n{message}\n你的勝率為:**{interaction_user_win_rate:.1%}** 總場數:**{data[userid]['blackjack_round']}**",color=common.bot_color))
         
 
 class BlackJackButton(discord.ui.View):
