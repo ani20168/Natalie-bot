@@ -485,7 +485,7 @@ class BlackJack(commands.Cog):
     def show_cards(self,player_cards):
         return '、'.join([list(card.keys())[0] for card in player_cards])
 
-    #顯示勝率跟場數(給embed footer用的)
+    #顯示勝率跟場數(給embed footer以及leaderboard用的)
     def win_rate_show(self,userid:str) ->str:
         data = common.dataload()
         if data[userid]["blackjack_round"] == 0:
@@ -587,6 +587,43 @@ class BlackJack(commands.Cog):
             data[str(member.id)]["blackjack_playing"] = False
             common.datawrite(data)
             await interaction.response.send_message(embed=Embed(title="系統操作",description =f"修改<@{member.id}>的blackjack_playing變數為False。",color=common.bot_color))
+
+    @app_commands.command(name = "blackjack_leaderboard", description = "21點勝率排行榜")
+    async def blackjack_leaderboard(self,interaction):
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(interaction.user.id)
+            #檢查玩家是否有勝場資料
+            # win rate = 勝場數
+            # round = 總遊戲場數
+            # tie = 平手場數
+            if "blackjack_tie" not in data[userid]:
+                data[userid]["blackjack_win_rate"] = 0
+                data[userid]["blackjack_round"] = 0
+                data[userid]["blackjack_tie"] = 0
+                common.datawrite(data)
+        # 過濾有"blackjack_round" >=50 的玩家，並計算勝率
+        players = []
+        for user_id, user_data in data.items():
+            if isinstance(user_data, dict) and "blackjack_round" in user_data and user_data["blackjack_round"] >= 50:
+                win_rate = (user_data["blackjack_win_rate"] + user_data["blackjack_tie"] * 0.5) / user_data["blackjack_round"]
+                players.append({"user_id": user_id, "win_rate": win_rate, "round": user_data["blackjack_round"]})
+
+        # 根據勝率排序
+        players.sort(key=lambda x: x["win_rate"], reverse=True)
+
+        # 取前五名玩家
+        top_players = players[:5]
+        message = ""
+        # 輸出結果
+        for i, player in enumerate(top_players):
+            user_object = self.bot.get_user(int(player['user_id']))
+            message += f"{i+1}.{user_object.name} 勝率:**{player['win_rate']:.1%}** 總場數:**{player['round']}**\n"
+
+        #指令輸入者的勝率
+        interaction_user_win_rate = (data[userid]["blackjack_win_rate"] + data[userid]["blackjack_tie"] *0.5) / data[userid]["blackjack_round"]
+        await interaction.response.send_message(embed=Embed(title="21點勝率排行榜",description=f"注意:需要遊玩至少50場才會記錄至排行榜。\n{message}\n你的勝率為:**{interaction_user_win_rate:.1%}** 總場數:**{data[userid]['blackjack_round']}**"))
+        
 
 class BlackJackButton(discord.ui.View):
     def __init__(self, *,timeout= 120,user,bet,player_cards,bot_cards,playing_deck,client,display_bot_points,display_bot_cards):
