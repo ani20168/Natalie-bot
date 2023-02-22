@@ -491,7 +491,7 @@ class BlackJack(commands.Cog):
         if data[userid]["blackjack_round"] == 0:
             return f"你的勝率:未知 總場數:{data[userid]['blackjack_round']}"
         else:
-            win_rate = data[userid]['blackjack_win_rate']/data[userid]['blackjack_round']
+            win_rate = (data[userid]['blackjack_win_rate'] + data[userid]['blackjack_tie'] * 0.5)/data[userid]['blackjack_round']
             return f"你的勝率:{win_rate:.1%} 總場數:{data[userid]['blackjack_round']}"
 
 
@@ -532,9 +532,11 @@ class BlackJack(commands.Cog):
             #檢查玩家是否有勝場資料
             # win rate = 勝場數
             # round = 總遊戲場數
-            if "blackjack_win_rate" not in data[userid]:
+            # tie = 平手場數
+            if "blackjack_tie" not in data[userid]:
                 data[userid]["blackjack_win_rate"] = 0
                 data[userid]["blackjack_round"] = 0
+                data[userid]["blackjack_tie"] = 0
 
             #初始化牌堆
             playing_deck = self.deck.copy()
@@ -565,10 +567,12 @@ class BlackJack(commands.Cog):
                 await interaction.response.send_message(embed=message)
                 return
             
-            #選項給予
-            await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
             data[userid]["blackjack_playing"] = True
             common.datawrite(data)
+            #選項給予
+            message.set_footer(text=self.win_rate_show(userid))
+            await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
+
 
     @app_commands.command(name = "blackjack_player_status", description = "手動更改玩家狀態")
     @app_commands.describe(member="要變更的成員")
@@ -609,8 +613,7 @@ class BlackJackButton(discord.ui.View):
             message = Embed(title="Natalie 21點",description="",color=common.bot_color)
             message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
             message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
-            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
-
+            
             #爆牌
             if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
                 message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
@@ -620,8 +623,10 @@ class BlackJackButton(discord.ui.View):
                 data[str(interaction.user.id)]["blackjack_round"] += 1
                 self.stop()
 
-            await interaction.response.edit_message(embed=message,view=self)
             common.datawrite(data)
+            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
+            await interaction.response.edit_message(embed=message,view=self)
+            
 
     @discord.ui.button(label="停牌!",style=discord.ButtonStyle.red)
     async def stand_button(self,interaction,button: discord.ui.Button):
@@ -638,8 +643,7 @@ class BlackJackButton(discord.ui.View):
             
             message = Embed(title="Natalie 21點",description="",color=common.bot_color)
             message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
-            message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
-            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
+            message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False) 
             data[str(interaction.user.id)]["blackjack_round"] += 1
 
             #莊家爆牌或者莊家點數比玩家小
@@ -655,11 +659,13 @@ class BlackJackButton(discord.ui.View):
             #平手
             if (BlackJack(self.bot).calculate_point(self.bot_cards) == BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
                 data[str(interaction.user.id)]['cake'] += self.bet
+                data[str(interaction.user.id)]["blackjack_tie"] += 1
                 message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
             
             data[str(interaction.user.id)]["blackjack_playing"] = False
-            await interaction.response.edit_message(embed=message,view=self)
             common.datawrite(data)
+            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
+            await interaction.response.edit_message(embed=message,view=self)
             self.stop()
 
     @discord.ui.button(label="雙倍下注!",style=discord.ButtonStyle.gray)
@@ -685,16 +691,16 @@ class BlackJackButton(discord.ui.View):
 
             message = Embed(title="Natalie 21點",description="",color=common.bot_color)
             message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
-            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
             data[str(interaction.user.id)]["blackjack_round"] += 1
 
             #玩家爆牌
             if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
                 message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
                 message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-                await interaction.response.edit_message(embed=message,view=self)
                 data[str(interaction.user.id)]["blackjack_playing"] = False
                 common.datawrite(data)
+                message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
+                await interaction.response.edit_message(embed=message,view=self)
                 self.stop()
                 return
             
@@ -717,11 +723,13 @@ class BlackJackButton(discord.ui.View):
             #平手
             if (BlackJack(self.bot).calculate_point(self.bot_cards) == BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
                 data[str(interaction.user.id)]['cake'] += self.bet * 2
+                data[str(interaction.user.id)]["blackjack_tie"] += 1
                 message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
             
-            await interaction.response.edit_message(embed=message,view=self)
             data[str(interaction.user.id)]["blackjack_playing"] = False
             common.datawrite(data)
+            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
+            await interaction.response.edit_message(embed=message,view=self)
             self.stop()
 
     async def interaction_check(self, interaction) -> bool:
