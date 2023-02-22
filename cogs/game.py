@@ -485,6 +485,16 @@ class BlackJack(commands.Cog):
     def show_cards(self,player_cards):
         return '、'.join([list(card.keys())[0] for card in player_cards])
 
+    #顯示勝率跟場數(給embed footer用的)
+    def win_rate_show(self,userid:str) ->str:
+        data = common.dataload()
+        if data[userid]["blackjack_round"] == 0:
+            return f"你的勝率:未知 總場數:{data[userid]['blackjack_round']}"
+        else:
+            win_rate = data[userid]['blackjack_win_rate']/data[userid]['blackjack_round']
+            return f"你的勝率:{win_rate:.1%} 總場數:{data[userid]['blackjack_round']}"
+
+
 
     @app_commands.command(name = "blackjack", description = "21點!")
     @app_commands.describe(bet="要下多少賭注?(支援all以及輸入蛋糕數量)")
@@ -519,6 +529,13 @@ class BlackJack(commands.Cog):
                 return
             data[userid]['cake'] -= bet
 
+            #檢查玩家是否有勝場資料
+            # win rate = 勝場數
+            # round = 總遊戲場數
+            if "blackjack_win_rate" not in data[userid]:
+                data[userid]["blackjack_win_rate"] = 0
+                data[userid]["blackjack_round"] = 0
+
             #初始化牌堆
             playing_deck = self.deck.copy()
             random.shuffle(playing_deck)
@@ -541,7 +558,10 @@ class BlackJack(commands.Cog):
             if self.calculate_point(player_cards) == 21:
                 data[userid]['cake'] += int(bet + (bet*1.5))
                 message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{int(bet*1.5)}**塊{cake_emoji}(blackjack! x 1.5)\n你現在有**{data[userid]['cake']}**塊{cake_emoji}",inline=False)
+                data[userid]["blackjack_win_rate"] += 1
+                data[userid]["blackjack_round"] += 1
                 common.datawrite(data)
+                message.set_footer(text=self.win_rate_show(userid))
                 await interaction.response.send_message(embed=message)
                 return
             
@@ -554,6 +574,7 @@ class BlackJack(commands.Cog):
     @app_commands.describe(member="要變更的成員")
     @app_commands.rename(member="成員")
     async def blackjack_player_status(self,interaction,member:discord.Member):
+        #廢棄的指令，之後可能會刪掉
         async with common.jsonio_lock:
             if interaction.user.id != common.bot_owner_id:
                 await interaction.response.send_message(embed=Embed(title="系統操作",description = "權限不足",color=common.bot_error_color))
@@ -588,6 +609,7 @@ class BlackJackButton(discord.ui.View):
             message = Embed(title="Natalie 21點",description="",color=common.bot_color)
             message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
             message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
+            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
 
             #爆牌
             if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
@@ -595,6 +617,7 @@ class BlackJackButton(discord.ui.View):
                 self.hit_button.disabled = True
                 self.stand_button.disabled = True
                 data[str(interaction.user.id)]["blackjack_playing"] = False
+                data[str(interaction.user.id)]["blackjack_round"] += 1
                 self.stop()
 
             await interaction.response.edit_message(embed=message,view=self)
@@ -616,12 +639,15 @@ class BlackJackButton(discord.ui.View):
             message = Embed(title="Natalie 21點",description="",color=common.bot_color)
             message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
             message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
+            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
+            data[str(interaction.user.id)]["blackjack_round"] += 1
 
             #莊家爆牌或者莊家點數比玩家小
             if BlackJack(self.bot).calculate_point(self.bot_cards) > 21 or (BlackJack(self.bot).calculate_point(self.bot_cards) < BlackJack(self.bot).calculate_point(self.player_cards)):
                 data[str(interaction.user.id)]['cake'] += self.bet * 2
+                data[str(interaction.user.id)]["blackjack_win_rate"] += 1
                 message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-            
+                   
             #莊家的牌比玩家大
             if (BlackJack(self.bot).calculate_point(self.bot_cards) > BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
                 message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
@@ -659,6 +685,8 @@ class BlackJackButton(discord.ui.View):
 
             message = Embed(title="Natalie 21點",description="",color=common.bot_color)
             message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
+            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
+            data[str(interaction.user.id)]["blackjack_round"] += 1
 
             #玩家爆牌
             if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
@@ -679,6 +707,7 @@ class BlackJackButton(discord.ui.View):
             #莊家爆牌或者莊家點數比玩家小
             if BlackJack(self.bot).calculate_point(self.bot_cards) > 21 or (BlackJack(self.bot).calculate_point(self.bot_cards) < BlackJack(self.bot).calculate_point(self.player_cards)):
                 data[str(interaction.user.id)]['cake'] += self.bet * 4
+                data[str(interaction.user.id)]["blackjack_win_rate"] += 1
                 message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
             
             #莊家的牌比玩家大
