@@ -620,8 +620,11 @@ class BlackJack(commands.Cog):
             user_object = self.bot.get_user(int(player['user_id']))
             message += f"{i+1}.{user_object.name} 勝率:**{player['win_rate']:.1%}** 總場數:**{player['round']}**\n"
 
-        #指令輸入者的勝率
-        interaction_user_win_rate = (data[userid]["blackjack_win_rate"] + data[userid]["blackjack_tie"] *0.5) / data[userid]["blackjack_round"]
+        #指令輸入者的勝率(如果沒有玩過則顯示0)
+        if data[userid]["blackjack_round"] == 0:
+            interaction_user_win_rate = 0
+        else:
+            interaction_user_win_rate = (data[userid]["blackjack_win_rate"] + data[userid]["blackjack_tie"] *0.5) / data[userid]["blackjack_round"]
         await interaction.response.send_message(embed=Embed(title="21點勝率排行榜",description=f"注意:需要遊玩至少50場才會記錄至排行榜。\n{message}\n你的勝率為:**{interaction_user_win_rate:.1%}** 總場數:**{data[userid]['blackjack_round']}**",color=common.bot_color))
         
 
