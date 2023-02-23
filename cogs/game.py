@@ -569,9 +569,9 @@ class BlackJack(commands.Cog):
             
             data[userid]["blackjack_playing"] = True
             common.datawrite(data)
-            #選項給予
-            message.set_footer(text=self.win_rate_show(userid))
-            await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
+        #選項給予
+        message.set_footer(text=self.win_rate_show(userid))
+        await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
 
 
     @app_commands.command(name = "blackjack_player_status", description = "手動更改玩家狀態")
