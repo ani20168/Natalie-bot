@@ -500,6 +500,8 @@ class BlackJack(commands.Cog):
     @app_commands.describe(bet="要下多少賭注?(支援all以及輸入蛋糕數量)")
     @app_commands.rename(bet="賭注")
     async def blackjack(self,interaction,bet: str):
+        #增加回應推遲，避免來不及發送embed造成遊戲狀態鎖死的問題
+        await interaction.response.defer()
         async with common.jsonio_lock:
             data = common.dataload()
             userid = str(interaction.user.id)
@@ -507,7 +509,8 @@ class BlackJack(commands.Cog):
             
             #檢查上一局遊戲有沒有玩完
             if "blackjack_playing" in data[userid] and data[userid]["blackjack_playing"] == True:
-                await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="你現在有進行中的遊戲!",color=common.bot_error_color))
+                #await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="你現在有進行中的遊戲!",color=common.bot_error_color))
+                await interaction.followup.send(embed=Embed(title="Natalie 21點",description="你現在有進行中的遊戲!",color=common.bot_error_color))
                 return
 
             #檢查要下注的數據
@@ -515,17 +518,20 @@ class BlackJack(commands.Cog):
                 if data[userid]['cake'] >= 1:
                     bet = data[userid]['cake']
                 else:
-                    await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"你現在沒有任何{cake_emoji}，無法下注!",color=common.bot_error_color))
+                    #await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"你現在沒有任何{cake_emoji}，無法下注!",color=common.bot_error_color))
+                    await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"你現在沒有任何{cake_emoji}，無法下注!",color=common.bot_error_color))
                     return
             elif bet.isdigit() and int(bet) >= 1:
                 bet = int(bet)
             else:
-                await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"無效的數據。(輸入想賭注的{cake_emoji}數量，或者輸入all下注全部的{cake_emoji})",color=common.bot_error_color))
+                #await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"無效的數據。(輸入想賭注的{cake_emoji}數量，或者輸入all下注全部的{cake_emoji})",color=common.bot_error_color))
+                await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"無效的數據。(輸入想賭注的{cake_emoji}數量，或者輸入all下注全部的{cake_emoji})",color=common.bot_error_color))
                 return
 
             #檢查蛋糕是否足夠
             if data[userid]['cake'] < bet:
-                await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"{cake_emoji}不足，無法下注!",color=common.bot_error_color))
+                #await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"{cake_emoji}不足，無法下注!",color=common.bot_error_color))
+                await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"{cake_emoji}不足，無法下注!",color=common.bot_error_color))
                 return
             data[userid]['cake'] -= bet
 
@@ -564,14 +570,16 @@ class BlackJack(commands.Cog):
                 data[userid]["blackjack_round"] += 1
                 common.datawrite(data)
                 message.set_footer(text=self.win_rate_show(userid))
-                await interaction.response.send_message(embed=message)
+                #await interaction.response.send_message(embed=message)
+                await interaction.followup.send(embed=message)
                 return
             
             data[userid]["blackjack_playing"] = True
             common.datawrite(data)
         #選項給予
         message.set_footer(text=self.win_rate_show(userid))
-        await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
+        #await interaction.response.send_message(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
+        await interaction.followup.send(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
 
 
     @app_commands.command(name = "blackjack_player_status", description = "手動更改玩家狀態")
