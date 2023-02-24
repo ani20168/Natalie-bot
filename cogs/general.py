@@ -146,7 +146,7 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description=f"<@{member.id}>資料變更...\n原始{cake_emoji}:**{cake_before}**\n增加了**{amount}**塊{cake_emoji}\n現在有**{data[str(member.id)]['cake']}**塊{cake_emoji}",color=common.bot_color))
 
     @app_commands.command(name = "poll", description = "投票")
-    @app_commands.rename(title="標題",option1="選項1",option2="選項2",option3="選項3(可選)",option4="選項4(可選)",option5="選項5(可選)")
+    @app_commands.rename(title="標題",option1="選項1",option2="選項2",option3="選項3",option4="選項4",option5="選項5")
     async def poll(self,interaction, title: str, option1: str, option2: str, option3: Optional[str] = None,option4: Optional[str] = None,option5: Optional[str] = None):
         options = [option1, option2]
         reactions = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣']  # 1~5的數字表情符號
