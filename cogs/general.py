@@ -46,6 +46,7 @@ class General(commands.Cog):
                 /voice_leaderboard 語音活躍排行榜
                 /blackjack 21點遊戲
                 /blackjack_leaderboard 21點勝率排行榜
+                /poll 簡單的投票功能
                 ''',
                 inline=False)
             await interaction.response.send_message(embed=message)
