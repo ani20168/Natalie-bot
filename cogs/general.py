@@ -147,24 +147,30 @@ class General(commands.Cog):
 
     @app_commands.command(name = "poll", description = "投票")
     async def poll(self,interaction, title: str, option1: str, option2: str, option3: Optional[str] = None,option4: Optional[str] = None,option5: Optional[str] = None):
-        # 建立投票訊息
-        message = f"**{title}**\n\n1: {option1}\n\n2: {option2}"
-        reactions = ['1️⃣', '2️⃣']  # 預設的兩個選項反應符號
+        options = [option1, option2]
+        reactions = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣']  # 1~5的數字表情符號
 
         # 添加選項3
         if option3:
-            message += f"\n\n3: {option3}"
-            reactions.append('3️⃣')
+            options.append(option3)
 
         # 添加選項4
         if option4:
-            message += f"\n\n4: {option4}"
-            reactions.append('4️⃣')
+            options.append(option4)
 
         # 添加選項5
         if option5:
-            message += f"\n\n5: {option5}"
-            reactions.append('5️⃣')
+            options.append(option5)
+
+        # 將反應符號添加到列表
+        reactions = reactions[:len(options)]
+
+        # 建立投票訊息
+        option_message = ""
+        for i, option in enumerate(options):
+            option_message += f"**{i+1}**:{option}\n\n"
+
+        message = Embed(title=title,description=option_message,color=common.bot_color)
 
         # 發送投票訊息
         await interaction.response.send_message(message)
