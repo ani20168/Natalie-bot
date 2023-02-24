@@ -159,9 +159,10 @@ class General(commands.Cog):
         # 發送投票訊息
         await interaction.response.send_message(message)
 
+        poll_message = await interaction.original_response()
         # 添加反應符號
         for reaction in reactions:
-            await interaction.original_response.add_reaction(reaction)
+            await poll_message.add_reaction(reaction)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
