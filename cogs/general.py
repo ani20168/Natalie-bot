@@ -4,6 +4,7 @@ from . import common
 from datetime import datetime, timezone, timedelta
 import json
 import discord
+from typing import Optional
 
 
 
@@ -143,6 +144,24 @@ class General(commands.Cog):
             common.datawrite(data)
             cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
             await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description=f"<@{member.id}>資料變更...\n原始{cake_emoji}:**{cake_before}**\n增加了**{amount}**塊{cake_emoji}\n現在有**{data[str(member.id)]['cake']}**塊{cake_emoji}",color=common.bot_color))
+
+    @app_commands.command(name = "poll", description = "投票")
+    async def poll(self,interaction, title: str, option1: str, option2: str, *options: Optional[str]):
+        # 建立投票訊息
+        message = f"**{title}**\n\n1: {option1}\n\n2: {option2}"
+        reactions = ['1️⃣', '2️⃣']  # 預設的兩個選項反應符號
+
+        # 添加更多選項
+        for i, option in enumerate(options):
+            message += f"\n\n:{i+3}: {option}"
+            reactions.append(f"{i+3}️⃣")
+
+        # 發送投票訊息
+        poll_message = await interaction.response.send_message(message)
+
+        # 添加反應符號
+        for reaction in reactions:
+            await poll_message.add_reaction(reaction)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
