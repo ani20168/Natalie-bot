@@ -169,7 +169,7 @@ class General(commands.Cog):
         # 建立投票訊息
         option_message = ""
         for i, option in enumerate(options):
-            option_message += f"**{i+1}**:{option}\n\n"
+            option_message += f"{reactions[i]} {option}\n\n"
 
         message = Embed(title=title,description=option_message,color=common.bot_color)
 
