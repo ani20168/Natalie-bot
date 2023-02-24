@@ -174,7 +174,7 @@ class General(commands.Cog):
         message = Embed(title=title,description=option_message,color=common.bot_color)
 
         # 發送投票訊息
-        await interaction.response.send_message(message)
+        await interaction.response.send_message(embed=message)
 
         poll_message = await interaction.original_response()
         # 添加反應符號
