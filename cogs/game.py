@@ -265,7 +265,7 @@ class MiningGame(commands.Cog):
         message.add_field(name=f"擁有收藏品 {collection_confirm_count}/{len(collection_confirm_list)}",value=f"{collection_confirm_message}",inline=False)
         await interaction.response.send_message(embed=message)
         
-    @app_commands.command(name = "collection_trade",description="販賣收藏品")
+    @app_commands.command(name = "collection_trade",description="與其他玩家交易收藏品")
     @app_commands.describe(collection_name="要販賣的收藏品名稱",price="要販賣的價格(蛋糕)")
     @app_commands.rename(collection_name="名稱",price="價格")
     @app_commands.checks.cooldown(1, 60)
@@ -294,6 +294,35 @@ class MiningGame(commands.Cog):
         message.add_field(name="收藏品",value=f"**{collection_name}**",inline=False)
         message.add_field(name="價格",value=f"**{price}**塊蛋糕",inline=False)
         await interaction.response.send_message(embed=message,view=CollectionTradeButton(selluser=interaction,collection_name=collection_name,price=price,client=self.bot))
+
+    @app_commands.command(name = "collection_sell",description="販賣收藏品給Natalie(每個1000塊蛋糕)")
+    @app_commands.describe(collection_name="要販賣的收藏品名稱")
+    @app_commands.rename(collection_name="名稱")
+    async def collection_sell(self,interaction,collection_name: str):
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            mining_data = self.miningdata_read(userid)
+            user_data = common.dataload()
+
+            #全部的收藏品列表
+            collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
+            #如果沒有在收藏品清單
+            if collection_name not in collection_confirm_list:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="錯誤:不存在的收藏品。",color=common.bot_error_color))
+                return
+            
+            #如果該收藏品不在用戶收藏品清單內或數量=0
+            if collection_name not in mining_data[userid]["collections"] or mining_data[userid]["collections"][collection_name] == 0:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"錯誤:你沒有**{collection_name}**。",color=common.bot_error_color))
+                return
+            
+            mining_data[userid]["collections"][collection_name] -= 1
+            user_data[userid]['cake'] += 1000
+            common.datawrite(mining_data,'data/mining.json')
+            common.datawrite(user_data)
+
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你賣出了**1**個**{collection_name}**。\n獲得**1000**塊{self.bot.get_emoji(common.cake_emoji_id)}",color=common.bot_color))
+
 
     @app_commands.command(name = "mine",description="更換礦場")
     @app_commands.describe(choices="要更換的礦場")
