@@ -141,9 +141,13 @@ class Startup(commands.Cog):
                 channel = self.bot.get_channel(channelid)
                 for member in channel.members:
                     if str(member.id) in data:
+                        #語音活躍分鐘數+1
                         if "voice_active_minutes" not in data[str(member.id)]:
                             data[str(member.id)]['voice_active_minutes'] = 0
                         data[str(member.id)]['voice_active_minutes'] += 1
+                        # 是否再掛機?(語音房內只有1人)
+                        if len(channel.members) == 1:
+                            pass
             
             #每日結算
             nowtime = datetime.now(timezone(timedelta(hours=8)))
