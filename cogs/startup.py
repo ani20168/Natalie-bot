@@ -92,6 +92,8 @@ class Startup(commands.Cog):
                 if str(member.id) not in data:
                     data[str(member.id)] = {"cake": 0}
                 data[str(member.id)]["blackjack_playing"] = False
+                if 'afk_start' in data[str(member.id)]:
+                    del data[str(member.id)]['afk_start']
             
             common.datawrite(data)
 
@@ -140,14 +142,31 @@ class Startup(commands.Cog):
             for channelid in vclist:
                 channel = self.bot.get_channel(channelid)
                 for member in channel.members:
-                    if str(member.id) in data:
+                    userid = str(member.id)
+                    if userid in data:
                         #語音活躍分鐘數+1
-                        if "voice_active_minutes" not in data[str(member.id)]:
-                            data[str(member.id)]['voice_active_minutes'] = 0
-                        data[str(member.id)]['voice_active_minutes'] += 1
-                        # 是否再掛機?(語音房內只有1人)
-                        if len(channel.members) == 1:
-                            pass
+                        if "voice_active_minutes" not in data[userid]:
+                            data[userid]['voice_active_minutes'] = 0
+                        data[userid]['voice_active_minutes'] += 1
+
+                        # 是否再掛機?(語音房內只有1人、靜音狀態)
+                        if len(channel.members) == 1 and member.voice.self_mute == True:
+                            # 如果資料中不存在該成員的AFK時間，則添加
+                            if 'afk_start' not in data[userid]:
+                                data[userid]['afk_start'] = int(time.time())
+                            else:
+                                # 檢查是否超過20分鐘
+                                elapsed_time = int(time.time()) - data[userid]['afk_start']
+                                if elapsed_time >= 20 * 60:
+                                    # 如果超過20分鐘，給予AFK角色
+                                    afk_role = member.guild.get_role(577690189942751252)
+                                    if afk_role not in member.roles:
+                                        await member.add_roles(afk_role,reason="掛機持續20分鐘，添加身分組。")
+                        else:
+                            # 如果用戶不再AFK狀態，清除計時
+                            if 'afk_start' in data[userid]:
+                                del data[userid]['afk_start']
+
             
             #每日結算
             nowtime = datetime.now(timezone(timedelta(hours=8)))
