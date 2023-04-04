@@ -12,7 +12,7 @@ cake_emoji_id = 896670335326371840       #蛋糕ID
 #讀寫保護鎖
 jsonio_lock = asyncio.Lock()
 
-def dataload(filepath="data/data.json"):
+def dataload(filepath="data/data.json") -> dict :
     with open(filepath, "r") as f:
         data = json.load(f)
     return data
