@@ -198,6 +198,16 @@ class General(commands.Cog):
         
         await interaction.response.send_message(embed=Embed(title="AFK status",description=message,color=common.bot_color))
 
+    @app_commands.command(name = "giveaway_join", description = "加入抽獎頻道")
+    async def giveaway_join(self,interaction):
+        userid = str(interaction.user.id)
+        async with common.jsonio_lock:
+            userlevel = common.LevelSystem().read_info(userid)
+        if userlevel.level >= 5 and all(role.id not in [621764669929160715, 605730134531637249] for role in interaction.user.roles):
+            await interaction.user.add_roles(interaction.guild.get_role(621764669929160715))
+            await interaction.response.send_message(embed=Embed(title="加入抽獎頻道",description="歡迎進入giveaway頻道!",color=common.bot_color))
+        else:
+            await interaction.response.send_message(embed=Embed(title="加入抽獎頻道",description="你無法使用這個指令!\n你已經具備抽獎仔身分，或者等級不足以進入。",color=common.bot_error_color))
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
