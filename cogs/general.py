@@ -264,6 +264,43 @@ class General(commands.Cog):
                 # 更新最後一次獲得蛋糕的時間
                 self.last_cake_time[memberid] = datetime.now()
 
+    @commands.Cog.listener()
+    async def on_guild_role_update(self,before,after):
+        #如果Nitro booster更動
+        if after.id == 623486844394536961:
+            #檢查是否有新加入的booster但未進入VIP身分
+            before_set = set(before.members)
+            after_set = set(after.members)
+            added_members = after_set - before_set
+            removed_members = before_set - after_set
+            vip_role = after.guild.get_role(605730134531637249)
+
+            #新加入的Booster
+            if len(added_members) >= 1:
+                #如果未加入VIP身分(605730134531637249)，則加入
+                async with common.jsonio_lock:  
+                    data = common.dataload()
+                    for member in added_members:
+                        if vip_role not in member.roles:
+                            await member.add_roles(vip_role,reason="新的Nitro Booster加入，賦予VIP身分組")
+                            data[str(member.id)]["vip_join_time"] = datetime.now()
+                    common.datawrite(data)
+
+            # 離開的booster
+            if len(removed_members) >= 1:
+                async with common.jsonio_lock:
+                    data = common.dataload()
+                    for member in removed_members:
+                        if vip_role in member.roles:
+                            # 檢查是否已經是VIP身分組30天
+                            vip_join_time = data[str(member.id)].get("vip_join_time", datetime.now() - timedelta(days=30))
+                            if datetime.now() - vip_join_time < timedelta(days=30):
+                                await member.remove_roles(vip_role, reason="Nitro Booster身分組未達30天就離開，移除VIP身分組")
+                                if "vip_join_time" in data[str(member.id)]:
+                                    del data[str(member.id)]["vip_join_time"]
+                    common.datawrite(data)
+
+
 
 async def setup(client:commands.Bot):
     await client.add_cog(General(client))
