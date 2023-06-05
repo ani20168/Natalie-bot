@@ -420,7 +420,7 @@ class MiningGame(commands.Cog):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
             mining_data = self.miningdata_read(userid)
-        message = Embed(title="自動挖礦機",description="你可以透過購買自動挖礦機來挖掘礦物，每小時會挖掘一次，挖到的礦物會直接列入玩家礦物清單。\n注意!!由於挖礦機火力太強，會破壞掉珍貴的收藏品，因此自動挖掘時'不會'獲得任何收藏品",color=common.bot_color)
+        message = Embed(title="自動挖礦機",description="你可以透過購買自動挖礦機來挖掘礦物，每3小時會挖掘一次，挖到的礦物會直接列入玩家礦物清單。\n注意!!由於挖礦機火力太強，會破壞掉珍貴的收藏品，因此自動挖掘時'不會'獲得任何收藏品",color=common.bot_color)
         message.add_field(name="目前持有的挖礦機數量",value=f"**{mining_data[userid]['machine_amount']}**",inline=False)
         if (mining_data[userid]['machine_amount'])*1000 == 0:
             message.add_field(name="購買價格 ***(第一台挖礦機為免費)***",value=f"**{(mining_data[userid]['machine_amount'])*1000}** (使用`/mining_machine_buy`購買挖礦機)",inline=False)
