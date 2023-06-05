@@ -54,7 +54,7 @@ class Startup(commands.Cog):
                 common.datawrite(data,"data/mining.json")
 
     #挖礦遊戲-自動挖礦機的挖礦流程
-    @tasks.loop(hours=1)
+    @tasks.loop(hours=3)
     async def mining_machine_work(self):
         async with common.jsonio_lock:
             data = common.dataload("data/mining.json")
