@@ -31,7 +31,7 @@ class BotSystem(commands.Cog):
             blackjack_playing_status_message = ""
             for member_id, member_info in data.items():
                 if isinstance(member_info, dict) and member_info.get("blackjack_playing") == True:
-                    blackjack_playing_status_message += self.bot.get_user(int(member_id)).name + "\n"
+                    blackjack_playing_status_message += self.bot.get_user(int(member_id)).display_name + "\n"
             if blackjack_playing_status_message != "":
                 await interaction.response.send_message(embed=Embed(title="系統操作",description=f"暫時無法重啟，以下用戶正在玩「BlackJack」!\n{blackjack_playing_status_message}",color=common.bot_error_color))
                 return

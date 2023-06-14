@@ -649,7 +649,7 @@ class BlackJack(commands.Cog):
         # 輸出結果
         for i, player in enumerate(top_players):
             user_object = self.bot.get_user(int(player['user_id']))
-            message += f"{i+1}.{user_object.name} 勝率:**{player['win_rate']:.1%}** 總場數:**{player['round']}**\n"
+            message += f"{i+1}.{user_object.display_name} 勝率:**{player['win_rate']:.1%}** 總場數:**{player['round']}**\n"
 
         #指令輸入者的勝率(如果沒有玩過則顯示0)
         if data[userid]["blackjack_round"] == 0:
