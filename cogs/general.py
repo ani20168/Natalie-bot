@@ -98,7 +98,7 @@ class General(commands.Cog):
         # 顯示排名榜前10名
         for i, (user, user_data) in enumerate(sorted_data[:10]):
             user_object = self.bot.get_user(int(user))
-            message += (f"%d.%s -- 等級:**%d** 經驗值:**%d**\n" % (i + 1, user_object.name, user_data['level'], user_data['level_exp']))
+            message += (f"%d.%s -- 等級:**%d** 經驗值:**%d**\n" % (i + 1, user_object.display_name, user_data['level'], user_data['level_exp']))
 
 
         # 找出使用指令者的排名
@@ -120,7 +120,7 @@ class General(commands.Cog):
         # 顯示排名榜前10名
         for i, (userid, user_data) in enumerate(sorted_data[:10]):
             user = self.bot.get_user(int(userid))
-            leaderboard_message += f"{i+1}.{user.name} 語音分鐘數:**{user_data['voice_active_minutes']}**\n"
+            leaderboard_message += f"{i+1}.{user.display_name} 語音分鐘數:**{user_data['voice_active_minutes']}**\n"
         message.description = leaderboard_message
 
         # 昨日排行榜
