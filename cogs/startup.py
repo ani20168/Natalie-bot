@@ -13,7 +13,6 @@ from datetime import datetime,timezone,timedelta
 class Startup(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
-        self.clearstardoor.start()  
         self.userdata_initialization.start()
         self.give_cake_in_vc.start()
         self.mine_mininglimit_reflash.start()
@@ -22,24 +21,12 @@ class Startup(commands.Cog):
 
     #卸載cog時觸發
     async def cog_unload(self):
-        self.clearstardoor.cancel()
         self.userdata_initialization.cancel()
         self.give_cake_in_vc.cancel()
         self.mine_mininglimit_reflash.cancel()
         self.voice_active_record.cancel()
         self.mining_machine_work.cancel()
 
-        
-    #自動鎖定過期的星門
-    @tasks.loop(hours=1)
-    async def clearstardoor(self):
-        nowtime = datetime.now(timezone(timedelta(hours=8)))
-        if nowtime.hour == 0:
-            list = self.bot.get_channel(1057894690478899330).threads           
-            if len(list) != 0:
-                for thread in list:
-                    if any( tag.name == "星門" for tag in thread.applied_tags):
-                        await thread.edit(archived=True,locked=True,reason="自動鎖定過期的星門")
 
     #挖礦遊戲-刷新礦場總挖礦次數
     @tasks.loop(minutes=1)
@@ -192,8 +179,7 @@ class Startup(commands.Cog):
                         data[userid]['voice_active_minutes'] = 0
             common.datawrite(data)
 
-    @userdata_initialization.before_loop 
-    @clearstardoor.before_loop    
+    @userdata_initialization.before_loop    
     @give_cake_in_vc.before_loop
     @mine_mininglimit_reflash.before_loop
     @voice_active_record.before_loop
