@@ -2,6 +2,7 @@ from discord import app_commands,Embed
 from discord.ext import commands
 from . import common
 from datetime import datetime, timezone, timedelta
+from dateutil.parser import parse
 import json
 import discord
 import time
@@ -208,6 +209,70 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="加入抽獎頻道",description="歡迎進入giveaway頻道!",color=common.bot_color))
         else:
             await interaction.response.send_message(embed=Embed(title="加入抽獎頻道",description="你無法使用這個指令!\n你已經具備抽獎仔身分，或者等級不足以進入。",color=common.bot_error_color))
+
+    @app_commands.command(name = "check_sevencolor_restday", description = "確認七色珀的休假日")
+    @app_commands.rename(date='日期')
+    @app_commands.describe(date='輸入日期以查看當天是否休假，或著留空來查看他的下一次休假日期')
+    async def check_sevencolor_restday(self,interaction,date:Optional[str] = None):
+        # 設定起始工作日
+        start_working_date = datetime(2023, 12, 26)
+
+        # 工作和休息的週期（四天工作，兩天休息）
+        work_days = 4
+        rest_days = 2
+        cycle_days = work_days + rest_days
+
+        # 相對日期描述
+        relative_dates = {
+            -1: "昨天",
+            0: "今天",
+            1: "明天",
+            2: "後天"
+        }
+
+        # 使用給定的當前日期或系統當前日期
+        current_date = datetime.now()
+
+        try:
+            if date:
+                # 解析輸入的日期
+                check_date = parse(date)
+                total_days = (check_date - start_working_date).days
+                position_in_cycle = total_days % cycle_days
+
+                # 判斷是否為休息日
+                if position_in_cycle >= work_days:
+                    await interaction.response.send_message(embed=Embed(title="查詢休假日...",description=f"七色在這天放假!({check_date})",color=common.bot_color))
+                else:
+                    await interaction.response.send_message(embed=Embed(title="查詢休假日...",description=f"七色在這天沒有放假!({check_date})",color=common.bot_color))
+            else:
+                # 查找下一個休息日的週期
+                days_since_start = (current_date - start_working_date).days
+                current_position_in_cycle = days_since_start % cycle_days
+
+                # 如果當前日期在工作日內
+                if current_position_in_cycle < work_days:
+                    days_to_next_rest_day = work_days - current_position_in_cycle
+                    rest_day_1 = current_date + timedelta(days=days_to_next_rest_day)
+                    rest_day_2 = rest_day_1 + timedelta(days=1)
+                else:
+                    # 如果當前日期已經在休息日
+                    days_to_last_rest_day = current_position_in_cycle - work_days
+                    rest_day_1 = current_date - timedelta(days=days_to_last_rest_day)
+                    rest_day_2 = rest_day_1 + timedelta(days=1)
+
+                # 決定如何顯示休息日日期
+                today = current_date.date()
+                date_diff_1 = (rest_day_1.date() - today).days
+                date_diff_2 = (rest_day_2.date() - today).days
+
+                rest_day_str_1 = relative_dates.get(date_diff_1, rest_day_1.strftime("%Y/%m/%d"))
+                rest_day_str_2 = relative_dates.get(date_diff_2, rest_day_2.strftime("%Y/%m/%d"))
+
+                await interaction.response.send_message(embed=Embed(title="最近的休假週期...",description=f"七色在{rest_day_str_1}跟{rest_day_str_2}放假!",color=common.bot_color))
+
+        except ValueError:
+            await interaction.response.send_message(embed=Embed(title="錯誤!",description="日期格式錯誤!",color=common.bot_error_color))
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
