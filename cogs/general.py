@@ -233,6 +233,10 @@ class General(commands.Cog):
         # 使用系統當前日期
         current_date = datetime.now()
 
+        #加入表情
+        cry_emoji = self.bot.get_emoji(1054249722304540713)
+        happy_emoji = self.bot.get_emoji(652707676081487895)
+
         try:
             if date:
                 # 解析輸入的日期
@@ -242,9 +246,9 @@ class General(commands.Cog):
 
                 # 判斷是否為休息日
                 if position_in_cycle >= work_days:
-                    await interaction.response.send_message(embed=Embed(title="查詢休假日...",description=f"七色在這天放假! ({check_date.date()})",color=common.bot_color))
+                    await interaction.response.send_message(embed=Embed(title="查詢休假日...",description=f"七色在這天放假!{happy_emoji} ({check_date.date()})",color=common.bot_color))
                 else:
-                    await interaction.response.send_message(embed=Embed(title="查詢休假日...",description=f"七色在這天沒有放假! ({check_date.date()})",color=common.bot_color))
+                    await interaction.response.send_message(embed=Embed(title="查詢休假日...",description=f"七色在這天沒有放假...{cry_emoji} ({check_date.date()})",color=common.bot_color))
             else:
                 # 查找下一個休息日的週期
                 days_since_start = (current_date - start_working_date).days
