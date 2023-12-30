@@ -213,7 +213,7 @@ class General(commands.Cog):
     @app_commands.command(name = "check_sevencolor_restday", description = "確認七色珀的休假日")
     @app_commands.rename(date='日期')
     @app_commands.describe(date='輸入日期以查看當天是否休假，或著留空來查看他的下一次休假日期')
-    async def check_sevencolor_restday(self,interaction,date:Optional[str] = None):
+    async def check_sevencolor_restday(self,interaction,checkarg:str,date:Optional[str] = None):
         # 設定起始工作日
         start_working_date = datetime(2023, 12, 26)
 
@@ -230,7 +230,7 @@ class General(commands.Cog):
             2: "後天"
         }
 
-        # 使用給定的當前日期或系統當前日期
+        # 使用系統當前日期
         current_date = datetime.now()
 
         try:
@@ -270,7 +270,6 @@ class General(commands.Cog):
                 rest_day_str_2 = relative_dates.get(date_diff_2, rest_day_2.strftime("%Y/%m/%d"))
 
                 await interaction.response.send_message(embed=Embed(title="最近的休假週期...",description=f"七色在{rest_day_str_1}跟{rest_day_str_2}放假!",color=common.bot_color))
-
         except ValueError:
             await interaction.response.send_message(embed=Embed(title="錯誤!",description="日期格式錯誤!",color=common.bot_error_color))
 
