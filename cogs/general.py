@@ -237,6 +237,10 @@ class General(commands.Cog):
         cry_emoji = self.bot.get_emoji(1054249722304540713)
         happy_emoji = self.bot.get_emoji(652707676081487895)
 
+        #footer
+        with_date_note = '提示:不輸入日期可以查看最近一次的休假週期'
+        withnot_date_note = '提示:輸入日期可以查看當天有沒有放假'
+
         try:
             if date:
                 # 解析輸入的日期
@@ -246,9 +250,9 @@ class General(commands.Cog):
 
                 # 判斷是否為休息日
                 if position_in_cycle >= work_days:
-                    await interaction.response.send_message(embed=Embed(title="查詢休假日...",description=f"七色在這天放假!{happy_emoji} ({check_date.date()})",color=common.bot_color))
+                    await interaction.response.send_message(embed=Embed(title="查詢休假日...",description=f"七色在這天放假!{happy_emoji} ({check_date.date()})",color=common.bot_color).set_footer(text=with_date_note))
                 else:
-                    await interaction.response.send_message(embed=Embed(title="查詢休假日...",description=f"七色在這天沒有放假...{cry_emoji} ({check_date.date()})",color=common.bot_color))
+                    await interaction.response.send_message(embed=Embed(title="查詢休假日...",description=f"七色在這天沒有放假...{cry_emoji} ({check_date.date()})",color=common.bot_color).set_footer(text=with_date_note))
             else:
                 # 查找下一個休息日的週期
                 days_since_start = (current_date - start_working_date).days
@@ -273,7 +277,7 @@ class General(commands.Cog):
                 rest_day_str_1 = relative_dates.get(date_diff_1, rest_day_1.strftime("%Y/%m/%d"))
                 rest_day_str_2 = relative_dates.get(date_diff_2, rest_day_2.strftime("%Y/%m/%d"))
 
-                await interaction.response.send_message(embed=Embed(title="最近的休假週期...",description=f"七色在 **{rest_day_str_1}** 跟 **{rest_day_str_2}** 放假!",color=common.bot_color))
+                await interaction.response.send_message(embed=Embed(title="最近的休假週期...",description=f"七色在 **{rest_day_str_1}** 跟 **{rest_day_str_2}** 放假!",color=common.bot_color).set_footer(text=withnot_date_note))
         except ValueError:
             await interaction.response.send_message(embed=Embed(title="錯誤!",description="日期格式錯誤!",color=common.bot_error_color))
 
