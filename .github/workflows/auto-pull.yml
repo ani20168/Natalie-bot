@@ -16,7 +16,4 @@ jobs:
         username: ${{ secrets.SERVER_USER }}
         password: ${{ secrets.SERVER_PASSWORD }}
         script: |
-          cd C:\Users\ani20168\Desktop\Natalie-bot
-          git fetch --all
-          git checkout ${{ github.ref_name }}
-          git pull origin ${{ github.ref_name }}
+          C:\Users\ani20168\Desktop\Natalie-bot\deploy.bat
