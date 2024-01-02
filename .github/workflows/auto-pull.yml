@@ -16,14 +16,5 @@ jobs:
         username: ${{ secrets.SERVER_USER }}
         password: ${{ secrets.SERVER_PASSWORD }}
         script: |
-          echo "Navigating to the repository directory"
-          cd C:\Users\ani20168\Desktop\Natalie-bot
-          echo %cd%
-          echo "Current directory:"
-          pwd
-          echo "Pulling latest changes from Git"
-          git status
-          git fetch --all
-          git checkout ${{ github.ref_name }}
-          git pull origin ${{ github.ref_name }}
-          echo "Git pull completed"
+          C:\Users\ani20168\Desktop\Natalie-bot\deploy.bat
+
