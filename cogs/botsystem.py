@@ -1,6 +1,6 @@
 import discord
 from discord import app_commands,Embed
-from discord.ext import commands
+from discord.ext import commands,tasks
 from . import common
 import os
 import time
@@ -9,8 +9,10 @@ import asyncio
 class BotSystem(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
-        self.restart_time = 0
-        self.gaming_time = 0
+        self.auto_restart.start()
+
+    async def cog_unload(self):
+        self.auto_restart.cancel()
 
     
     @app_commands.command(name="shutdown", description = "關閉機器人" )
@@ -27,7 +29,7 @@ class BotSystem(commands.Cog):
         if interaction.user.id != common.bot_owner_id:
             await interaction.response.send_message(embed=Embed(title="系統操作",description="權限不足。",color=common.bot_error_color))
             return
-        
+        await interaction.response.send_message(embed=Embed(title="系統操作",description="嘗試運行重啟服務...",color=common.bot_color))
         await self.restart_service()
 
         # if interaction.user.id == common.bot_owner_id:
@@ -81,6 +83,10 @@ class BotSystem(commands.Cog):
                 data['restart_time'] = time.time()
                 common.datawrite(data)
 
+        if os.path.isfile('deploy_restart.txt'):
+            with open('deploy_restart.txt', 'w') as file:
+                file.write('0')
+                
         if need_to_wait:
             await self.bot.get_channel(543641756042788864).send(embed=Embed(title="系統操作",description="15秒後重新載入...(正在等待其他指令執行完畢)",color=common.bot_color))
             await asyncio.sleep(15)
@@ -92,6 +98,20 @@ class BotSystem(commands.Cog):
         await self.bot.tree.sync()
         await self.bot.get_channel(543641756042788864).send(embed=Embed(title="系統操作",description="載入完成!",color=common.bot_color))
 
+    @tasks.loop(seconds=15)
+    async def auto_restart(self):
+        if not os.path.isfile('deploy_restart.txt'):
+            return
+        with open('deploy_restart.txt', 'r') as file:
+            content = file.read().strip()
+        if content == '1':
+            await self.bot.get_channel(543641756042788864).send(embed=Embed(title="自動部署流程",description="收到新的版本，機器人將自動重啟。",color=common.bot_color))
+            await self.restart_service()
+
+
+    @auto_restart.before_loop
+    async def event_before_loop(self):
+        await self.bot.wait_until_ready()
 
 
 
