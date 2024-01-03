@@ -181,24 +181,6 @@ class General(commands.Cog):
             await poll_message.add_reaction(reaction)
 
 
-    @app_commands.command(name = "afk_log", description = "AFK日誌")
-    async def afk_log(self,interaction):
-        if interaction.user.id != common.bot_owner_id:
-            await interaction.response.send_message(embed=Embed(title="系統操作",description="權限不足。",color=common.bot_error_color))
-            return
-        data = common.dataload()
-        afk_members = []
-        for member in self.bot.get_all_members():
-            if 'afk_start' in data[str(member.id)]:
-                afk_members.append((member, data[str(member.id)]['afk_start']))
-        
-        message = "目前處於AFK狀態的成員及AFK秒數：\n"
-        for member, afk_start in afk_members:
-            afk_seconds = int(time.time()) - afk_start
-            message += f"{member.mention} - {afk_seconds}秒\n"
-        
-        await interaction.response.send_message(embed=Embed(title="AFK status",description=message,color=common.bot_color))
-
     @app_commands.command(name = "giveaway_join", description = "加入抽獎頻道")
     async def giveaway_join(self,interaction):
         userid = str(interaction.user.id)

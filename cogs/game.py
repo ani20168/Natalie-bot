@@ -605,20 +605,6 @@ class BlackJack(commands.Cog):
         await interaction.followup.send(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
 
 
-    @app_commands.command(name = "blackjack_player_status", description = "手動更改玩家狀態")
-    @app_commands.describe(member="要變更的成員")
-    @app_commands.rename(member="成員")
-    async def blackjack_player_status(self,interaction,member:discord.Member):
-        #廢棄的指令，之後可能會刪掉
-        async with common.jsonio_lock:
-            if interaction.user.id != common.bot_owner_id:
-                await interaction.response.send_message(embed=Embed(title="系統操作",description = "權限不足",color=common.bot_error_color))
-                return
-            data = common.dataload()
-            data[str(member.id)]["blackjack_playing"] = False
-            common.datawrite(data)
-            await interaction.response.send_message(embed=Embed(title="系統操作",description =f"修改<@{member.id}>的blackjack_playing變數為False。",color=common.bot_color))
-
     @app_commands.command(name = "blackjack_leaderboard", description = "21點勝率排行榜")
     async def blackjack_leaderboard(self,interaction):
         async with common.jsonio_lock:
