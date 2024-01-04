@@ -42,7 +42,7 @@ class BotSystem(commands.Cog):
                 if isinstance(member_info, dict) and member_info.get("blackjack_playing") == True:
                     blackjack_playing_status_message += self.bot.get_user(int(member_id)).display_name + "\n"
             if blackjack_playing_status_message != "":
-                await self.bot.get_channel(543641756042788864).send(embed=Embed(title="系統操作",description=f"暫時無法重啟，以下用戶正在玩「BlackJack」!\n{blackjack_playing_status_message}",color=common.bot_error_color))
+                await self.bot.get_channel(common.admin_log_channel).send(embed=Embed(title="系統操作",description=f"暫時無法重啟，以下用戶正在玩「BlackJack」!\n{blackjack_playing_status_message}",color=common.bot_error_color))
                 return
 
             
@@ -58,15 +58,16 @@ class BotSystem(commands.Cog):
                 file.write('0')
                 
         if need_to_wait:
-            await self.bot.get_channel(543641756042788864).send(embed=Embed(title="系統操作",description="15秒後重新載入...(正在等待其他指令執行完畢)",color=common.bot_color))
+            await self.bot.get_channel(common.admin_log_channel).send(embed=Embed(title="系統操作",description="15秒後重新載入...(正在等待其他指令執行完畢)",color=common.bot_color))
             await asyncio.sleep(15)
 
-        await self.bot.get_channel(543641756042788864).send(embed=Embed(title="系統操作",description="正在重新載入...",color=common.bot_color))
+        await self.bot.get_channel(common.admin_log_channel).send(embed=Embed(title="系統操作",description="正在重新載入...",color=common.bot_color))
         for filename in os.listdir('./cogs'):
             if filename.endswith('.py') and not(filename == 'common.py'):
                 await self.bot.reload_extension(f'cogs.{filename[:-3]}')
         await self.bot.tree.sync()
-        await self.bot.get_channel(543641756042788864).send(embed=Embed(title="系統操作",description="載入完成!",color=common.bot_color))
+        await asyncio.sleep(2) #加這個避免訊息發送太快被API吃掉
+        await self.bot.get_channel(common.admin_log_channel).send(embed=Embed(title="系統操作",description="載入完成!",color=common.bot_color))
 
     @tasks.loop(seconds=15)
     async def auto_restart(self):
@@ -75,7 +76,7 @@ class BotSystem(commands.Cog):
         with open('deploy_restart.txt', 'r') as file:
             content = file.read().strip()
         if content == '1':
-            await self.bot.get_channel(543641756042788864).send(embed=Embed(title="自動部署流程",description="收到新的版本，機器人將自動重啟。",color=common.bot_color))
+            await self.bot.get_channel(common.admin_log_channel).send(embed=Embed(title="自動部署流程",description="收到新的版本，機器人將自動重啟。",color=common.bot_color))
             await self.restart_service()
 
 
