@@ -294,6 +294,9 @@ class General(commands.Cog):
         app_commands.Choice(name="桃色 LV20", value="桃色")
         ])
     async def set_color(self, interaction, colorchoice:app_commands.Choice[str]):
+        if interaction.user.id != common.bot_owner_id:
+            await interaction.response.send_message('開發中...稍後在回來看看。')
+            return
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
             userlevel = common.LevelSystem().read_info(userid)
@@ -304,11 +307,9 @@ class General(commands.Cog):
         }
         user_roles = interaction.user.roles
 
-        #debug
-        msg = ''
-        for role in user_roles:
-            msg += role.name
-        await interaction.response.send_message(msg)
+        if any(role.name == colorchoice.value for role in user_roles):
+            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 **{colorchoice.value}** 了!",color=common.bot_error_color))
+            return
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
