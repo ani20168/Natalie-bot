@@ -308,11 +308,11 @@ class General(commands.Cog):
         user_roles = interaction.user.roles
 
         if any(role.name == colorchoice.value for role in user_roles):
-            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 <@&{interaction.guild.get_role(color_dict[colorchoice.value]['role_id'])}> 了!",color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 <@&{color_dict[colorchoice.value]['role_id']}> 了!",color=common.bot_error_color))
             return
 
         if userlevel.level < color_dict[colorchoice.value]['需求等級']:
-            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"等級不足! <@&{interaction.guild.get_role(color_dict[colorchoice.value]['role_id'])}> 需要**{color_dict[colorchoice.value]['需求等級']}**等，你目前只有**{userlevel.level}**等。",color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"等級不足! <@&{color_dict[colorchoice.value]['role_id']}> 需要**{color_dict[colorchoice.value]['需求等級']}**等，你目前只有**{userlevel.level}**等。",color=common.bot_error_color))
             return
 
         for role in user_roles:
@@ -322,7 +322,7 @@ class General(commands.Cog):
                     break
         
         await interaction.user.add_roles(interaction.guild.get_role(color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
-        await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...<@&{interaction.guild.get_role(color_dict[colorchoice.value]['role_id'])}>!",color=common.bot_color))
+        await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...<@&{color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
         
 
     @commands.Cog.listener()
