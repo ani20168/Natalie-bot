@@ -263,6 +263,53 @@ class General(commands.Cog):
         except ValueError:
             await interaction.response.send_message(embed=Embed(title="錯誤!",description="日期格式錯誤!",color=common.bot_error_color))
 
+    @app_commands.command(name = "set_color",description="更換ID的顏色")
+    @app_commands.describe(colorchoice="要更換的暱稱顏色")
+    @app_commands.rename(colorchoice="選擇顏色")
+    @app_commands.choices(colorchoice=[
+        app_commands.Choice(name="紅色 LV10", value="紅色"),
+        app_commands.Choice(name="棕色 LV10", value="棕色"),
+        app_commands.Choice(name="暗紫 LV10", value="暗紫"),
+        app_commands.Choice(name="橙色 LV10", value="橙色"),
+        app_commands.Choice(name="黃色 LV10", value="黃色"),
+        app_commands.Choice(name="暗藍 LV10", value="暗藍"),
+        app_commands.Choice(name="綠松石 LV10", value="綠松石"),
+        app_commands.Choice(name="黑色 LV10", value="黑色"),
+        app_commands.Choice(name="白色 LV10", value="白色"),
+        app_commands.Choice(name="常春藤綠 LV10", value="常春藤綠"),
+        app_commands.Choice(name="緋紅 LV10", value="緋紅"),
+        app_commands.Choice(name="紫色 LV10", value="紫色"),
+        app_commands.Choice(name="淺紫紅 LV20", value="淺紫紅"),
+        app_commands.Choice(name="粉紅色 LV20", value="粉紅色"),
+        app_commands.Choice(name="粉玫瑰紅 LV20", value="粉玫瑰紅"),
+        app_commands.Choice(name="薰衣草 LV20", value="薰衣草"),
+        app_commands.Choice(name="巧克力 LV20", value="巧克力"),
+        app_commands.Choice(name="原木色 LV20", value="原木色"),
+        app_commands.Choice(name="粉木瓜橙 LV20", value="粉木瓜橙"),
+        app_commands.Choice(name="天藍色 LV20", value="天藍色"),
+        app_commands.Choice(name="淡藍綠 LV20", value="淡藍綠"),
+        app_commands.Choice(name="香檳黃 LV20", value="香檳黃"),
+        app_commands.Choice(name="紫丁香色 LV20", value="紫丁香色"),
+        app_commands.Choice(name="珊瑚紅 LV20", value="珊瑚紅"),
+        app_commands.Choice(name="桃色 LV20", value="桃色")
+        ])
+    async def set_color(self, interaction, colorchoice:app_commands.Choice[str]):
+        userid = str(interaction.user.id)
+        async with common.jsonio_lock:
+            userlevel = common.LevelSystem().read_info(userid)
+        color_dict = {
+            "紅色":{"需求等級":10,"role_id":623544449280114716},
+            "棕色":{"需求等級":10,"role_id":623544701840261122},
+            "暗紫":{"需求等級":10,"role_id":623544702981111808},
+        }
+        user_roles = interaction.user.roles
+
+        #debug
+        msg = ''
+        for role in user_roles:
+            msg += role.name
+        await interaction.response.send_message(msg)
+
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
     #進入語音頻道
