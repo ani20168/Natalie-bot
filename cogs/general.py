@@ -311,6 +311,20 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 **{colorchoice.value}** 了!",color=common.bot_error_color))
             return
 
+        if userlevel.level < color_dict[colorchoice.value]['需求等級']:
+            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"等級不足! **{colorchoice.value}** 需要**{color_dict[colorchoice.value]['需求等級']}**等，你目前只有**{userlevel.level}**等。",color=common.bot_error_color))
+            return
+
+        for role in user_roles:
+            for color, attributes in color_dict.items():
+                if role.id == attributes["role_id"]:
+                    await interaction.user.remove_roles(role,reason="移除舊的顏色身分組")
+                    break
+        
+        await interaction.user.add_roles(interaction.guild.get_role(color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
+        await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...**{interaction.guild.get_role(color_dict[colorchoice.value]['role_id'])}**!",color=common.bot_color))
+        
+
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
     #進入語音頻道
