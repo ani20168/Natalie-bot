@@ -136,6 +136,7 @@ class SteamFreeGameCrawler(commands.Cog):
             if "steam_freegame_alreadypost" not in data:
                 data["steam_freegame_alreadypost"] = []
             data["steam_freegame_alreadypost"].append(game_id)
+            common.datawrite(data)
 
     def get_game_id(self, url):
         match = re.search(r"https://store.steampowered.com/app/(\d+)/", url)
