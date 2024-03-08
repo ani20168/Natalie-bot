@@ -88,15 +88,20 @@ class SteamFreeGameCrawler(commands.Cog):
         free_to_keep_info = game_buy_block.find('p', class_="game_purchase_discount_quantity")
         free_to_keep_info_text = free_to_keep_info.text.strip() if free_to_keep_info else None
         if free_to_keep_info_text is None: return
-        free_date_match = re.search(r"(\d{1,2} \w+ @ \d{1,2}:\d{2}am|\d{1,2} \w+ @ \d{1,2}:\d{2}pm)", free_to_keep_info_text)
+        free_date_match = re.search(r"(\d{1,2} \w+ @ \d{1,2}:\d{2}(am|pm)?)|(\w+ \d{1,2} @ \d{1,2}:\d{2}(am|pm)?)", free_to_keep_info_text)
+
         if free_date_match:
             # 匹配到的时间字符串
-            date_str = free_date_match.group(1).replace(" @ ", " ")
+            print(free_date_match.group(0))
+            date_str = free_date_match.group(0).replace(" @ ", " ")
             date_str = date_str.replace("am", " AM").replace("pm", " PM")
             # 解析时间字符串（太平洋时间）
             pst_zone = pytz.timezone('America/Los_Angeles')
             # 注意解析格式中的月份应为缩写形式，这里简化处理，具体应根据实际情况调整
-            date_pst = datetime.strptime(date_str, "%d %b %I:%M %p")
+            try:
+                date_pst = datetime.strptime(date_str, "%b %d %I:%M %p")
+            except:
+                date_pst = datetime.strptime(date_str, "%d %b %I:%M %p")
             date_pst = pst_zone.localize(date_pst, is_dst=None)  # 自动处理夏令时
             # 转换到台湾时区（UTC+8）
             tw_zone = pytz.timezone('Asia/Taipei')
@@ -105,7 +110,6 @@ class SteamFreeGameCrawler(commands.Cog):
             date_tw_str = date_tw.strftime("%m 月 %d 日 %p %I:%M").lstrip("0").replace(" 0", " ").replace("AM", "上午").replace("PM", "下午")
         else:
             print(f"free to keep match error! original text:{free_to_keep_info_text}")
-            return
 
         # 折扣幅度
         discount_pct = game_buy_block.find('div', class_="discount_pct")
