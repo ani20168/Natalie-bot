@@ -32,7 +32,7 @@ class SteamFreeGameCrawler(commands.Cog):
         for needcheck_game in game_list:
             game_id = self.get_game_id(needcheck_game)
             if game_id in data.get("steam_freegame_alreadypost",[]):
-                game_list.remove(game_id)
+                game_list.remove(needcheck_game)
         async with aiohttp.ClientSession() as session:
             tasks = [self.steam_check_free(session, game) for game in game_list]
             await asyncio.gather(*tasks)
