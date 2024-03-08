@@ -28,6 +28,11 @@ class SteamFreeGameCrawler(commands.Cog):
     @tasks.loop(minutes=1)
     async def main(self):
         game_list = await self.bahamut_source()
+        data = common.dataload()
+        for needcheck_game in game_list:
+            game_id = self.get_game_id(needcheck_game)
+            if game_id in data["steam_freegame_alreadypost"]:
+                game_list.remove(game_id)
         async with aiohttp.ClientSession() as session:
             tasks = [self.steam_check_free(session, game) for game in game_list]
             await asyncio.gather(*tasks)
@@ -126,7 +131,11 @@ class SteamFreeGameCrawler(commands.Cog):
         post_text = f"{game_url}\n{free_info}前可以免費取得! ({discount_pct} {final_price})"
         await self.bot.get_channel(common.admin_log_channel).send(content=post_text)
         game_id = self.get_game_id(game_url)
-        await self.bot.get_channel(common.admin_log_channel).send(content=f"test:{game_id}")
+        async with common.jsonio_lock:
+            data = common.dataload()
+            if "steam_freegame_alreadypost" not in data:
+                data["steam_freegame_alreadypost"] = []
+            data["steam_freegame_alreadypost"].append(game_id)
 
     def get_game_id(self, url):
         match = re.search(r"https://store.steampowered.com/app/(\d+)/", url)
