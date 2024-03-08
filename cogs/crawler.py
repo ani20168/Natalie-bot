@@ -25,7 +25,7 @@ class SteamFreeGameCrawler(commands.Cog):
     async def cog_unload(self):
         self.main.cancel()
 
-    @tasks.loop(minutes=1)
+    @tasks.loop(hours=2)
     async def main(self):
         game_list = await self.bahamut_source()
         data = common.dataload()
@@ -97,7 +97,6 @@ class SteamFreeGameCrawler(commands.Cog):
 
         if free_date_match:
             # 匹配到的时间字符串
-            print(free_date_match.group(0))
             date_str = free_date_match.group(0).replace(" @ ", " ")
             date_str = date_str.replace("am", " AM").replace("pm", " PM")
             # 解析时间字符串（太平洋时间）
@@ -129,7 +128,7 @@ class SteamFreeGameCrawler(commands.Cog):
     async def post_freegame(self, game_url, free_info, discount_pct, final_price):
         #free_info:幾月幾號前可免費取得(日期)
         post_text = f"{game_url}\n{free_info}前可以免費取得! ({discount_pct} {final_price})"
-        await self.bot.get_channel(common.admin_log_channel).send(content=post_text)
+        await self.bot.get_channel(1091267312537047040).send(content=post_text)
         game_id = self.get_game_id(game_url)
         async with common.jsonio_lock:
             data = common.dataload()
