@@ -93,27 +93,33 @@ class SteamFreeGameCrawler(commands.Cog):
         free_to_keep_info = game_buy_block.find('p', class_="game_purchase_discount_quantity")
         free_to_keep_info_text = free_to_keep_info.text.strip() if free_to_keep_info else None
         if free_to_keep_info_text is None: return
+        # 搜索匹配日期时间格式
         free_date_match = re.search(r"(\d{1,2} \w+ @ \d{1,2}:\d{2}(am|pm)?)|(\w+ \d{1,2} @ \d{1,2}:\d{2}(am|pm)?)", free_to_keep_info_text)
 
         if free_date_match:
             # 匹配到的时间字符串
-            date_str = free_date_match.group(0).replace(" @ ", " ")
-            date_str = date_str.replace("am", " AM").replace("pm", " PM")
+            date_str = free_date_match.group(0).replace(" @ ", " ").replace("am", " AM").replace("pm", " PM")
+
+            # 检查月份和日期的顺序来决定使用哪种日期格式
+            if re.match(r"\d{1,2} \w+", date_str):
+                date_format = "%d %b %I:%M %p"
+            else:
+                date_format = "%b %d %I:%M %p"
+
             # 解析时间字符串（太平洋时间）
             pst_zone = pytz.timezone('America/Los_Angeles')
-            # 注意解析格式中的月份应为缩写形式，这里简化处理，具体应根据实际情况调整
-            try:
-                date_pst = datetime.strptime(date_str, "%b %d %I:%M %p")
-            except:
-                date_pst = datetime.strptime(date_str, "%d %b %I:%M %p")
+            date_pst = datetime.strptime(date_str, date_format)
             date_pst = pst_zone.localize(date_pst, is_dst=None)  # 自动处理夏令时
+            
             # 转换到台湾时区（UTC+8）
             tw_zone = pytz.timezone('Asia/Taipei')
             date_tw = date_pst.astimezone(tw_zone)
-            # 格式化输出，确保月份和日期不带前导零，同时处理前导零问题
+            
+            # 格式化输出
             date_tw_str = date_tw.strftime("%m 月 %d 日 %p %I:%M").lstrip("0").replace(" 0", " ").replace("AM", "上午").replace("PM", "下午")
         else:
             print(f"free to keep match error! original text:{free_to_keep_info_text}")
+            return
 
         # 折扣幅度
         discount_pct = game_buy_block.find('div', class_="discount_pct")
@@ -138,7 +144,7 @@ class SteamFreeGameCrawler(commands.Cog):
             common.datawrite(data)
 
     def get_game_id(self, url):
-        match = re.search(r"https://store.steampowered.com/app/(\d+)/", url)
+        match = re.search(r"https://store.steampowered.com/app/(\d+)", url)
         if match:
             game_id = match.group(1)
             return game_id
