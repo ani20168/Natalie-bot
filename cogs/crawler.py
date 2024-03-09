@@ -16,6 +16,7 @@ class SteamFreeGameCrawler(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
         self.bahamut_already_parser_url = []
+        self.steamgroup_already_parser_url = []
         self.headers = {
             'User-Agent':"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         }
@@ -27,14 +28,28 @@ class SteamFreeGameCrawler(commands.Cog):
 
     @tasks.loop(hours=2)
     async def main(self):
-        game_list = await self.bahamut_source()
+        game_list = []
+        bahamut_gamelist, steamgroup_gamelist = await asyncio.gather(
+            self.bahamut_source(),
+            self.steam_group_source()
+        )
+        game_list = bahamut_gamelist + steamgroup_gamelist
+
+        unique_game_ids = set()
+        unique_gamelist = []
+        for url in game_list:
+            game_id = self.get_game_id(url)
+            if game_id and game_id not in unique_game_ids:
+                unique_game_ids.add(game_id)
+                unique_gamelist.append(url)
+
         data = common.dataload()
-        for needcheck_game in game_list:
+        for needcheck_game in unique_gamelist:
             game_id = self.get_game_id(needcheck_game)
             if game_id in data.get("steam_freegame_alreadypost",[]):
-                game_list.remove(needcheck_game)
+                unique_gamelist.remove(needcheck_game)
         async with aiohttp.ClientSession() as session:
-            tasks = [self.steam_check_free(session, game) for game in game_list]
+            tasks = [self.steam_check_free(session, game) for game in unique_gamelist]
             await asyncio.gather(*tasks)
 
     async def web_request(self, session, url):
@@ -52,7 +67,7 @@ class SteamFreeGameCrawler(commands.Cog):
         source_url = "https://forum.gamer.com.tw/B.php?bsn=60599&subbsn=10"
         async with aiohttp.ClientSession() as session:
             response = await self.web_request(session, source_url)
-            if response is None: return
+            if response is None: return []
             subbsn_soup = BeautifulSoup(response, "html.parser")
             article_elements = subbsn_soup.find_all(class_="b-list__row b-list-item b-imglist-item")
 
@@ -68,6 +83,7 @@ class SteamFreeGameCrawler(commands.Cog):
         if article_url not in self.bahamut_already_parser_url:
             self.bahamut_already_parser_url.append(article_url)
             response = await self.web_request(session, article_url)
+            if response is None: return []
             return self.bahamut_find_steam_url(response)
 
     def bahamut_find_steam_url(self, response) ->list:
@@ -150,6 +166,36 @@ class SteamFreeGameCrawler(commands.Cog):
             return game_id
         else:
             return ""
+
+    async def steam_group_source(self):
+        #從群組的公告區塊找
+        group_announcements_url = [
+            "https://steamcommunity.com/groups/freegamesfinders/announcements",
+            "https://steamcommunity.com/groups/freegamesinfoo/announcements",
+            ]
+        async with aiohttp.ClientSession() as session:
+            tasks = [self.steam_group_find_steam_url(session, group_url) for group_url in group_announcements_url]
+            game_lists = await asyncio.gather(*tasks)
+            all_game_lists = [game for game_list in game_lists if game_list for game in game_list]
+            for game_url in all_game_lists:
+                #已經爬過的就刪掉
+                if game_url in self.steamgroup_already_parser_url:
+                    all_game_lists.remove(game_url)
+                else:
+                    self.steamgroup_already_parser_url.append(game_url)
+            return all_game_lists
+
+    async def steam_group_find_steam_url(self, session, group_url):
+        response = await self.web_request(session, group_url)
+        if response is None: return []
+        group_announcements_soup = BeautifulSoup(response, "html.parser")
+        announcements_element = group_announcements_soup.find_all(class_="announcement")
+        re_pattern = r'https://store\.steampowered\.com/app/\d+(?:/.+?/)?'
+        all_links = []
+        for announcement in announcements_element:
+            links = re.findall(re_pattern, str(announcement))
+            all_links.extend(links)
+        return all_links
 
     @main.before_loop
     async def event_before_loop(self):
