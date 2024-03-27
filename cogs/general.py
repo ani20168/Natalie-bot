@@ -16,6 +16,7 @@ class General(commands.Cog):
         #獲得蛋糕的冷卻
         self.cake_cooldown = timedelta(seconds=20)
         self.last_cake_time = {}
+        self.member_invoice_time = {} 
 
 
     @app_commands.command(name = "info", description = "關於Natalie...")
@@ -348,6 +349,7 @@ class General(commands.Cog):
     async def on_voice_state_update(self,member, before, after):
     #進入語音頻道
         if after.channel and not before.channel:
+            self.member_invoice_time[str(member.id)] = time.time()
             embed = Embed(title="", description=f"{member.display_name} 進入了 {after.channel.name} 語音頻道", color=common.bot_color)
             embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
             embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
@@ -356,6 +358,10 @@ class General(commands.Cog):
         #離開語音頻道
         if before.channel and not after.channel:
             embed = Embed(title="", description=f"{member.display_name} 離開了 {before.channel.name} 語音頻道", color=common.bot_color)
+            invoice_time = time.time() - self.member_invoice_time.get(str(member.id),60)
+            if invoice_time  < 10:
+                embed = Embed(title="", description=f"{member.display_name} 離開了 {before.channel.name} 語音頻道 (在{invoice_time:.2f}秒內進出)", color=0xEAC100)
+            self.member_invoice_time.pop(str(member.id),None)
             embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
             embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
             await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
@@ -371,6 +377,12 @@ class General(commands.Cog):
         if before.channel != after.channel:
             if before.channel and after.channel:
                 embed = Embed(title="", description=f"{member.display_name} 從 {before.channel.name} 移動到 {after.channel.name} 頻道", color=common.bot_color)
+                #如果除了自己外房間還有其他人，則檢查進出時間
+                if len(before.channel.members) >= 2:
+                    invoice_time = time.time() - self.member_invoice_time.get(str(member.id),60)
+                    if invoice_time  < 10:
+                        embed = Embed(title="", description=f"{member.display_name} 從 {before.channel.name} 移動到 {after.channel.name} 頻道 (在{invoice_time:.2f}秒內切換頻道)", color=0xEAC100)
+                self.member_invoice_time[str(member.id)] = time.time()
                 embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
                 embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
                 await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
