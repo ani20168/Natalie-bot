@@ -347,7 +347,8 @@ class General(commands.Cog):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
-    #進入語音頻道
+        if member.guild.id != 419108485435883531: return #如果語音事件不在妹妹群內則略過(例如在測試群進語音之類的)
+        #進入語音頻道
         if after.channel and not before.channel:
             self.member_invoice_time[str(member.id)] = time.time()
             embed = Embed(title="", description=f"{member.display_name} 進入了 {after.channel.name} 語音頻道", color=common.bot_color)
