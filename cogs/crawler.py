@@ -152,8 +152,7 @@ class SteamFreeGameCrawler(commands.Cog):
     async def post_freegame(self, game_url, free_info, discount_pct, final_price):
         #free_info:幾月幾號前可免費取得(日期)
         post_text = f"{game_url}\n{free_info} 前可以免費取得! ({discount_pct} {final_price})"
-        #await self.bot.get_channel(1091267312537047040).send(content=post_text)
-        await self.bot.get_channel(common.admin_log_channel).send(content=post_text)
+        await self.bot.get_channel(1091267312537047040).send(content=post_text)
         game_id = self.get_game_id(game_url)
         async with common.jsonio_lock:
             data = common.dataload()
