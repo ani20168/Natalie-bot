@@ -5,7 +5,7 @@ import time
 import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import re
 
@@ -44,10 +44,11 @@ class SteamFreeGameCrawler(commands.Cog):
                 unique_gamelist.append(url)
 
         data = common.dataload()
-        for needcheck_game in unique_gamelist:
+        for i in range(len(unique_gamelist) - 1, -1, -1):  # 从列表的最后一个元素向前迭代
+            needcheck_game = unique_gamelist[i]
             game_id = self.get_game_id(needcheck_game)
-            if game_id in data.get("steam_freegame_alreadypost",[]):
-                unique_gamelist.remove(needcheck_game)
+            if game_id in data.get("steam_freegame_alreadypost", []):
+                unique_gamelist.pop(i)  # 移除当前元素
         async with aiohttp.ClientSession() as session:
             tasks = [self.steam_check_free(session, game) for game in unique_gamelist]
             await asyncio.gather(*tasks)
@@ -130,6 +131,7 @@ class SteamFreeGameCrawler(commands.Cog):
             # 转换到台湾时区（UTC+8）
             tw_zone = pytz.timezone('Asia/Taipei')
             date_tw = date_pst.astimezone(tw_zone)
+            date_tw -= timedelta(minutes=59)
             
             # 格式化输出
             date_tw_str = date_tw.strftime("%m 月 %d 日 %p %I:%M").lstrip("0").replace(" 0", " ").replace("AM", "上午").replace("PM", "下午")
@@ -149,8 +151,9 @@ class SteamFreeGameCrawler(commands.Cog):
 
     async def post_freegame(self, game_url, free_info, discount_pct, final_price):
         #free_info:幾月幾號前可免費取得(日期)
-        post_text = f"{game_url}\n{free_info}前可以免費取得! ({discount_pct} {final_price})"
-        await self.bot.get_channel(1091267312537047040).send(content=post_text)
+        post_text = f"{game_url}\n{free_info} 前可以免費取得! ({discount_pct} {final_price})"
+        #await self.bot.get_channel(1091267312537047040).send(content=post_text)
+        await self.bot.get_channel(common.admin_log_channel).send(content=post_text)
         game_id = self.get_game_id(game_url)
         async with common.jsonio_lock:
             data = common.dataload()
