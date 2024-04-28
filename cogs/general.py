@@ -7,6 +7,7 @@ import json
 import discord
 import time
 from typing import Optional
+from collections import deque
 
 
 
@@ -17,6 +18,7 @@ class General(commands.Cog):
         self.cake_cooldown = timedelta(seconds=20)
         self.last_cake_time = {}
         self.member_invoice_time = {} 
+        self.last_three_messages_info = {}
 
 
     @app_commands.command(name = "info", description = "關於Natalie...")
@@ -400,17 +402,43 @@ class General(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self,message):
-        if not message.author.bot:
-            memberid = str(message.author.id)
-            now = datetime.now()
-            # 如果成員還沒有獲得過蛋糕，或者已經過了冷卻時間
-            if memberid not in self.last_cake_time or now - self.last_cake_time[memberid] > self.cake_cooldown:
-                async with common.jsonio_lock:
-                    data = common.dataload()
-                    data[memberid]["cake"] += 1
-                    common.datawrite(data)
-                # 更新最後一次獲得蛋糕的時間
-                self.last_cake_time[memberid] = datetime.now()
+        if message.author.bot:
+            return
+
+        memberid = str(message.author.id)
+        now = datetime.now()
+        # 如果成員還沒有獲得過蛋糕，或者已經過了冷卻時間
+        if memberid not in self.last_cake_time or now - self.last_cake_time[memberid] > self.cake_cooldown:
+            async with common.jsonio_lock:
+                data = common.dataload()
+                data[memberid]["cake"] += 1
+                common.datawrite(data)
+            # 更新最後一次獲得蛋糕的時間
+            self.last_cake_time[memberid] = datetime.now()
+        #紀錄最新的3筆訊息(用於機器人偵測)
+        message_info = {
+            "channel_id": message.channel.id,
+            "message_id": message.id,
+            "message_time": now
+        }
+        if memberid not in self.last_three_messages_info:
+            self.last_three_messages_info[memberid] = deque(maxlen=3)
+        self.last_three_messages_info[memberid].append(message_info)
+
+        #檢查機器人行為
+        if len(self.last_three_messages_info[memberid]) == 3:
+            messages = list(self.last_three_messages_info[memberid])
+            oldest_time = messages[0]['message_time']
+            newest_time = messages[2]['message_time']
+            time_difference = (newest_time - oldest_time).total_seconds()
+            #最舊跟最新的訊息如果不超過3秒，而且都在不同頻道，就是異常
+            if time_difference <= 7:
+                channel_ids = {msg['channel_id'] for msg in messages}
+                if len(channel_ids) == 3:  # Check if all channel IDs are unique
+                    # Log the potential bot activity
+                    admin_channel = self.bot.get_channel(common.admin_log_channel)
+                    await admin_channel.send(f"偵測到機器人行為，使用者ID:<@{memberid}>")
+
 
     @commands.Cog.listener()
     async def on_guild_role_update(self,before,after):
