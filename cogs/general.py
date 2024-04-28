@@ -8,6 +8,7 @@ import discord
 import time
 from typing import Optional
 from collections import deque
+import asyncio
 
 
 
@@ -415,6 +416,7 @@ class General(commands.Cog):
                 common.datawrite(data)
             # 更新最後一次獲得蛋糕的時間
             self.last_cake_time[memberid] = datetime.now()
+
         #紀錄最新的3筆訊息(用於機器人偵測)
         message_info = {
             "channel_id": message.channel.id,
@@ -436,8 +438,36 @@ class General(commands.Cog):
                 channel_ids = {msg['channel_id'] for msg in messages}
                 if len(channel_ids) == 3:  # Check if all channel IDs are unique
                     # Log the potential bot activity
+                    member = self.bot.get_user(message.author.id)
+                    asyncio.create_task(self.mute_10_mins(member))
+                    block_embed = Embed(title="Bot Detection",description="你在「偽造妹妹」的伺服器，發送訊息的行為異常，為了保護社群成員的帳號安全，我們已將你暫時禁言，並刪除最近的訊息。\n如果你有任何問題，請向ANI(ani20168)回報。",color=common.bot_error_color)
+                    block_embed.set_footer(text="Natalie 機器人防護系統")
+                    await member.send(embed=block_embed)
                     admin_channel = self.bot.get_channel(common.admin_log_channel)
                     await admin_channel.send(f"偵測到機器人行為，使用者ID:<@{memberid}>")
+                    asyncio.create_task(self.delete_messages(messages))
+
+
+
+    async def mute_10_mins(self, member:discord.Member):
+        mute_role = member.guild.get_role(563285841384833024)
+        await member.add_roles(mute_role,reason="發送訊息的行為異常。暫時禁言10分鐘")
+        await asyncio.sleep(600)
+        await member.remove_roles(mute_role,reason="禁言10分鐘結束")
+
+    async def delete_messages(self, messages:list):
+        for msg in messages:
+            channel = self.bot.get_channel(msg['channel_id'])
+            if channel:
+                try:
+                    message_to_delete = await channel.fetch_message(msg['message_id'])
+                    await message_to_delete.delete()
+                except discord.NotFound:
+                    print(f"Message {msg['message_id']} not found.")
+                except discord.Forbidden:
+                    print("Do not have permissions to delete the message.")
+                except discord.HTTPException as e:
+                    print(f"Failed to delete message {msg['message_id']}: {e}")
 
 
     @commands.Cog.listener()
