@@ -8,6 +8,7 @@ admin_log_channel = 543641756042788864   #admin日誌ID
 mod_log_channel = 1062348474152136714    #管理員日誌ID
 bot_owner_id = 410847926236086272        #我的ID
 cake_emoji_id = 896670335326371840       #蛋糕ID
+fake_sister_server_id = 419108485435883531
 
 #讀寫保護鎖
 jsonio_lock = asyncio.Lock()

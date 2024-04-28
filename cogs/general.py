@@ -438,7 +438,7 @@ class General(commands.Cog):
                 channel_ids = {msg['channel_id'] for msg in messages}
                 if len(channel_ids) == 3:  # Check if all channel IDs are unique
                     # Log the potential bot activity
-                    member = self.bot.get_user(message.author.id)
+                    member = message.author
                     asyncio.create_task(self.mute_10_mins(member))
                     block_embed = Embed(title="Bot Detection",description="你在「偽造妹妹」的伺服器，發送訊息的行為異常，為了保護社群成員的帳號安全，我們已將你暫時禁言，並刪除最近的訊息。\n如果你有任何問題，請向ANI(ani20168)回報。",color=common.bot_error_color)
                     block_embed.set_footer(text="Natalie 機器人防護系統")
