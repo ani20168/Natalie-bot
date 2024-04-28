@@ -434,7 +434,7 @@ class General(commands.Cog):
             newest_time = messages[2]['message_time']
             time_difference = (newest_time - oldest_time).total_seconds()
             #最舊跟最新的訊息如果不超過3秒，而且都在不同頻道，就是異常
-            if time_difference <= 7:
+            if time_difference <= 3:
                 channel_ids = {msg['channel_id'] for msg in messages}
                 if len(channel_ids) == 3:  # Check if all channel IDs are unique
                     # Log the potential bot activity
