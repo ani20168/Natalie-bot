@@ -20,6 +20,7 @@ class SteamFreeGameCrawler(commands.Cog):
         self.headers = {
             'User-Agent':"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
         }
+        self.freegame_notice_channel = self.bot.get_channel(1091267312537047040)
         self.main.start()
 
     #卸載cog時觸發
@@ -52,6 +53,7 @@ class SteamFreeGameCrawler(commands.Cog):
         async with aiohttp.ClientSession() as session:
             tasks = [self.steam_check_free(session, game) for game in unique_gamelist]
             await asyncio.gather(*tasks)
+        await self.freegame_notice_channel.edit(topic=f"爬蟲最後檢查時間:{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     async def web_request(self, session, url):
         try:
@@ -152,7 +154,7 @@ class SteamFreeGameCrawler(commands.Cog):
     async def post_freegame(self, game_url, free_info, discount_pct, final_price):
         #free_info:幾月幾號前可免費取得(日期)
         post_text = f"{game_url}\n{free_info} 前可以免費取得! ({discount_pct} {final_price})"
-        await self.bot.get_channel(1091267312537047040).send(content=post_text)
+        await self.freegame_notice_channel.send(content=post_text)
         game_id = self.get_game_id(game_url)
         async with common.jsonio_lock:
             data = common.dataload()
