@@ -417,6 +417,9 @@ class General(commands.Cog):
             # 更新最後一次獲得蛋糕的時間
             self.last_cake_time[memberid] = datetime.now()
 
+        #oh土豆的偵測
+        await self.oh_totato_detect(message)
+
         #紀錄最新的3筆訊息(用於機器人偵測)
         message_info = {
             "channel_id": message.channel.id,
@@ -447,7 +450,12 @@ class General(commands.Cog):
                     await admin_channel.send(f"偵測到機器人行為，使用者ID:<@{memberid}>")
                     asyncio.create_task(self.delete_messages(messages))
 
-
+    async def oh_totato_detect(self, message:discord.Message):
+        """
+        偵測oh~關鍵字並讓bot回應土豆
+        """
+        if message.content != "oh~": return
+        await message.channel.send("土豆")
 
     async def mute_10_mins(self, member:discord.Member):
         mute_role = member.guild.get_role(563285841384833024)
