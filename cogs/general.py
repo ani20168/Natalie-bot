@@ -419,6 +419,8 @@ class General(commands.Cog):
 
         #oh土豆的偵測
         await self.oh_totato_detect(message)
+        #放假抱怨偵測
+        await self.restday_complain_detect(message)
 
         #紀錄最新的3筆訊息(用於機器人偵測)
         message_info = {
@@ -456,6 +458,25 @@ class General(commands.Cog):
         """
         if message.content != "oh~": return
         await message.channel.send("土豆")
+
+    async def restday_complain_detect(self, message:discord.Message):
+        """
+        偵測"好像放假"或"想放假了"關鍵字並根據今天的星期回應圖片
+        """
+        if message.content == "好像放假" or message.content == "想放假了":
+            weekday = datetime.now().weekday()  # 0: Monday, 6: Sunday
+            weekday_url_map = {
+                0: 'https://lurl.cc/BvpOEZ',  # 星期一
+                1: 'https://lurl.cc/IEgZmt',  # 星期二
+                2: 'https://i.imgur.com/hQ5TYGC.jpeg',  # 星期三
+                3: 'https://megapx-assets.dcard.tw/images/272898db-892d-48d1-95dc-79ccc1800a4a/1280.jpeg',  # 星期四
+                4: 'https://i.ytimg.com/vi/QM6uCrDYaiM/maxresdefault.jpg',  # 星期五
+                5: None,  # 星期六
+                6: 'https://megapx-assets.dcard.tw/images/ea2dcbc5-4090-4184-83f1-6e6a3bfbd894/1280.jpeg',  # 星期日
+            }
+            url = weekday_url_map.get(weekday)
+            if url:
+                await message.channel.send(url)
 
     async def mute_10_mins(self, member:discord.Member):
         mute_role = member.guild.get_role(563285841384833024)
