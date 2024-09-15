@@ -463,7 +463,7 @@ class General(commands.Cog):
         """
         偵測"好像放假"或"想放假了"關鍵字並根據今天的星期回應圖片
         """
-        if message.content == "好像放假" or message.content == "想放假了":
+        if message.content == "好想放假" or message.content == "想放假了":
             weekday = datetime.now().weekday()  # 0: Monday, 6: Sunday
             weekday_url_map = {
                 0: 'https://lurl.cc/BvpOEZ',  # 星期一
