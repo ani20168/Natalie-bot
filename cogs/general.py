@@ -461,13 +461,13 @@ class General(commands.Cog):
 
     async def restday_complain_detect(self, message:discord.Message):
         """
-        偵測"好像放假"或"想放假了"關鍵字並根據今天的星期回應圖片
+        偵測"好想放假"或"想放假了"關鍵字並根據今天的星期回應圖片
         """
         if message.content == "好想放假" or message.content == "想放假了":
             weekday = datetime.now().weekday()  # 0: Monday, 6: Sunday
             weekday_url_map = {
-                0: 'https://lurl.cc/BvpOEZ',  # 星期一
-                1: 'https://lurl.cc/IEgZmt',  # 星期二
+                0: 'https://thumbor.4gamers.com.tw/YyXxQ71ug_5LkjjKm7zSOavPjAg=/adaptive-fit-in/1200x1200/filters:no_upscale():extract_cover():format(jpeg):quality(85)/https%3A%2F%2Fugc-media.4gamers.com.tw%2Fpuku-prod-zh%2Fanonymous-story%2F75919057-ef63-443a-ae83-f951b7747ba1.jpg',  # 星期一
+                1: 'https://truth.bahamut.com.tw/s01/202211/b013b3ef353c7fa2a906483ceb102bde.JPG',  # 星期二
                 2: 'https://i.imgur.com/hQ5TYGC.jpeg',  # 星期三
                 3: 'https://megapx-assets.dcard.tw/images/272898db-892d-48d1-95dc-79ccc1800a4a/1280.jpeg',  # 星期四
                 4: 'https://i.ytimg.com/vi/QM6uCrDYaiM/maxresdefault.jpg',  # 星期五
