@@ -421,6 +421,8 @@ class General(commands.Cog):
         await self.oh_totato_detect(message)
         #放假抱怨偵測
         await self.restday_complain_detect(message)
+        #好想睡覺偵測
+        await self.want_to_sleep_detect(message)
 
         #紀錄最新的3筆訊息(用於機器人偵測)
         message_info = {
@@ -458,6 +460,13 @@ class General(commands.Cog):
         """
         if message.content != "oh~": return
         await message.channel.send("土豆")
+
+    async def want_to_sleep_detect(self, message:discord.Message):
+        """
+        偵測"好想睡覺"關鍵字並讓bot回應派大星的圖
+        """
+        if message.content != "好想睡覺": return
+        await message.channel.send("https://i.meee.com.tw/GHTzB8m.jpg")
 
     async def restday_complain_detect(self, message:discord.Message):
         """
