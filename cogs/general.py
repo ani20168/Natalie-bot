@@ -480,7 +480,7 @@ class General(commands.Cog):
                 2: 'https://i.imgur.com/hQ5TYGC.jpeg',  # 星期三
                 3: 'https://megapx-assets.dcard.tw/images/272898db-892d-48d1-95dc-79ccc1800a4a/1280.jpeg',  # 星期四
                 4: 'https://i.ytimg.com/vi/QM6uCrDYaiM/maxresdefault.jpg',  # 星期五
-                5: None,  # 星期六
+                5: 'https://i.imgur.com/v001EcH.jpeg',  # 星期六
                 6: 'https://megapx-assets.dcard.tw/images/ea2dcbc5-4090-4184-83f1-6e6a3bfbd894/1280.jpeg',  # 星期日
             }
             url = weekday_url_map.get(weekday)
