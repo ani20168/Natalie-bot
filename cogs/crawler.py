@@ -138,7 +138,7 @@ class SteamFreeGameCrawler(commands.Cog):
             # 格式化输出
             date_tw_str = date_tw.strftime("%m 月 %d 日 %p %I:%M").lstrip("0").replace(" 0", " ").replace("AM", "上午").replace("PM", "下午")
         else:
-            print(f"free to keep match error! original text:{free_to_keep_info_text}")
+            print(f"free to keep match error! game url: {game_url} original text:{free_to_keep_info_text}")
             return
 
         # 折扣幅度
