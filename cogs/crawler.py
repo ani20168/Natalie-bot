@@ -5,8 +5,8 @@ import time
 import asyncio
 import aiohttp
 from bs4 import BeautifulSoup
-from datetime import datetime, timedelta
-import pytz
+from datetime import datetime
+from zoneinfo import ZoneInfo
 import re
 
 
@@ -18,7 +18,7 @@ class SteamFreeGameCrawler(commands.Cog):
         self.bahamut_already_parser_url = []
         self.steamgroup_already_parser_url = []
         self.headers = {
-            'User-Agent':"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            'User-Agent':"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         }
         self.freegame_notice_channel = self.bot.get_channel(1091267312537047040)
         self.main.start()
@@ -112,31 +112,61 @@ class SteamFreeGameCrawler(commands.Cog):
         free_to_keep_info = game_buy_block.find('p', class_="game_purchase_discount_quantity")
         free_to_keep_info_text = free_to_keep_info.text.strip() if free_to_keep_info else None
         if free_to_keep_info_text is None: return
-        # 搜索匹配日期时间格式
-        free_date_match = re.search(r"(\d{1,2} \w+ @ \d{1,2}:\d{2}(am|pm)?)|(\w+ \d{1,2} @ \d{1,2}:\d{2}(am|pm)?)", free_to_keep_info_text)
+
+        # 搜索匹配日期時間格式，支援可選年份
+        # 格式範例：
+        #   - 4 Jan @ 2:00am
+        #   - Jan 4 @ 2:00am
+        #   - 4 Jan, 2025 @ 2:00am
+        #   - Jan 4, 2025 @ 2:00am
+        free_date_match = re.search(
+            r"(\d{1,2}\s+\w+(?:,?\s*\d{4})?\s+@\s+\d{1,2}:\d{2}(?:am|pm))|"
+            r"(\w+\s+\d{1,2}(?:,?\s*\d{4})?\s+@\s+\d{1,2}:\d{2}(?:am|pm))",
+            free_to_keep_info_text,
+            re.IGNORECASE
+        )
 
         if free_date_match:
-            # 匹配到的时间字符串
-            date_str = free_date_match.group(0).replace(" @ ", " ").replace("am", " AM").replace("pm", " PM")
+            # 擷取匹配到的字串並做前置處理
+            date_str = free_date_match.group(0)
+            # 例如 "4 Jan, 2025 @ 2:00am" -> "4 Jan, 2025 2:00 AM"
+            date_str = date_str.replace(" @ ", " ") \
+                            .replace("am", " AM") \
+                            .replace("pm", " PM") \
+                            .replace(",", "")  # 去逗號，方便後續 datetime.strptime
 
-            # 检查月份和日期的顺序来决定使用哪种日期格式
-            if re.match(r"\d{1,2} \w+", date_str):
-                date_format = "%d %b %I:%M %p"
+            # 判斷是否含有年份
+            if re.search(r"\d{4}", date_str):
+                #   - 4 Jan 2025 2:00 AM  (日在前)
+                #   - Jan 4 2025 2:00 AM  (月在前)
+                if re.match(r"^\d{1,2}\s+\w+\s+\d{4}", date_str):
+                    date_format = "%d %b %Y %I:%M %p"
+                else:
+                    date_format = "%b %d %Y %I:%M %p"
             else:
-                date_format = "%b %d %I:%M %p"
+                # 無年份
+                if re.match(r"^\d{1,2}\s+\w+", date_str):
+                    date_format = "%d %b %I:%M %p"
+                else:
+                    date_format = "%b %d %I:%M %p"
 
-            # 解析时间字符串（太平洋时间）
-            pst_zone = pytz.timezone('America/Los_Angeles')
+            # 使用 Python 內建的 ZoneInfo 來處理時區(請求時，回傳的時間會是太平洋時區)
+            pacific_zone = ZoneInfo("America/Los_Angeles")
+            taipei_zone = ZoneInfo("Asia/Taipei")
+
+            # 解析為 naive datetime，再指定為太平洋時間
             date_pst = datetime.strptime(date_str, date_format)
-            date_pst = pst_zone.localize(date_pst, is_dst=None)  # 自动处理夏令时
-            
-            # 转换到台湾时区（UTC+8）
-            tw_zone = pytz.timezone('Asia/Taipei')
-            date_tw = date_pst.astimezone(tw_zone)
-            date_tw -= timedelta(minutes=59)
-            
-            # 格式化输出
-            date_tw_str = date_tw.strftime("%m 月 %d 日 %p %I:%M").lstrip("0").replace(" 0", " ").replace("AM", "上午").replace("PM", "下午")
+            date_pst = date_pst.replace(tzinfo=pacific_zone)
+
+            # 轉換到台灣時區
+            date_tw = date_pst.astimezone(taipei_zone)
+
+            # 格式化輸出 (ex: "12 月 21 日 上午 02:00")
+            date_tw_str = (date_tw.strftime("%m 月 %d 日 %p %I:%M")
+                                .lstrip("0")      # 去除月若為0x時的 '0'
+                                .replace(" 0", " ") 
+                                .replace("AM", "上午")
+                                .replace("PM", "下午"))
         else:
             print(f"free to keep match error! game url: {game_url} original text:{free_to_keep_info_text}")
             return
