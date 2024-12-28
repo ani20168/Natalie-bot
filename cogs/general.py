@@ -149,42 +149,6 @@ class General(commands.Cog):
             cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
             await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description=f"<@{member.id}>資料變更...\n原始{cake_emoji}:**{cake_before}**\n增加了**{amount}**塊{cake_emoji}\n現在有**{data[str(member.id)]['cake']}**塊{cake_emoji}",color=common.bot_color))
 
-    @app_commands.command(name = "poll", description = "投票")
-    @app_commands.rename(title="標題",option1="選項1",option2="選項2",option3="選項3",option4="選項4",option5="選項5")
-    async def poll(self,interaction, title: str, option1: str, option2: str, option3: Optional[str] = None,option4: Optional[str] = None,option5: Optional[str] = None):
-        options = [option1, option2]
-        reactions = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣']  # 1~5的數字表情符號
-
-        # 添加選項3
-        if option3:
-            options.append(option3)
-
-        # 添加選項4
-        if option4:
-            options.append(option4)
-
-        # 添加選項5
-        if option5:
-            options.append(option5)
-
-        # 將反應符號添加到列表
-        reactions = reactions[:len(options)]
-
-        # 建立投票訊息
-        option_message = ""
-        for i, option in enumerate(options):
-            option_message += f"{reactions[i]} {option}\n\n"
-
-        message = Embed(title=title,description=option_message,color=common.bot_color)
-
-        # 發送投票訊息
-        await interaction.response.send_message(embed=message)
-
-        poll_message = await interaction.original_response()
-        # 添加反應符號
-        for reaction in reactions:
-            await poll_message.add_reaction(reaction)
-
 
     @app_commands.command(name = "giveaway_join", description = "加入抽獎頻道")
     async def giveaway_join(self,interaction):
@@ -466,7 +430,11 @@ class General(commands.Cog):
         """
         偵測"好想睡覺"關鍵字並讓bot回應派大星的圖
         """
-        if message.content != "好想睡覺": return
+        if message.content != "好想睡覺" or message.content != "想睡覺了": return
+        #如果傳訊息的是這些人，則發送另一張圖(看看現在都幾點了)
+        if message.author.id in [587934995063111681]:
+            await message.channel.send("https://i.meee.com.tw/t7DJZXv.png")
+            return
         await message.channel.send("https://i.meee.com.tw/GHTzB8m.jpg")
 
     async def restday_complain_detect(self, message:discord.Message):
