@@ -430,7 +430,7 @@ class General(commands.Cog):
         """
         偵測"好想睡覺"關鍵字並讓bot回應派大星的圖
         """
-        if message.content != "好想睡覺" or message.content != "想睡覺了": return
+        if message.content not in ["好想睡覺","想睡覺了"]: return
         #如果傳訊息的是這些人，則發送另一張圖(看看現在都幾點了)
         if message.author.id in [587934995063111681]:
             await message.channel.send("https://i.meee.com.tw/t7DJZXv.png")
