@@ -692,7 +692,7 @@ class BlackJackButton(discord.ui.View):
             elif len(self.player_cards) >= 5:
                 data[str(interaction.user.id)]['cake'] += int(self.bet + (self.bet*3))
                 data[str(interaction.user.id)]["blackjack_win_rate"] += 1
-                message.add_field(name="結果",value=f"**過五關!**!\n你獲得了**{int(self.bet*3)}**塊{self.cake_emoji}(過五關 x 3.0)\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+                message.add_field(name="結果",value=f"**過五關!**\n你獲得了**{int(self.bet*3)}**塊{self.cake_emoji}(過五關 x 3.0)\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
                 self.hit_button.disabled = True
                 self.stand_button.disabled = True
                 data[str(interaction.user.id)]["blackjack_playing"] = False
