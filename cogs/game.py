@@ -526,7 +526,7 @@ class BlackJack(commands.Cog):
 
 
     @app_commands.command(name = "blackjack", description = "21點!")
-    @app_commands.describe(bet="要下多少賭注?(支援all以及輸入蛋糕數量)")
+    @app_commands.describe(bet="要下多少賭注?(支援all、half以及輸入蛋糕數量)")
     @app_commands.rename(bet="賭注")
     async def blackjack(self,interaction,bet: str):
         #增加回應推遲，避免來不及發送embed造成遊戲狀態鎖死的問題
@@ -541,13 +541,22 @@ class BlackJack(commands.Cog):
                 await interaction.followup.send(embed=Embed(title="Natalie 21點",description="你現在有進行中的遊戲!",color=common.bot_error_color))
                 return
 
-            #檢查要下注的數據
+            #檢查要下注的蛋糕數據
+            #下全部
             if bet == "all":
                 if data[userid]['cake'] >= 1:
                     bet = data[userid]['cake']
                 else:
                     await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"你現在沒有任何{cake_emoji}，無法下注!",color=common.bot_error_color))
                     return
+            #下一半
+            elif bet == "half":
+                if data[userid]['cake'] >= 2:
+                    bet = data[userid]['cake'] // 2
+                else:
+                    await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"你的{cake_emoji}不足(至少需2個{cake_emoji})，無法下注!",color=common.bot_error_color))
+                    return
+            #user自己輸入數量
             elif bet.isdigit() and int(bet) >= 1:
                 bet = int(bet)
             else:

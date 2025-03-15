@@ -93,7 +93,9 @@ class Startup(commands.Cog):
             616238868164771861,
             540856580325769226,
             540856651805360148,
-            540856695992221706]
+            540856695992221706,
+            540484453445664768
+        ]
         
         async with common.jsonio_lock:
             data = common.dataload()
@@ -122,7 +124,9 @@ class Startup(commands.Cog):
             616238868164771861,
             540856580325769226,
             540856651805360148,
-            540856695992221706]
+            540856695992221706,
+            540484453445664768
+        ]
         
         async with common.jsonio_lock:
             data = common.dataload()
