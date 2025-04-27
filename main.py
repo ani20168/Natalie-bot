@@ -14,7 +14,6 @@ class Natalie(commands.Bot):
             if filename.endswith('.py') and not(filename == 'common.py'):
                 await self.load_extension(f'cogs.{filename[:-3]}')
         await client.tree.sync()
-        self.session = aiohttp.ClientSession()
 
     async def close(self):
         await super().close()

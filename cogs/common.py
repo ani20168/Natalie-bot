@@ -20,7 +20,7 @@ def dataload(filepath="data/data.json") -> dict :
 
 def datawrite(data, filepath="data/data.json"):
     with open(filepath, "w") as f:
-        json.dump(data, f)
+        json.dump(data, f, indent=4)
 
 
 class LevelSystem:
