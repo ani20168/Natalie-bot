@@ -161,6 +161,35 @@ class General(commands.Cog):
         else:
             await interaction.response.send_message(embed=Embed(title="加入抽獎頻道",description="你無法使用這個指令!\n你已經具備抽獎仔身分，或者等級不足以進入。",color=common.bot_error_color))
 
+    @app_commands.command(name = "afkdisconnect_trigger", description = "設置掛機斷連的觸發時間點(僅供部分會員使用)")
+    @app_commands.rename(time = "觸發時間(分鐘)")
+    @app_commands.describe(time = "何時觸發掛機斷連? (range:15~60)")
+    async def afk_disconnect_settrigger(self, interaction, time:int):
+        """
+        設置關MIC掛機後，被機器人中斷連線的觸發時間點，
+
+        """
+        userid = str(interaction.user.id)
+        whitelist = [
+            "410847926236086272" #ANI
+        ]
+        if userid not in whitelist:
+            await interaction.response.send_message(embed=Embed(title="權限不足",description="你無法使用這個指令!\n此指令僅供白名單使用。",color=common.bot_error_color), ephemeral=True)
+            return
+
+        if time < 1 or time > 60:
+            await interaction.response.send_message(embed=Embed(title="設置失敗",description="時間範圍僅能選擇1~60分鐘!",color=common.bot_error_color), ephemeral=True)
+            return
+
+        async with common.jsonio_lock:
+            data = common.dataload()
+            data[userid]["afkdisconnect_trigger"] = time
+            common.datawrite(data)
+
+        admin_channel = self.bot.get_channel(common.admin_log_channel)
+        await admin_channel.send(f"掛機斷連設置已經被變更! 對象:{userid} 觸發時間: {time}分鐘")
+        await interaction.response.send_message(embed=Embed(title="掛機斷連設置",description=f"設定完成! 觸發時間: {time}分鐘",color=common.bot_color), ephemeral=True)
+
     @app_commands.command(name = "check_sevencolor_restday", description = "確認七色珀的休假日")
     @app_commands.rename(date='日期')
     @app_commands.describe(date='輸入日期以查看當天是否休假，或著留空來查看他的下一次休假日期')

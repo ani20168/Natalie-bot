@@ -191,6 +191,90 @@ class Startup(commands.Cog):
     async def event_before_loop(self):
         await self.bot.wait_until_ready()
         
+class AfkDisconnect(commands.Cog):
+    def __init__(self, bot: commands.Bot):
+        """初始化 Cog 與相關狀態。
+        Args:
+            bot (commands.Bot): Discord Bot 實例
+        Returns:
+            None
+        """
+        self.bot = bot
+        self.whitelist = [
+            "410847926236086272", #ANI
+            "587934995063111681" #xu6
+        ]
+        self.server_id = common.fake_sister_server_id
+        self.lobby_textchannel_id = 419108485435883533
+        self._afk_state = {}
+        self.afk_disconnect_event.start()
+
+    #卸載cog時觸發
+    async def cog_unload(self):
+        self.afk_disconnect_event.cancel()
+
+    @tasks.loop(minutes=1)
+    async def afk_disconnect_event(self) -> None:
+        """每分鐘檢查白名單用戶是否符合 AFK 斷線條件並執行斷線。
+        Args:
+            self (AfkDisconnect): Cog 自身
+        Returns:
+            None
+        """
+        guild = self.bot.get_guild(self.server_id)
+        if guild is None:
+            return
+        data = common.dataload()
+        for uid in self.whitelist:
+            member = guild.get_member(int(uid))
+            if member is None:
+                continue
+            voice_state = member.voice
+            state = self._afk_state.setdefault(uid, {"counter": 0, "last_channel": None})
+            trigger = data.get(uid, {}).get("afkdisconnect_trigger", 15)
+            if voice_state is None:
+                state["counter"] = 0
+                state["last_channel"] = None
+                continue
+            if state["last_channel"] != voice_state.channel.id:
+                state["counter"] = 0
+                state["last_channel"] = voice_state.channel.id
+            elif voice_state.self_mute or voice_state.mute:
+                state["counter"] += 1
+                if state["counter"] >= trigger:
+                    await member.move_to(None, reason=f"掛機已持續{trigger}分鐘，觸發自動斷連!")
+                    state["counter"] = 0
+                    state["last_channel"] = None
+            else:
+                state["counter"] = 0
+
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """白名單成員在大廳文字頻道發言時重置掛機計時。
+        Args:
+            message (discord.Message): 收到的訊息物件
+        Returns:
+            None
+        """
+        if message.author.bot:
+            return
+        if message.channel.id == self.lobby_textchannel_id and str(message.author.id) in self.whitelist:
+            state = self._afk_state.get(str(message.author.id))
+            if state:
+                state["counter"] = 0
+
+    @commands.Cog.listener()
+    async def on_ready(self) -> None:
+        """Bot 啟動後確保背景任務正在執行。
+        Args:
+            self (AfkDisconnect): Cog 自身
+        Returns:
+            None
+        """
+        if not self.afk_disconnect_event.is_running():
+            self.afk_disconnect_event.start()
+
 
 async def setup(client:commands.Bot):
+    await client.add_cog(AfkDisconnect(client))
     await client.add_cog(Startup(client))
