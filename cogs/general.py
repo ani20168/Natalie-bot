@@ -161,10 +161,10 @@ class General(commands.Cog):
         else:
             await interaction.response.send_message(embed=Embed(title="加入抽獎頻道",description="你無法使用這個指令!\n你已經具備抽獎仔身分，或者等級不足以進入。",color=common.bot_error_color))
 
-    @app_commands.command(name = "afkdisconnect_trigger", description = "設置掛機斷連的觸發時間點(僅供部分會員使用)")
-    @app_commands.rename(time = "觸發時間")
-    @app_commands.describe(time = "何時觸發掛機斷連? range:15~60分鐘")
-    async def afkdisconnect_trigger(self, interaction, time:int):
+    @app_commands.command(description = "設置掛機斷連的觸發時間點(僅供部分會員使用)")
+    @app_commands.rename(timeset = "觸發時間")
+    @app_commands.describe(timeset = "何時觸發掛機斷連? 範圍為15~60分鐘")
+    async def afkdisconnect_trigger(self, interaction, timeset:int):
         """
         設置關MIC掛機後，被機器人中斷連線的觸發時間點
 
@@ -177,18 +177,18 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="權限不足",description="你無法使用這個指令!\n此指令僅供白名單使用。",color=common.bot_error_color), ephemeral=True)
             return
 
-        if time < 1 or time > 60:
+        if timeset < 1 or timeset > 60:
             await interaction.response.send_message(embed=Embed(title="設置失敗",description="時間範圍僅能選擇1~60分鐘!",color=common.bot_error_color), ephemeral=True)
             return
 
         async with common.jsonio_lock:
             data = common.dataload()
-            data[userid]["afkdisconnect_trigger"] = time
+            data[userid]["afkdisconnect_trigger"] = timeset
             common.datawrite(data)
 
         admin_channel = self.bot.get_channel(common.admin_log_channel)
-        await admin_channel.send(f"掛機斷連設置已經被變更! 對象:{userid} 觸發時間: {time}分鐘")
-        await interaction.response.send_message(embed=Embed(title="掛機斷連設置",description=f"設定完成! 觸發時間: {time}分鐘",color=common.bot_color), ephemeral=True)
+        await admin_channel.send(f"掛機斷連設置已經被變更! 對象:{userid} 觸發時間: {timeset}分鐘")
+        await interaction.response.send_message(embed=Embed(title="掛機斷連設置",description=f"設定完成! 觸發時間: {timeset}分鐘",color=common.bot_color), ephemeral=True)
 
     @app_commands.command(name = "check_sevencolor_restday", description = "確認七色珀的休假日")
     @app_commands.rename(date='日期')
