@@ -162,8 +162,8 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="加入抽獎頻道",description="你無法使用這個指令!\n你已經具備抽獎仔身分，或者等級不足以進入。",color=common.bot_error_color))
 
     @app_commands.command(name = "afkdisconnect_trigger", description = "設置掛機斷連的觸發時間點(僅供部分會員使用)")
-    @app_commands.rename(time = "觸發時間-分鐘")
-    @app_commands.describe(time = "何時觸發掛機斷連? range:15~60")
+    @app_commands.rename(time = "觸發時間")
+    @app_commands.describe(time = "何時觸發掛機斷連? range:15~60分鐘")
     async def afk_disconnect_settrigger(self, interaction, time:int):
         """
         設置關MIC掛機後，被機器人中斷連線的觸發時間點，
