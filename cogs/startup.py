@@ -201,7 +201,7 @@ class AfkDisconnect(commands.Cog):
         """
         self.bot = bot
         self.whitelist = [
-            "410847926236086272", #ANI
+            # "410847926236086272", #ANI
             "587934995063111681" #xu6
         ]
         self.server_id = common.fake_sister_server_id
@@ -215,7 +215,7 @@ class AfkDisconnect(commands.Cog):
 
     @tasks.loop(minutes=1)
     async def afk_disconnect_event(self) -> None:
-        """每分鐘檢查白名單用戶是否符合 AFK 斷線條件並執行斷線。
+        """每分鐘檢查白名單用戶是否符合 AFK 斷線條件並執行語音斷線。
         Args:
             self (AfkDisconnect): Cog 自身
         Returns:

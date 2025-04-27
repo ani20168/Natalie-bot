@@ -167,14 +167,15 @@ class General(commands.Cog):
     async def afkdisconnect_trigger(self, interaction, timeset:int):
         userid = str(interaction.user.id)
         whitelist = [
-            "410847926236086272" #ANI
+            # "410847926236086272", #ANI
+            "587934995063111681" #xu6
         ]
         if userid not in whitelist:
             await interaction.response.send_message(embed=Embed(title="權限不足",description="你無法使用這個指令!\n此指令僅供白名單使用。",color=common.bot_error_color), ephemeral=True)
             return
 
-        if timeset < 1 or timeset > 60:
-            await interaction.response.send_message(embed=Embed(title="設置失敗",description="時間範圍僅能選擇1~60分鐘!",color=common.bot_error_color), ephemeral=True)
+        if timeset < 15 or timeset > 60:
+            await interaction.response.send_message(embed=Embed(title="設置失敗",description="時間範圍僅能選擇15~60分鐘!",color=common.bot_error_color), ephemeral=True)
             return
 
         async with common.jsonio_lock:
