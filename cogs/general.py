@@ -166,7 +166,7 @@ class General(commands.Cog):
     @app_commands.describe(time = "何時觸發掛機斷連? range:15~60分鐘")
     async def afkdisconnect_trigger(self, interaction, time:int):
         """
-        設置關MIC掛機後，被機器人中斷連線的觸發時間點，
+        設置關MIC掛機後，被機器人中斷連線的觸發時間點
 
         """
         userid = str(interaction.user.id)

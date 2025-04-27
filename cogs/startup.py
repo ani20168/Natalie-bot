@@ -263,16 +263,9 @@ class AfkDisconnect(commands.Cog):
             if state:
                 state["counter"] = 0
 
-    @commands.Cog.listener()
-    async def on_ready(self) -> None:
-        """Bot 啟動後確保背景任務正在執行。
-        Args:
-            self (AfkDisconnect): Cog 自身
-        Returns:
-            None
-        """
-        if not self.afk_disconnect_event.is_running():
-            self.afk_disconnect_event.start()
+    @afk_disconnect_event.before_loop
+    async def event_before_loop(self):
+        await self.bot.wait_until_ready()
 
 
 async def setup(client:commands.Bot):
