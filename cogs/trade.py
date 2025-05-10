@@ -23,6 +23,7 @@ class Auction:
         self.end_time = end_time                # 競標結束時間 (UTC)
         self.author_id = author_id              # 建立者 ID
         self.message = message                  # Discord 訊息物件 (用來更新)
+        self.view: "AuctionView | None" = None  # 留存 View 物件以便後續更新
 
         # 競標狀態
         self.highest_bid = start_price - increment  # 設為 "尚未有人出價" 的前置值
@@ -121,6 +122,7 @@ class AuctionView(discord.ui.View):
         self.auction = auction
         self.bid_button = BidButton(auction)
         self.add_item(self.bid_button)
+        auction.view = self
         # 將競標交給背景迴圈持續追蹤
         AuctionLoop.instance().track(auction)
 
@@ -131,8 +133,7 @@ class AuctionView(discord.ui.View):
     @staticmethod
     async def update_embed(auction: Auction):
         embed = generate_embed(auction)
-        view = auction.message.components[0] if auction.message.components else None
-        await auction.message.edit(embed=embed, view=view)
+        await auction.message.edit(embed=embed, view=auction.view)
 
 class AuctionLoop:
     """背景持續更新所有進行中競標的單例。"""
