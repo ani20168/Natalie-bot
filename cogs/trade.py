@@ -12,7 +12,7 @@ class Auction:
     # -----------------------------
     # 防搶標參數 (類別層級)
     # -----------------------------
-    EXTEND_THRESHOLD = 15  # 剩餘秒數 ≤ 此值時觸發延長
+    EXTEND_THRESHOLD = 60  # 剩餘秒數 ≤ 此值時觸發延長
     EXTEND_DURATION = 30   # 每次延長的秒數
 
     def __init__(self, *, item: str, start_price: int, increment: int,
@@ -160,7 +160,7 @@ class AuctionLoop:
 
     async def _run(self):
         while True:
-            await asyncio.sleep(5)  # 每 5 秒更新
+            await asyncio.sleep(1)  # 每秒更新
             finished: list[int] = []
             for msg_id, auction in list(self.active.items()):
                 remaining = auction.remaining()
@@ -230,13 +230,13 @@ def generate_embed(auction: Auction) -> Embed:
         embed.add_field(name="目前最高價", value="尚無", inline=False)
     embed.add_field(name="此商品出價次數", value=str(auction.bid_count), inline=False)
 
-    embed.set_footer(text="⚠️ 若剩餘時間低於 15 秒再出價，系統將自動延長 30 秒。")
+    embed.set_footer(text="⚠️ 若剩餘時間低於 60 秒再出價，系統將自動延長 30 秒。")
     return embed
 
 class Trade(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
-        self.auction_channel_id = common.admin_log_channel  #拍賣所 頻道 ID
+        self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID
 
     # =====================================================
     #  建立競標指令
