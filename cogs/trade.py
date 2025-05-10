@@ -4,12 +4,273 @@ from discord.ext import commands,tasks
 from . import common
 from datetime import datetime,timezone,timedelta
 import re
+import asyncio
 
+class Auction:
+    """單一競標的執行中狀態。"""
 
+    # -----------------------------
+    # 防搶標參數 (類別層級)
+    # -----------------------------
+    EXTEND_THRESHOLD = 15  # 剩餘秒數 ≤ 此值時觸發延長
+    EXTEND_DURATION = 30   # 每次延長的秒數
+
+    def __init__(self, *, item: str, start_price: int, increment: int,
+                 end_time: datetime, author_id: int, message: discord.Message):
+        self.item = item                        # 商品名稱
+        self.start_price = start_price          # 起標價
+        self.increment = increment              # 每次最小加價
+        self.end_time = end_time                # 競標結束時間 (UTC)
+        self.author_id = author_id              # 建立者 ID
+        self.message = message                  # Discord 訊息物件 (用來更新)
+
+        # 競標狀態
+        self.highest_bid = start_price - increment  # 設為 "尚未有人出價" 的前置值
+        self.highest_bidder: int | None = None      # 目前最高出價者 ID
+        self.bid_count: int = 0                     # 出價次數
+        self.bid_history: dict[int, int] = {}       # 用戶預扣金額紀錄 {user_id: 已預扣總額}
+        self.lock = asyncio.Lock()                  # 保護競態條件
+
+    # ----------------------------------------------------
+    # 工具函式
+    # ----------------------------------------------------
+    def next_price(self) -> int:
+        """計算下一次出價需要的金額。"""
+        return self.highest_bid + self.increment
+
+    def remaining(self) -> int:
+        """回傳剩餘秒數 (小於 0 代表已到期)。"""
+        return int((self.end_time - datetime.now(timezone.utc)).total_seconds())
+
+    def needs_extension(self) -> bool:
+        """判斷是否觸發防搶標延長。"""
+        return self.remaining() <= self.EXTEND_THRESHOLD
+
+    async def reserve(self, user_id: int, amount: int):
+        """預扣指定用戶的蛋糕。"""
+        data = common.dataload()
+        if str(user_id) not in data or data[str(user_id)]["cake"] < amount:
+            raise ValueError("蛋糕不足")
+        data[str(user_id)]["cake"] -= amount
+        common.datawrite(data)
+
+    async def refund(self, user_id: int, amount: int):
+        """退款給指定用戶。"""
+        async with common.jsonio_lock:
+            data = common.dataload()
+            if str(user_id) not in data:
+                data[str(user_id)] = {"cake": 0}
+            data[str(user_id)]["cake"] += amount
+            common.datawrite(data)
+
+    async def place_bid(self, interaction: discord.Interaction):
+        """處理按鈕互動產生的出價。必須於 self.lock 內呼叫。"""
+        bidder_id = interaction.user.id
+        next_price = self.next_price()
+        previously_reserved = self.bid_history.get(bidder_id, 0)
+        additional_needed = next_price - previously_reserved
+        if additional_needed <= 0:
+            raise ValueError("你的出價已經是目前最高價")
+        # 預扣差額蛋糕
+        async with common.jsonio_lock:
+            data = common.dataload()
+            if str(bidder_id) not in data or data[str(bidder_id)]["cake"] < additional_needed:
+                raise ValueError("蛋糕不足，無法出價")
+            data[str(bidder_id)]["cake"] -= additional_needed
+            common.datawrite(data)
+
+        # 更新競標狀態
+        self.bid_history[bidder_id] = previously_reserved + additional_needed
+        self.highest_bid = next_price
+        self.highest_bidder = bidder_id
+        self.bid_count += 1
+
+        # 防搶標：如剩餘時間過短則延長
+        if self.needs_extension():
+            self.end_time += timedelta(seconds=self.EXTEND_DURATION)
+
+class BidButton(discord.ui.Button):
+    """出價按鈕元件。"""
+
+    def __init__(self, auction: Auction):
+        super().__init__(label=f"出價!({auction.next_price()})", style=discord.ButtonStyle.green)
+        self.auction = auction
+
+    async def callback(self, interaction: discord.Interaction):
+        """處理出價按鈕點擊。"""
+        async with self.auction.lock:
+            try:
+                await self.auction.place_bid(interaction)
+            except ValueError as e:
+                # 使用 embed 呈現錯誤訊息，並僅對使用者可見
+                error_embed = Embed(title="❌ 出價失敗", description=str(e), color=common.bot_error_color)
+                await interaction.response.send_message(embed=error_embed, ephemeral=True)
+                return
+        # ---------------- 出價成功 ----------------
+        # 更新按鈕文字
+        self.label = f"出價!({self.auction.next_price()})"
+        success_embed = Embed(title="✅ 出價成功", description=f"你成功以 **{self.auction.highest_bid}** 出價!", color=common.bot_color)
+        await interaction.response.send_message(embed=success_embed, ephemeral=True)
+        await AuctionView.update_embed(self.auction)
+
+class AuctionView(discord.ui.View):
+    """提供按鈕並定期更新 embed 的 View。"""
+
+    def __init__(self, auction: Auction):
+        super().__init__(timeout=None)
+        self.auction = auction
+        self.bid_button = BidButton(auction)
+        self.add_item(self.bid_button)
+        # 將競標交給背景迴圈持續追蹤
+        AuctionLoop.instance().track(auction)
+
+    async def on_timeout(self):
+        # 由 AuctionLoop 統一處理結束，不在此處理
+        pass
+
+    @staticmethod
+    async def update_embed(auction: Auction):
+        embed = generate_embed(auction)
+        view = auction.message.components[0] if auction.message.components else None
+        await auction.message.edit(embed=embed, view=view)
+
+class AuctionLoop:
+    """背景持續更新所有進行中競標的單例。"""
+
+    _instance = None
+
+    @classmethod
+    def instance(cls):
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def __init__(self):
+        self.active: dict[int, Auction] = {}  # message_id -> Auction
+        self.task = asyncio.create_task(self._run())
+
+    def track(self, auction: Auction):
+        """加入追蹤。"""
+        self.active[auction.message.id] = auction
+
+    async def _run(self):
+        while True:
+            await asyncio.sleep(5)  # 每 5 秒更新
+            finished: list[int] = []
+            for msg_id, auction in list(self.active.items()):
+                remaining = auction.remaining()
+                if remaining <= 0:
+                    finished.append(msg_id)
+                    await self._settle(auction)  # 結算
+                else:
+                    await AuctionView.update_embed(auction)  # 更新剩餘時間
+            for msg_id in finished:
+                del self.active[msg_id]
+
+    async def _settle(self, auction: Auction):
+        """結算競標、退款落標者，並將金額轉給賣家。"""
+        # 1. 禁用按鈕
+        if auction.message.components:
+            for row in auction.message.components:
+                for comp in row.children:
+                    comp.disabled = True
+            await auction.message.edit(view=auction.message.components[0])
+
+        # 2. 退款所有未得標者
+        for uid, reserved in auction.bid_history.items():
+            if uid != auction.highest_bidder:
+                await auction.refund(uid, reserved)
+
+        # 3. 若有人得標，將金額撥給賣家
+        if auction.highest_bidder is not None:
+            async with common.jsonio_lock:
+                data = common.dataload()
+                seller_id = str(auction.author_id)
+                data.setdefault(seller_id, {"cake": 0})
+                data[seller_id]["cake"] += auction.highest_bid
+                common.datawrite(data)
+
+        # 4. 公告結果
+        winner_mention = f"<@{auction.highest_bidder}>" if auction.highest_bidder else "無人"
+        channel = auction.message.channel
+        await channel.send(f"競標結束! 恭喜 {winner_mention} 以 **{auction.highest_bid}** 塊蛋糕得標 **{auction.item}** !")
+
+# ------------------------------------------------------------
+#  產生 embed 區塊
+# ------------------------------------------------------------
+
+def generate_embed(auction: Auction) -> Embed:
+    remaining = max(0, auction.remaining())
+    minutes, seconds = divmod(remaining, 60)
+    embed = Embed(title="🎉 競標中 – " + auction.item,
+                  description=f"剩餘時間: **{minutes:02d}:{seconds:02d}**",
+                  color=common.bot_color)
+    if auction.highest_bidder:
+        embed.add_field(name="目前最高價", value=f"{auction.highest_bid} <@{auction.highest_bidder}>", inline=False)
+    else:
+        embed.add_field(name="目前最高價", value="尚無", inline=False)
+    embed.add_field(name="此商品出價次數", value=str(auction.bid_count), inline=False)
+    embed.set_footer(text="⚠️ 若剩餘時間低於 15 秒再出價，系統將自動延長 30 秒。")
+    return embed
 
 class Trade(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
+        self.auction_channel_id = common.admin_log_channel  #拍賣所 頻道 ID
+
+    # =====================================================
+    #  建立競標指令
+    # =====================================================
+
+    class CreateBidModal(discord.ui.Modal, title="建立競標"):
+        item = discord.ui.TextInput(label="商品", placeholder="300元禮物卡", required=True)
+        start_price = discord.ui.TextInput(label="起標價", placeholder="輸入數字", required=True)
+        increment = discord.ui.TextInput(label="增額出價", placeholder="每次最少加多少", required=True)
+        duration = discord.ui.TextInput(label="持續時間 (分鐘)", placeholder="例如 10", required=True)
+
+        def __init__(self, parent_cog: "Trade"):
+            super().__init__()
+            self.parent_cog = parent_cog
+
+        async def on_submit(self, interaction: discord.Interaction):
+            # 參數驗證
+            try:
+                start = int(self.start_price.value)
+                inc = int(self.increment.value)
+                dur_minutes = int(self.duration.value)
+                if start <= 0 or inc <= 0 or dur_minutes <= 0:
+                    raise ValueError
+            except ValueError:
+                await interaction.response.send_message("輸入格式錯誤，請確認皆為正整數。", ephemeral=True)
+                return
+
+            end_time = datetime.now(timezone.utc) + timedelta(minutes=dur_minutes)
+            channel = interaction.guild.get_channel(self.parent_cog.auction_channel_id)
+            if channel is None:
+                await interaction.response.send_message("找不到拍賣所頻道，請先設定。", ephemeral=True)
+                return
+
+            dummy_msg = await channel.send("稍等…正在建立競標…")
+
+            auction = Auction(
+                item=self.item.value,
+                start_price=start,
+                increment=inc,
+                end_time=end_time,
+                author_id=interaction.user.id,
+                message=dummy_msg
+            )
+
+            embed = generate_embed(auction)
+            view = AuctionView(auction)
+            await dummy_msg.edit(content="", embed=embed, view=view)
+            await interaction.response.send_message("競標已建立!", ephemeral=True)
+
+    @app_commands.command(name="create_bid", description="建立競標交易")
+    async def create_bid(self, interaction: discord.Interaction):
+        """跳出 Modal 讓使用者輸入競標資訊。"""
+        await interaction.response.send_modal(self.CreateBidModal(self))
+
 
     #Nitro Booster 每月可以兌換一次稱號
     @app_commands.command(name = "redeem_member_role", description = "兌換自訂稱號(每月一次)")
