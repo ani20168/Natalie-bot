@@ -203,15 +203,33 @@ class AuctionLoop:
 
 def generate_embed(auction: Auction) -> Embed:
     remaining = max(0, auction.remaining())
-    minutes, seconds = divmod(remaining, 60)
+    m, s = divmod(remaining, 60)
+
+    # 將結束時間轉為 UTC+8 並格式化
+    tz_taipei = timezone(timedelta(hours=8))
+    end_local = auction.end_time.astimezone(tz_taipei)
+    end_str = end_local.strftime("%Y-%m-%d %H:%M:%S")
+
+    description = (
+        f"剩餘時間: **{m:02d}:{s:02d}**\n"
+        f"結束時間: {end_str} (UTC+8)"
+    )
+
     embed = Embed(title="🎉 競標中 – " + auction.item,
-                  description=f"剩餘時間: **{minutes:02d}:{seconds:02d}**",
+                  description=description,
                   color=common.bot_color)
+
+    # 起標價與增額出價
+    embed.add_field(name="起標價", value=str(auction.start_price), inline=True)
+    embed.add_field(name="增額出價", value=str(auction.increment), inline=True)
+
+    # 最高價與出價次數
     if auction.highest_bidder:
         embed.add_field(name="目前最高價", value=f"{auction.highest_bid} <@{auction.highest_bidder}>", inline=False)
     else:
         embed.add_field(name="目前最高價", value="尚無", inline=False)
     embed.add_field(name="此商品出價次數", value=str(auction.bid_count), inline=False)
+
     embed.set_footer(text="⚠️ 若剩餘時間低於 15 秒再出價，系統將自動延長 30 秒。")
     return embed
 
