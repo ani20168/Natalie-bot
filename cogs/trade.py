@@ -237,7 +237,7 @@ def generate_embed(auction: Auction) -> Embed:
         embed.add_field(name="目前最高價", value="尚無", inline=False)
     embed.add_field(name="此商品出價次數", value=str(auction.bid_count), inline=False)
 
-    embed.set_footer(text="⚠️ 若剩餘時間低於 60 秒再出價，系統將自動延長 30 秒。")
+    embed.set_footer(text="⚠️ 若剩餘時間低於 60 秒後有人出價，系統將自動延長 30 秒。")
     return embed
 
 class Trade(commands.Cog):
