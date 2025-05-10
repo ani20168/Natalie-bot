@@ -67,6 +67,10 @@ class Auction:
     async def place_bid(self, interaction: discord.Interaction):
         """處理按鈕互動產生的出價。必須於 self.lock 內呼叫。"""
         bidder_id = interaction.user.id
+        # 固定最高價者不得連續出價
+        if bidder_id == self.highest_bidder:
+            raise ValueError("你已是最高出價者，無法再次出價")
+
         next_price = self.next_price()
         previously_reserved = self.bid_history.get(bidder_id, 0)
         additional_needed = next_price - previously_reserved
