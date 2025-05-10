@@ -160,7 +160,7 @@ class AuctionLoop:
 
     async def _run(self):
         while True:
-            await asyncio.sleep(1)  # 每秒更新
+            await asyncio.sleep(2)  # 每 2 秒更新
             finished: list[int] = []
             for msg_id, auction in list(self.active.items()):
                 remaining = auction.remaining()
@@ -203,7 +203,14 @@ class AuctionLoop:
 
 def generate_embed(auction: Auction) -> Embed:
     remaining = max(0, auction.remaining())
-    m, s = divmod(remaining, 60)
+    h, rem = divmod(remaining, 3600)
+    m, s = divmod(rem, 60)
+
+    # 動態格式：>=1 小時顯示 HH:MM:SS，否則顯示 MM:SS
+    if h:
+        remain_str = f"{h:02d}:{m:02d}:{s:02d}"
+    else:
+        remain_str = f"{m:02d}:{s:02d}"
 
     # 將結束時間轉為 UTC+8 並格式化
     tz_taipei = timezone(timedelta(hours=8))
@@ -211,7 +218,7 @@ def generate_embed(auction: Auction) -> Embed:
     end_str = end_local.strftime("%Y-%m-%d %H:%M:%S")
 
     description = (
-        f"剩餘時間: **{m:02d}:{s:02d}**\n"
+        f"剩餘時間: **{remain_str}**\n"
         f"結束時間: {end_str} (UTC+8)"
     )
 
