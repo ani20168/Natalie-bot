@@ -173,32 +173,29 @@ class AuctionLoop:
                 del self.active[msg_id]
 
     async def _settle(self, auction: Auction):
-        """結算競標、退款落標者，並將金額轉給賣家。"""
-        # 1. 禁用按鈕
-        if auction.message.components:
-            for row in auction.message.components:
-                for comp in row.children:
-                    comp.disabled = True
-            await auction.message.edit(view=auction.message.components[0])
+        # 1. 禁用按鈕並顯示 00:00
+        if auction.view:
+            for child in auction.view.children:
+                if isinstance(child, discord.ui.Button):
+                    child.disabled = True
+            await auction.message.edit(embed=generate_embed(auction), view=auction.view)  # embed 亦更新為 00:00
 
-        # 2. 退款所有未得標者
+        # 2. 退款未得標者
         for uid, reserved in auction.bid_history.items():
             if uid != auction.highest_bidder:
                 await auction.refund(uid, reserved)
 
-        # 3. 若有人得標，將金額撥給賣家
+        # 3. 撥款給賣家
         if auction.highest_bidder is not None:
             async with common.jsonio_lock:
                 data = common.dataload()
-                seller_id = str(auction.author_id)
-                data.setdefault(seller_id, {"cake": 0})
-                data[seller_id]["cake"] += auction.highest_bid
+                data.setdefault(str(auction.author_id), {"cake": 0})
+                data[str(auction.author_id)]["cake"] += auction.highest_bid
                 common.datawrite(data)
 
         # 4. 公告結果
-        winner_mention = f"<@{auction.highest_bidder}>" if auction.highest_bidder else "無人"
-        channel = auction.message.channel
-        await channel.send(f"競標結束! 恭喜 {winner_mention} 以 **{auction.highest_bid}** 塊蛋糕得標 **{auction.item}** !")
+        winner = f"<@{auction.highest_bidder}>" if auction.highest_bidder else "無人"
+        await auction.message.channel.send(f"競標結束! 恭喜 {winner} 以 **{auction.highest_bid}** 塊蛋糕得標 **{auction.item}** !")
 
 # ------------------------------------------------------------
 #  產生 embed 區塊
