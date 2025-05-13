@@ -20,6 +20,34 @@ class General(commands.Cog):
         self.last_cake_time = {}
         self.member_invoice_time = {} 
         self.last_three_messages_info = {}
+        self.color_dict = { #一般的顏色身分組
+            "紅色":{"需求等級":10,"role_id":623544449280114716},
+            "棕色":{"需求等級":10,"role_id":623544701840261122},
+            "暗紫":{"需求等級":10,"role_id":623544702981111808},
+            "橙色":{"需求等級":10,"role_id":623544707519348757},
+            "黃色":{"需求等級":10,"role_id":623547225129091094},
+            "暗藍":{"需求等級":10,"role_id":623547226387513345},
+            "綠松石":{"需求等級":10,"role_id":623548440210702395},
+            "黑色":{"需求等級":10,"role_id":675586536808382495},
+            "白色":{"需求等級":10,"role_id":675586754710994964},
+            "常春藤綠":{"需求等級":10,"role_id":675587892600504342},
+            "緋紅":{"需求等級":10,"role_id":675592036555948052},
+            "紫色":{"需求等級":10,"role_id":675592363372183607},
+            "淺紫紅":{"需求等級":20,"role_id":623544703517851655},
+            "粉紅色":{"需求等級":20,"role_id":623544704696320010},
+            "粉玫瑰紅":{"需求等級":20,"role_id":623544705367670795},
+            "薰衣草":{"需求等級":20,"role_id":623544706218852374},
+            "巧克力":{"需求等級":20,"role_id":623544706583887881},
+            "原木色":{"需求等級":20,"role_id":623544708366598164},
+            "粉木瓜橙":{"需求等級":20,"role_id":623547224307138582},
+            "天藍色":{"需求等級":20,"role_id":623547226911932442},
+            "淡藍綠":{"需求等級":20,"role_id":623548441187844136},
+            "香檳黃":{"需求等級":20,"role_id":675590265372934165},
+            "紫丁香色":{"需求等級":20,"role_id":675591514482540594},
+            "珊瑚紅":{"需求等級":20,"role_id":675593108569849856},
+            "桃色":{"需求等級":20,"role_id":921046788385943572},
+        }
+        self.animation_color_dict = {} #動態身分組
 
 
     @app_commands.command(name = "info", description = "關於Natalie...")
@@ -292,51 +320,31 @@ class General(commands.Cog):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
             userlevel = common.LevelSystem().read_info(userid)
-        color_dict = {
-            "紅色":{"需求等級":10,"role_id":623544449280114716},
-            "棕色":{"需求等級":10,"role_id":623544701840261122},
-            "暗紫":{"需求等級":10,"role_id":623544702981111808},
-            "橙色":{"需求等級":10,"role_id":623544707519348757},
-            "黃色":{"需求等級":10,"role_id":623547225129091094},
-            "暗藍":{"需求等級":10,"role_id":623547226387513345},
-            "綠松石":{"需求等級":10,"role_id":623548440210702395},
-            "黑色":{"需求等級":10,"role_id":675586536808382495},
-            "白色":{"需求等級":10,"role_id":675586754710994964},
-            "常春藤綠":{"需求等級":10,"role_id":675587892600504342},
-            "緋紅":{"需求等級":10,"role_id":675592036555948052},
-            "紫色":{"需求等級":10,"role_id":675592363372183607},
-            "淺紫紅":{"需求等級":20,"role_id":623544703517851655},
-            "粉紅色":{"需求等級":20,"role_id":623544704696320010},
-            "粉玫瑰紅":{"需求等級":20,"role_id":623544705367670795},
-            "薰衣草":{"需求等級":20,"role_id":623544706218852374},
-            "巧克力":{"需求等級":20,"role_id":623544706583887881},
-            "原木色":{"需求等級":20,"role_id":623544708366598164},
-            "粉木瓜橙":{"需求等級":20,"role_id":623547224307138582},
-            "天藍色":{"需求等級":20,"role_id":623547226911932442},
-            "淡藍綠":{"需求等級":20,"role_id":623548441187844136},
-            "香檳黃":{"需求等級":20,"role_id":675590265372934165},
-            "紫丁香色":{"需求等級":20,"role_id":675591514482540594},
-            "珊瑚紅":{"需求等級":20,"role_id":675593108569849856},
-            "桃色":{"需求等級":20,"role_id":921046788385943572},
-        }
+
         user_roles = interaction.user.roles
 
         if any(role.name == colorchoice.value for role in user_roles):
-            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 <@&{color_dict[colorchoice.value]['role_id']}> 了!",color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 <@&{self.color_dict[colorchoice.value]['role_id']}> 了!",color=common.bot_error_color))
             return
 
-        if userlevel.level < color_dict[colorchoice.value]['需求等級']:
-            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"等級不足! <@&{color_dict[colorchoice.value]['role_id']}> 需要**{color_dict[colorchoice.value]['需求等級']}**等，你目前只有**{userlevel.level}**等。",color=common.bot_error_color))
+        if userlevel.level < self.color_dict[colorchoice.value]['需求等級']:
+            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"等級不足! <@&{self.color_dict[colorchoice.value]['role_id']}> 需要**{self.color_dict[colorchoice.value]['需求等級']}**等，你目前只有**{userlevel.level}**等。",color=common.bot_error_color))
             return
 
         for role in user_roles:
-            for color, attributes in color_dict.items():
+            #移除舊的靜態顏色身分組
+            for color, attributes in self.color_dict.items():
                 if role.id == attributes["role_id"]:
                     await interaction.user.remove_roles(role,reason="移除舊的顏色身分組")
                     break
+            #移除舊的動態顏色身分組
+            for color, attributes in self.animation_color_dict.items():
+                if role.id == attributes["role_id"]:
+                    await interaction.user.remove_roles(role,reason="移除舊的動態顏色身分組")
+                    break
         
-        await interaction.user.add_roles(interaction.guild.get_role(color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
-        await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...<@&{color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
+        await interaction.user.add_roles(interaction.guild.get_role(self.color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
+        await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...<@&{self.color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
         
 
     @commands.Cog.listener()
