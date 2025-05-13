@@ -128,17 +128,35 @@ class General(commands.Cog):
         sorted_data = sorted([(user, user_data) for user, user_data in data.items() if isinstance(user_data, dict) and "level_exp" in user_data], key=lambda x: x[1]["level_exp"], reverse=True)
 
 
-        message = ""
-        # 顯示排名榜前10名
-        for i, (user, user_data) in enumerate(sorted_data[:10]):
-            user_object = self.bot.get_user(int(user))
-            message += (f"%d.%s -- 等級:**%d** 經驗值:**%d**\n" % (i + 1, user_object.display_name, user_data['level'], user_data['level_exp']))
+        # ===== 1) 前 10 名排行榜（自動補齊） =====
+        lines: list[str] = []
+        shown = 0
+        for rank, (uid, udata) in enumerate(sorted_data, start=1):
+            # 嘗試用快取；失敗再 API 抓
+            user_obj = self.bot.get_user(int(uid))
+            if user_obj is None:
+                try:
+                    user_obj = await self.bot.fetch_user(int(uid))
+                except:  # 帳號刪除或抓不到
+                    continue  # 跳過並往後補人數
 
+            lines.append(
+                f"{rank}. {user_obj.display_name} "
+                f"-- 等級:**{udata['level']}** 經驗值:**{udata['level_exp']}**"
+            )
+            shown += 1
+            if shown >= 10:
+                break  # 已補齊 10 筆
 
-        # 找出使用指令者的排名
-        for i, (user, user_data) in enumerate(sorted_data):
-            if user == userid:
-                message += ("\n你的排名為**%d**，等級:**%d** 經驗值:**%d**" % (i + 1, user_data['level'], user_data['level_exp']))
+        message = "\n".join(lines)
+
+        # ===== 2) 呼叫者自己的排名 =====
+        for rank, (uid, udata) in enumerate(sorted_data, start=1):
+            if uid == userid:
+                message += (
+                    f"\n\n你的排名為 **{rank}**，"
+                    f"等級:**{udata['level']}** 經驗值:**{udata['level_exp']}**"
+                )
                 break
 
         await interaction.response.send_message(embed=Embed(title="等級排行榜",description=message,color=common.bot_color))
