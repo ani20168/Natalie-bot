@@ -4,6 +4,7 @@ from discord.ext import commands,tasks
 from . import common
 from datetime import datetime,timezone,timedelta
 import re
+from pathlib import Path
 import asyncio
 
 class Auction:
@@ -31,6 +32,9 @@ class Auction:
         self.bid_count: int = 0                     # 出價次數
         self.bid_history: dict[int, int] = {}       # 用戶預扣金額紀錄 {user_id: 已預扣總額}
         self.lock = asyncio.Lock()                  # 保護競態條件
+        safe_name = self._safe_filename(self.item)          # ← 轉成安全檔名
+        self.log_path = Path("log/bid") / f"{safe_name}_{message.id}.txt"
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
 
     # ----------------------------------------------------
     # 工具函式
@@ -94,6 +98,28 @@ class Auction:
         if self.needs_extension():
             self.end_time += timedelta(seconds=self.EXTEND_DURATION)
 
+    async def write_log(self, bidder_name: str):
+        """
+        將成功出價寫入 log/bid/<商品名稱_訊息ID>.txt
+        Args:
+            bidder_name (str): Discord 的 display_name
+        Returns:
+            None
+        """
+        line = f"第{self.bid_count}次出價:{bidder_name} 出價{self.highest_bid}個蛋糕\n"
+        # 用 run_in_executor 避免阻塞 event-loop
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,                      # 預設 ThreadPool
+            self.log_path.open("a", encoding="utf-8").write,
+            line
+        )
+
+    @staticmethod
+    def _safe_filename(name: str) -> str:
+        # Windows 禁止: \ / : * ? " < > |   ── 全平台最大公約數
+        return re.sub(r'[\\/*?:"<>|]', '', name).replace(' ', '_')
+
 class BidButton(discord.ui.Button):
     """出價按鈕元件。"""
 
@@ -117,6 +143,7 @@ class BidButton(discord.ui.Button):
         success_embed = Embed(title="✅ 出價成功", description=f"你成功以 **{self.auction.highest_bid}** 出價!", color=common.bot_color)
         await interaction.response.send_message(embed=success_embed, ephemeral=True)
         await AuctionView.update_embed(self.auction)
+        await self.auction.write_log(interaction.user.display_name)
 
 class AuctionView(discord.ui.View):
     """提供按鈕並定期更新 embed 的 View。"""
@@ -243,7 +270,8 @@ def generate_embed(auction: Auction) -> Embed:
 class Trade(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
-        self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID
+        # self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID
+        self.auction_channel_id = 597738018698428416  #測試用
 
     # =====================================================
     #  建立競標指令
