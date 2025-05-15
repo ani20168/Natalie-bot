@@ -84,7 +84,7 @@ class Auction:
         async with common.jsonio_lock:
             data = common.dataload()
             if str(bidder_id) not in data or data[str(bidder_id)]["cake"] < additional_needed:
-                raise ValueError("蛋糕不足，無法出價")
+                raise ValueError(f"{common.cake_emoji}不足，無法出價")
             data[str(bidder_id)]["cake"] -= additional_needed
             common.datawrite(data)
 
@@ -124,7 +124,8 @@ class BidButton(discord.ui.Button):
     """出價按鈕元件。"""
 
     def __init__(self, auction: Auction):
-        super().__init__(label=f"出價!({auction.next_price()})", style=discord.ButtonStyle.green)
+        emoji = discord.PartialEmoji(id=common.cake_emoji_id, name="cake")
+        super().__init__(label=f"出價!({auction.next_price()})", style=discord.ButtonStyle.green, emoji=emoji)
         self.auction = auction
 
     async def callback(self, interaction: discord.Interaction):
@@ -140,7 +141,7 @@ class BidButton(discord.ui.Button):
         # ---------------- 出價成功 ----------------
         # 更新按鈕文字
         self.label = f"出價!({self.auction.next_price()})"
-        success_embed = Embed(title="✅ 出價成功", description=f"你成功以 **{self.auction.highest_bid}** 塊{common.cake_emoji} 出價!", color=common.bot_color)
+        success_embed = Embed(title="✅ 出價成功", description=f"你成功以 **{self.auction.highest_bid}** 塊{common.cake_emoji}出價!", color=common.bot_color)
         await interaction.response.send_message(embed=success_embed, ephemeral=True)
         await AuctionView.update_embed(self.auction)
         await self.auction.write_log(interaction.user.display_name)
@@ -222,7 +223,7 @@ class AuctionLoop:
 
         # 4. 公告結果
         winner = f"<@{auction.highest_bidder}>" if auction.highest_bidder else "無人"
-        await auction.message.channel.send(f"競標結束! 恭喜 {winner} 以 **{auction.highest_bid}** 塊蛋糕得標 **{auction.item}** !")
+        await auction.message.channel.send(f"競標結束! 恭喜 {winner} 以 **{auction.highest_bid}** 塊{common.cake_emoji}得標 **{auction.item}** !")
 
 # ------------------------------------------------------------
 #  產生 embed 區塊
@@ -270,9 +271,9 @@ def generate_embed(auction: Auction) -> Embed:
 class Trade(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
-        # self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID
+        self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID
         # self.auction_channel_id = 597738018698428416  #測試用 (MOD頻道)
-        self.auction_channel_id = common.admin_log_channel  #測試用 (日誌)
+        # self.auction_channel_id = common.admin_log_channel  #測試用 (日誌)
 
     # =====================================================
     #  建立競標指令
