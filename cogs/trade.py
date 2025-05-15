@@ -55,7 +55,7 @@ class Auction:
         """預扣指定用戶的蛋糕。"""
         data = common.dataload()
         if str(user_id) not in data or data[str(user_id)]["cake"] < amount:
-            raise ValueError("蛋糕不足")
+            raise ValueError(f"{common.cake_emoji}不足")
         data[str(user_id)]["cake"] -= amount
         common.datawrite(data)
 
@@ -140,7 +140,7 @@ class BidButton(discord.ui.Button):
         # ---------------- 出價成功 ----------------
         # 更新按鈕文字
         self.label = f"出價!({self.auction.next_price()})"
-        success_embed = Embed(title="✅ 出價成功", description=f"你成功以 **{self.auction.highest_bid}** 出價!", color=common.bot_color)
+        success_embed = Embed(title="✅ 出價成功", description=f"你成功以 **{self.auction.highest_bid}** 塊{common.cake_emoji} 出價!", color=common.bot_color)
         await interaction.response.send_message(embed=success_embed, ephemeral=True)
         await AuctionView.update_embed(self.auction)
         await self.auction.write_log(interaction.user.display_name)
@@ -270,8 +270,8 @@ def generate_embed(auction: Auction) -> Embed:
 class Trade(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
-        self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID
-        # self.auction_channel_id = 597738018698428416  #測試用 (MOD頻道)
+        # self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID
+        self.auction_channel_id = 597738018698428416  #測試用 (MOD頻道)
 
     # =====================================================
     #  建立競標指令
