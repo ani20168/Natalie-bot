@@ -397,14 +397,14 @@ class Trade(commands.Cog):
                 await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:請輸入有效的數字。",color=common.bot_error_color))
                 return
             if user_data[userid]["cake"] < amount:
-                await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"錯誤:蛋糕不足，你只有**{user_data[userid]['cake']}**塊蛋糕。",color=common.bot_error_color))
+                await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"錯誤:{common.cake_emoji}不足，你只有**{user_data[userid]['cake']}**塊{common.cake_emoji}。",color=common.bot_error_color))
                 return
 
             user_data[userid]["cake"] -= amount
             user_data[str(member_give.id)]["cake"] += amount
             common.datawrite(user_data)
 
-            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"你給予了**{amount}**塊蛋糕給<@{str(member_give.id)}>",color=common.bot_color))
+        await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"你給予了**{amount}**塊{common.cake_emoji}給<@{str(member_give.id)}>",color=common.bot_color))
 
 
 async def setup(client:commands.Bot):
