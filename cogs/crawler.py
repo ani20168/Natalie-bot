@@ -20,12 +20,15 @@ class SteamFreeGameCrawler(commands.Cog):
         self.headers = {
             'User-Agent':"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         }
-        self.freegame_notice_channel = self.bot.get_channel(1091267312537047040)
         self.main.start()
 
     #卸載cog時觸發
     async def cog_unload(self):
         self.main.cancel()
+
+    @property
+    def freegame_notice_channel(self):
+        return self.bot.get_channel(1091267312537047040)
 
     @tasks.loop(hours=2)
     async def main(self):
