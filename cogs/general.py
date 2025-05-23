@@ -194,7 +194,7 @@ class General(commands.Cog):
 
         cake_emoji = common.cake_emoji  # 取出表情方便用
 
-        embed = Embed(title=f"{cake_emoji} 排行榜", color=common.bot_color)
+        embed = Embed(title="蛋糕排行榜", color=common.bot_color)
         leaderboard_message = f"妹妹群中 {cake_emoji} 最多的用戶：\n"
 
         # 顯示排名榜前10名
@@ -215,7 +215,7 @@ class General(commands.Cog):
         if self_rank:
             embed.add_field(
                 name="你的排名",
-                value=f"你目前排名：**{self_rank}**，持有 {cake_emoji} ：**{data[user_id]['cake']}**",
+                value=f"你目前排名: **{self_rank}**  持有{cake_emoji}: **{data[user_id]['cake']}**",
                 inline=False
             )
         else:
