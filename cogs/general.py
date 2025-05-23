@@ -181,6 +181,52 @@ class General(commands.Cog):
 
         await interaction.response.send_message(embed=message)
 
+    @app_commands.command(name="cake_leaderboard", description="蛋糕排行榜")
+    async def cake_leaderboard(self, interaction):
+        data = common.dataload()
+        # 排除沒有cake資料或蛋糕數為0的用戶
+        sorted_data = sorted(
+            [(userid, userdata) for userid, userdata in data.items() 
+            if isinstance(userdata, dict) and 'cake' in userdata and userdata['cake'] > 0], 
+            key=lambda x: x[1]['cake'], 
+            reverse=True
+        )
+
+        cake_emoji = common.cake_emoji  # 取出表情方便用
+
+        embed = Embed(title=f"{cake_emoji} 排行榜", color=common.bot_color)
+        leaderboard_message = f"妹妹群中 {cake_emoji} 最多的用戶：\n"
+
+        # 顯示排名榜前10名
+        for i, (userid, user_data) in enumerate(sorted_data[:10]):
+            user = self.bot.get_user(int(userid))
+            username = user.display_name if user else f"User({userid})"
+            leaderboard_message += f"{i+1}. {username} {cake_emoji} 數:**{user_data['cake']}**\n"
+        embed.description = leaderboard_message
+
+        # 找自己的排名
+        user_id = str(interaction.user.id)
+        self_rank = None
+        for idx, (userid, user_data) in enumerate(sorted_data):
+            if userid == user_id:
+                self_rank = idx + 1
+                break
+
+        if self_rank:
+            embed.add_field(
+                name="你的排名",
+                value=f"你目前排名：**{self_rank}**，持有 {cake_emoji} ：**{data[user_id]['cake']}**",
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="你的排名",
+                value=f"你目前沒有 {cake_emoji}，快去賺取 {cake_emoji} 吧！",
+                inline=False
+            )
+
+        await interaction.response.send_message(embed=embed)
+
     @app_commands.command(name = "cake_add", description = "增加蛋糕")
     @app_commands.describe(member = "選擇一個成員",amount = "數量(扣除蛋糕加上負號)")
     async def cake_add(self,interaction,member: discord.Member,amount:int):
