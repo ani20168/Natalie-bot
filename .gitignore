@@ -5,3 +5,5 @@ databackup/*
 token.txt
 deploy.bat
 deploy_restart.txt
+
+/log
