@@ -3,6 +3,7 @@ from discord import app_commands,Embed
 from discord.ext import commands
 from . import common
 import random
+import itertools
 import asyncio
 import time
 
@@ -821,11 +822,273 @@ class BlackJackButton(discord.ui.View):
     async def on_timeout(self) -> None:
         async with common.jsonio_lock:
             data = common.dataload()
-            
+
             if data[str(self.command_interaction.user.id)]["blackjack_playing"] == True:
                 data[str(self.command_interaction.user.id)]["blackjack_playing"] = False
             common.datawrite(data)
-        
+
+
+class PokerGame(commands.Cog):
+    """Simple poker showdown using seven-card hands."""
+    def __init__(self, client: commands.Bot):
+        self.bot = client
+        self.refund_rate = 0.2
+        self.suits = ["\♣️", "\♦️", "\♥️", "\♠️"]
+        self.ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+        self.rank_value = {"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
+        self.rank_order = {
+            "高牌": 1,
+            "一對": 2,
+            "兩對": 3,
+            "三條": 4,
+            "順子": 5,
+            "同花": 6,
+            "葫蘆": 7,
+            "鐵支": 8,
+            "同花順": 9,
+            "皇家同花順": 10,
+        }
+
+    def create_deck(self):
+        deck = [(r, s) for s in self.suits for r in self.ranks]
+        random.shuffle(deck)
+        return deck
+
+    def evaluate_five_cards(self, cards):
+        values = [self.rank_value[r] for r, _ in cards]
+        suits = [s for _, s in cards]
+        value_counts = {v: values.count(v) for v in values}
+        sorted_counts = sorted(value_counts.values(), reverse=True)
+        is_flush = len(set(suits)) == 1
+        unique_values = sorted(set(values))
+        is_straight = len(unique_values) == 5 and max(unique_values) - min(unique_values) == 4
+
+        if is_flush and sorted(values) == [10, 11, 12, 13, 14]:
+            return "皇家同花順"
+        if is_flush and is_straight:
+            return "同花順"
+        if sorted_counts == [4, 1]:
+            return "鐵支"
+        if sorted_counts == [3, 2]:
+            return "葫蘆"
+        if is_flush:
+            return "同花"
+        if is_straight:
+            return "順子"
+        if sorted_counts == [3, 1, 1]:
+            return "三條"
+        if sorted_counts == [2, 2, 1]:
+            return "兩對"
+        if sorted_counts == [2, 1, 1, 1]:
+            return "一對"
+        return "高牌"
+
+    def evaluate_hand(self, cards):
+        if len(cards) <= 5:
+            return self.evaluate_five_cards(cards)
+        best_rank = "高牌"
+        for combo in itertools.combinations(cards, 5):
+            rank = self.evaluate_five_cards(list(combo))
+            if self.rank_order[rank] > self.rank_order[best_rank]:
+                best_rank = rank
+        return best_rank
+
+    def show_cards(self, cards):
+        return "、".join([f"{r}{s}" for r, s in cards])
+
+    def create_deck(self):
+        deck = [(r, s) for s in self.suits for r in self.ranks]
+        random.shuffle(deck)
+        return deck
+
+    def evaluate_hand(self, cards):
+        values = [self.rank_value[r] for r, _ in cards]
+        suits = [s for _, s in cards]
+        value_counts = {v: values.count(v) for v in values}
+        sorted_counts = sorted(value_counts.values(), reverse=True)
+        is_flush = len(set(suits)) == 1
+        unique_values = sorted(set(values))
+        is_straight = len(unique_values) == 5 and max(unique_values) - min(unique_values) == 4
+
+        if is_flush and sorted(values) == [10, 11, 12, 13, 14]:
+            return "皇家同花順"
+        if is_flush and is_straight:
+            return "同花順"
+        if sorted_counts == [4, 1]:
+            return "鐵支"
+        if sorted_counts == [3, 2]:
+            return "葫蘆"
+        if is_flush:
+            return "同花"
+        if is_straight:
+            return "順子"
+        if sorted_counts == [3, 1, 1]:
+            return "三條"
+        if sorted_counts == [2, 2, 1]:
+            return "兩對"
+        if sorted_counts == [2, 1, 1, 1]:
+            return "一對"
+        return "高牌"
+
+    def show_cards(self, cards):
+        return "、".join([f"{r}{s}" for r, s in cards])
+
+    @app_commands.command(name="poker", description="撲克牌比大小")
+    @app_commands.describe(bet="要下多少賭注?(支援all、half以及輸入蛋糕數量)")
+    @app_commands.rename(bet="賭注")
+    async def poker(self, interaction, bet: str):
+        await interaction.response.defer()
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(interaction.user.id)
+            cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+
+            if data.get(userid, {}).get("poker_playing"):
+                await interaction.followup.send(embed=Embed(title="撲克牌比大小", description="你現在有進行中的遊戲!", color=common.bot_error_color))
+                return
+
+            if bet == "all":
+                if data[userid]["cake"] >= 1:
+                    bet = data[userid]["cake"]
+                else:
+                    await interaction.followup.send(embed=Embed(title="撲克牌比大小", description=f"你現在沒有任何{cake_emoji}，無法下注!", color=common.bot_error_color))
+                    return
+            elif bet == "half":
+                if data[userid]["cake"] >= 2:
+                    bet = data[userid]["cake"] // 2
+                else:
+                    await interaction.followup.send(embed=Embed(title="撲克牌比大小", description=f"你的{cake_emoji}不足(至少需2個{cake_emoji})，無法下注!", color=common.bot_error_color))
+                    return
+            elif bet.isdigit() and int(bet) >= 1:
+                bet = int(bet)
+            else:
+                await interaction.followup.send(embed=Embed(title="撲克牌比大小", description=f"無效的數據。(輸入想賭注的{cake_emoji}數量，或者輸入all下注全部的{cake_emoji})", color=common.bot_error_color))
+                return
+
+            if data[userid]["cake"] < bet:
+                await interaction.followup.send(embed=Embed(title="撲克牌比大小", description=f"{cake_emoji}不足，無法下注!", color=common.bot_error_color))
+                return
+
+            data[userid]["cake"] -= bet
+            data[userid]["poker_playing"] = True
+            common.datawrite(data)
+
+        deck = self.create_deck()
+        player_cards = deck[:7]
+        bot_cards = deck[7:14]
+
+        player_display = self.show_cards(player_cards[:5]) + "、?、?"
+        bot_display = self.show_cards(bot_cards[:4]) + "、?、?、?"
+
+        message = Embed(title="撲克牌比大小", color=common.bot_color)
+        message.add_field(name="你的手牌", value=player_display, inline=False)
+        message.add_field(name="Natalie的手牌", value=bot_display, inline=False)
+
+        await interaction.followup.send(embed=message, view=PokerButton(user=interaction, bet=bet, player_cards=player_cards, bot_cards=bot_cards, client=self.bot))
+
+
+class PokerButton(discord.ui.View):
+    def __init__(self, *, timeout=120, user, bet, player_cards, bot_cards, client):
+        super().__init__(timeout=timeout)
+        self.command_interaction = user
+        self.bet = bet
+        self.player_cards = player_cards
+        self.bot_cards = bot_cards
+        self.bot = client
+        self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+
+    def result_message(self, double: bool = False):
+        userid = str(self.command_interaction.user.id)
+        data = common.dataload()
+        player_rank = PokerGame(self.bot).evaluate_hand(self.player_cards)
+        bot_rank = PokerGame(self.bot).evaluate_hand(self.bot_cards)
+        message = Embed(title="撲克牌比大小", color=common.bot_color)
+        message.add_field(name=f"你的手牌(牌型:{player_rank})", value=PokerGame(self.bot).show_cards(self.player_cards), inline=False)
+        message.add_field(name=f"Natalie的手牌(牌型:{bot_rank})", value=PokerGame(self.bot).show_cards(self.bot_cards), inline=False)
+
+        rank_order = PokerGame(self.bot).rank_order
+
+        if rank_order[player_rank] > rank_order[bot_rank]:
+            if double:
+                data[userid]["cake"] += self.bet * 4
+                message.add_field(name="結果", value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
+            else:
+                data[userid]["cake"] += self.bet * 2
+                message.add_field(name="結果", value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
+        elif rank_order[player_rank] < rank_order[bot_rank]:
+            lose_amount = self.bet * 2 if double else self.bet
+            message.add_field(name="結果", value=f"你輸了!\n你失去了**{lose_amount}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
+        else:
+            if double:
+                data[userid]["cake"] += self.bet * 2
+            else:
+                data[userid]["cake"] += self.bet
+            message.add_field(name="結果", value=f"平手!\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
+
+        data[userid]["poker_playing"] = False
+        common.datawrite(data)
+        return message
+
+    @discord.ui.button(label="加注!", style=discord.ButtonStyle.gray)
+    async def double_button(self, interaction, button: discord.ui.Button):
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(interaction.user.id)
+            if data[userid]["cake"] < self.bet:
+                self.double_button.disabled = True
+                self.double_button.label = "加注!(蛋糕不足)"
+                await interaction.response.edit_message(view=self)
+                return
+            data[userid]["cake"] -= self.bet
+            common.datawrite(data)
+
+        self.double_button.disabled = True
+        self.reveal_button.disabled = True
+        self.fold_button.disabled = True
+        message = self.result_message(double=True)
+        await interaction.response.edit_message(embed=message, view=self)
+        self.stop()
+
+    @discord.ui.button(label="顯牌!", style=discord.ButtonStyle.green)
+    async def reveal_button(self, interaction, button: discord.ui.Button):
+        async with common.jsonio_lock:
+            message = self.result_message()
+            self.double_button.disabled = True
+            self.reveal_button.disabled = True
+            self.fold_button.disabled = True
+            await interaction.response.edit_message(embed=message, view=self)
+            self.stop()
+
+    @discord.ui.button(label="放棄...", style=discord.ButtonStyle.red)
+    async def fold_button(self, interaction, button: discord.ui.Button):
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(interaction.user.id)
+            refund = int(self.bet * PokerGame(self.bot).refund_rate)
+            data[userid]["cake"] += refund
+            data[userid]["poker_playing"] = False
+            common.datawrite(data)
+        self.double_button.disabled = True
+        self.reveal_button.disabled = True
+        self.fold_button.disabled = True
+        message = Embed(title="撲克牌比大小", description=f"你選擇放棄，退回**{refund}**塊{self.cake_emoji}", color=common.bot_color)
+        await interaction.response.edit_message(embed=message, view=self)
+        self.stop()
+
+    async def interaction_check(self, interaction) -> bool:
+        if interaction.user != self.command_interaction.user:
+            await interaction.response.send_message(embed=Embed(title="撲克牌比大小", description="你不能遊玩別人建立的遊戲。", color=common.bot_error_color), ephemeral=True)
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(self.command_interaction.user.id)
+            if data.get(userid, {}).get("poker_playing"):
+                data[userid]["poker_playing"] = False
+                common.datawrite(data)
+
         
 
 
@@ -886,3 +1149,4 @@ class AutofixButton(discord.ui.View):
 async def setup(client:commands.Bot):
     await client.add_cog(MiningGame(client))
     await client.add_cog(BlackJack(client))
+    await client.add_cog(PokerGame(client))
