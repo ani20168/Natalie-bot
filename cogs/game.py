@@ -896,6 +896,18 @@ class PokerGame(commands.Cog):
     def show_cards(self, cards):
         return "、".join([f"{r}{s}" for r, s in cards])
 
+    #顯示勝率跟場數(給embed footer以及leaderboard用的)
+    def win_rate_show(self, userid: str) -> str:
+        data = common.dataload()
+        if "poker_round" not in data[userid]:
+            return "你的勝率:未知 總場數:0"
+        if data[userid]["poker_round"] == 0:
+            return f"你的勝率:未知 總場數:{data[userid]['poker_round']}"
+        win_rate = (
+            data[userid]["poker_win_rate"] + data[userid]["poker_tie"] * 0.5
+        ) / data[userid]["poker_round"]
+        return f"你的勝率:{win_rate:.1%} 總場數:{data[userid]['poker_round']}"
+
     @app_commands.command(name="poker", description="撲克牌比大小")
     @app_commands.describe(bet="要下多少賭注?(支援all、half以及輸入蛋糕數量)")
     @app_commands.rename(bet="賭注")
@@ -933,6 +945,10 @@ class PokerGame(commands.Cog):
                 return
 
             data[userid]["cake"] -= bet
+            if "poker_tie" not in data[userid]:
+                data[userid]["poker_win_rate"] = 0
+                data[userid]["poker_round"] = 0
+                data[userid]["poker_tie"] = 0
             data[userid]["poker_playing"] = True
             common.datawrite(data)
 
@@ -946,8 +962,48 @@ class PokerGame(commands.Cog):
         message = Embed(title="撲克牌比大小", color=common.bot_color)
         message.add_field(name="你的手牌", value=player_display, inline=False)
         message.add_field(name="Natalie的手牌", value=bot_display, inline=False)
+        message.set_footer(text=self.win_rate_show(userid))
 
         await interaction.followup.send(embed=message, view=PokerButton(user=interaction, bet=bet, player_cards=player_cards, bot_cards=bot_cards, client=self.bot))
+
+    @app_commands.command(name="poker_leaderboard", description="撲克牌勝率排行榜")
+    async def poker_leaderboard(self, interaction):
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(interaction.user.id)
+            if "poker_tie" not in data.get(userid, {}):
+                data[userid]["poker_win_rate"] = 0
+                data[userid]["poker_round"] = 0
+                data[userid]["poker_tie"] = 0
+                common.datawrite(data)
+
+        players = []
+        for user_id, user_data in data.items():
+            if isinstance(user_data, dict) and "poker_round" in user_data and user_data["poker_round"] >= 50:
+                win_rate = (user_data["poker_win_rate"] + user_data["poker_tie"] * 0.5) / user_data["poker_round"]
+                players.append({"user_id": user_id, "win_rate": win_rate, "round": user_data["poker_round"]})
+
+        players.sort(key=lambda x: x["win_rate"], reverse=True)
+        top_players = players[:5]
+        message = ""
+        for i, player in enumerate(top_players):
+            user_object = self.bot.get_user(int(player["user_id"]))
+            message += f"{i+1}.{user_object.display_name} 勝率:**{player['win_rate']:.1%}** 總場數:**{player['round']}**\n"
+
+        if data[userid]["poker_round"] == 0:
+            interaction_user_win_rate = 0
+        else:
+            interaction_user_win_rate = (
+                data[userid]["poker_win_rate"] + data[userid]["poker_tie"] * 0.5
+            ) / data[userid]["poker_round"]
+
+        await interaction.response.send_message(
+            embed=Embed(
+                title="撲克牌勝率排行榜",
+                description=f"注意:需要遊玩至少50場才會記錄至排行榜。\n{message}\n你的勝率為:**{interaction_user_win_rate:.1%}** 總場數:**{data[userid]['poker_round']}**",
+                color=common.bot_color,
+            )
+        )
 
 
 class PokerButton(discord.ui.View):
@@ -970,8 +1026,10 @@ class PokerButton(discord.ui.View):
         message.add_field(name=f"Natalie的手牌(牌型:{bot_rank})", value=PokerGame(self.bot).show_cards(self.bot_cards), inline=False)
 
         rank_order = PokerGame(self.bot).rank_order
+        data[userid]["poker_round"] += 1
 
         if rank_order[player_rank] > rank_order[bot_rank]:
+            data[userid]["poker_win_rate"] += 1
             if double:
                 data[userid]["cake"] += self.bet * 4
                 message.add_field(name="結果", value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
@@ -986,10 +1044,12 @@ class PokerButton(discord.ui.View):
                 data[userid]["cake"] += self.bet * 2
             else:
                 data[userid]["cake"] += self.bet
+            data[userid]["poker_tie"] += 1
             message.add_field(name="結果", value=f"平手!\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
 
         data[userid]["poker_playing"] = False
         common.datawrite(data)
+        message.set_footer(text=PokerGame(self.bot).win_rate_show(userid))
         return message
 
     @discord.ui.button(label="加注!", style=discord.ButtonStyle.gray)
@@ -1029,12 +1089,15 @@ class PokerButton(discord.ui.View):
             userid = str(interaction.user.id)
             refund = int(self.bet * PokerGame(self.bot).refund_rate)
             data[userid]["cake"] += refund
+            if "poker_round" in data[userid]:
+                data[userid]["poker_round"] += 1
             data[userid]["poker_playing"] = False
             common.datawrite(data)
         self.double_button.disabled = True
         self.reveal_button.disabled = True
         self.fold_button.disabled = True
         message = Embed(title="撲克牌比大小", description=f"你選擇放棄，退回**{refund}**塊{self.cake_emoji}", color=common.bot_color)
+        message.set_footer(text=PokerGame(self.bot).win_rate_show(userid))
         await interaction.response.edit_message(embed=message, view=self)
         self.stop()
 
