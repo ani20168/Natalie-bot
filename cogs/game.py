@@ -3,6 +3,7 @@ from discord import app_commands,Embed
 from discord.ext import commands
 from . import common
 import random
+import itertools
 import asyncio
 import time
 
@@ -831,11 +832,21 @@ class PokerGame(commands.Cog):
     def __init__(self, client: commands.Bot):
         self.bot = client
         self.refund_rate = 0.2
-        # self.suits = ["\u2660", "\u2665\ufe0f", "\u2666\ufe0f", "\u2663"]
-        self.suits = ["\♣️", "\♦️", "\♥️", "\♠️"]
-        self.ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
-        self.rank_value = {"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
-        self.rank_order = {
+    def evaluate_five_cards(self, cards):
+    def evaluate_hand(self, cards):
+        if len(cards) <= 5:
+            return self.evaluate_five_cards(cards)
+        best_rank = "高牌"
+        for combo in itertools.combinations(cards, 5):
+            rank = self.evaluate_five_cards(list(combo))
+            if self.rank_order[rank] > self.rank_order[best_rank]:
+                best_rank = rank
+        return best_rank
+
+        player_cards = deck[:7]
+        bot_cards = deck[7:14]
+        player_display = self.show_cards(player_cards[:5]) + "、?、?"
+        bot_display = self.show_cards(bot_cards[:4]) + "、?、?、?"
             "高牌": 1,
             "一對": 2,
             "兩對": 3,
