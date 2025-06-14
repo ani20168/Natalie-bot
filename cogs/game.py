@@ -920,6 +920,7 @@ class PokerGame(commands.Cog):
         best_rank = "高牌"
         best_order = 0
         best_value = []
+        best_combo = []
         for combo in itertools.combinations(cards, 5):
             rank, value = self.evaluate_five_cards_detailed(list(combo))
             order = self.rank_order[rank]
@@ -927,7 +928,30 @@ class PokerGame(commands.Cog):
                 best_rank = rank
                 best_order = order
                 best_value = value
-        return best_rank, best_order, best_value
+                best_combo = list(combo)
+        return best_rank, best_order, best_value, best_combo
+
+    def extract_rank_cards(self, combo, rank):
+        values = [self.rank_value[r] for r, _ in combo]
+        counts = {v: values.count(v) for v in set(values)}
+
+        if rank in ["皇家同花順", "同花順", "順子", "同花", "葫蘆"]:
+            return combo
+        if rank == "鐵支":
+            val = max(v for v, c in counts.items() if c == 4)
+            return [card for card in combo if self.rank_value[card[0]] == val]
+        if rank == "三條":
+            val = max(v for v, c in counts.items() if c == 3)
+            return [card for card in combo if self.rank_value[card[0]] == val]
+        if rank == "兩對":
+            vals = [v for v, c in counts.items() if c == 2]
+            return [card for card in combo if self.rank_value[card[0]] in vals]
+        if rank == "一對":
+            val = max(v for v, c in counts.items() if c == 2)
+            return [card for card in combo if self.rank_value[card[0]] == val]
+        # 高牌
+        high = max(values)
+        return [card for card in combo if self.rank_value[card[0]] == high]
 
     def show_cards(self, cards):
         return "、".join([f"{r}{s}" for r, s in cards])
@@ -1055,11 +1079,34 @@ class PokerButton(discord.ui.View):
     def result_message(self, double: bool = False):
         userid = str(self.command_interaction.user.id)
         data = common.dataload()
-        player_rank, player_order, player_value = PokerGame(self.bot).best_hand_value(self.player_cards)
-        bot_rank, bot_order, bot_value = PokerGame(self.bot).best_hand_value(self.bot_cards)
+        (
+            player_rank,
+            player_order,
+            player_value,
+            player_combo,
+        ) = PokerGame(self.bot).best_hand_value(self.player_cards)
+        (
+            bot_rank,
+            bot_order,
+            bot_value,
+            bot_combo,
+        ) = PokerGame(self.bot).best_hand_value(self.bot_cards)
+        pg = PokerGame(self.bot)
+        player_best = pg.extract_rank_cards(player_combo, player_rank)
+        bot_best = pg.extract_rank_cards(bot_combo, bot_rank)
         message = Embed(title="撲克牌比大小", color=common.bot_color)
-        message.add_field(name=f"你的手牌(牌型:{player_rank})", value=PokerGame(self.bot).show_cards(self.player_cards), inline=False)
-        message.add_field(name=f"Natalie的手牌(牌型:{bot_rank})", value=PokerGame(self.bot).show_cards(self.bot_cards), inline=False)
+        message.add_field(
+            name=f"你的手牌(牌型:{player_rank})",
+            value=pg.show_cards(self.player_cards)
+            + "\n最好牌型:" + pg.show_cards(player_best),
+            inline=False,
+        )
+        message.add_field(
+            name=f"Natalie的手牌(牌型:{bot_rank})",
+            value=pg.show_cards(self.bot_cards)
+            + "\n最好牌型:" + pg.show_cards(bot_best),
+            inline=False,
+        )
 
         data[userid]["poker_round"] += 1
 
