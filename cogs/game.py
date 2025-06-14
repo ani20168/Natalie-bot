@@ -833,21 +833,10 @@ class PokerGame(commands.Cog):
     def __init__(self, client: commands.Bot):
         self.bot = client
         self.refund_rate = 0.2
-    def evaluate_five_cards(self, cards):
-    def evaluate_hand(self, cards):
-        if len(cards) <= 5:
-            return self.evaluate_five_cards(cards)
-        best_rank = "高牌"
-        for combo in itertools.combinations(cards, 5):
-            rank = self.evaluate_five_cards(list(combo))
-            if self.rank_order[rank] > self.rank_order[best_rank]:
-                best_rank = rank
-        return best_rank
-
-        player_cards = deck[:7]
-        bot_cards = deck[7:14]
-        player_display = self.show_cards(player_cards[:5]) + "、?、?"
-        bot_display = self.show_cards(bot_cards[:4]) + "、?、?、?"
+        self.suits = ["\♣️", "\♦️", "\♥️", "\♠️"]
+        self.ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+        self.rank_value = {"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
+        self.rank_order = {
             "高牌": 1,
             "一對": 2,
             "兩對": 3,
@@ -859,6 +848,53 @@ class PokerGame(commands.Cog):
             "同花順": 9,
             "皇家同花順": 10,
         }
+
+    def create_deck(self):
+        deck = [(r, s) for s in self.suits for r in self.ranks]
+        random.shuffle(deck)
+        return deck
+
+    def evaluate_five_cards(self, cards):
+        values = [self.rank_value[r] for r, _ in cards]
+        suits = [s for _, s in cards]
+        value_counts = {v: values.count(v) for v in values}
+        sorted_counts = sorted(value_counts.values(), reverse=True)
+        is_flush = len(set(suits)) == 1
+        unique_values = sorted(set(values))
+        is_straight = len(unique_values) == 5 and max(unique_values) - min(unique_values) == 4
+
+        if is_flush and sorted(values) == [10, 11, 12, 13, 14]:
+            return "皇家同花順"
+        if is_flush and is_straight:
+            return "同花順"
+        if sorted_counts == [4, 1]:
+            return "鐵支"
+        if sorted_counts == [3, 2]:
+            return "葫蘆"
+        if is_flush:
+            return "同花"
+        if is_straight:
+            return "順子"
+        if sorted_counts == [3, 1, 1]:
+            return "三條"
+        if sorted_counts == [2, 2, 1]:
+            return "兩對"
+        if sorted_counts == [2, 1, 1, 1]:
+            return "一對"
+        return "高牌"
+
+    def evaluate_hand(self, cards):
+        if len(cards) <= 5:
+            return self.evaluate_five_cards(cards)
+        best_rank = "高牌"
+        for combo in itertools.combinations(cards, 5):
+            rank = self.evaluate_five_cards(list(combo))
+            if self.rank_order[rank] > self.rank_order[best_rank]:
+                best_rank = rank
+        return best_rank
+
+    def show_cards(self, cards):
+        return "、".join([f"{r}{s}" for r, s in cards])
 
     def create_deck(self):
         deck = [(r, s) for s in self.suits for r in self.ranks]
@@ -938,11 +974,11 @@ class PokerGame(commands.Cog):
             common.datawrite(data)
 
         deck = self.create_deck()
-        player_cards = deck[:5]
-        bot_cards = deck[5:10]
+        player_cards = deck[:7]
+        bot_cards = deck[7:14]
 
-        player_display = self.show_cards(player_cards[:4]) + "、?"
-        bot_display = self.show_cards(bot_cards[:3]) + "、?、?"
+        player_display = self.show_cards(player_cards[:5]) + "、?、?"
+        bot_display = self.show_cards(bot_cards[:4]) + "、?、?、?"
 
         message = Embed(title="撲克牌比大小", color=common.bot_color)
         message.add_field(name="你的手牌", value=player_display, inline=False)
