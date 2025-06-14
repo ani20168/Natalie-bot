@@ -855,43 +855,79 @@ class PokerGame(commands.Cog):
         return deck
 
     def evaluate_five_cards(self, cards):
-        values = [self.rank_value[r] for r, _ in cards]
+        rank, _ = self.evaluate_five_cards_detailed(cards)
+        return rank
+
+    def evaluate_five_cards_detailed(self, cards):
+        values = sorted([self.rank_value[r] for r, _ in cards])
         suits = [s for _, s in cards]
-        value_counts = {v: values.count(v) for v in values}
-        sorted_counts = sorted(value_counts.values(), reverse=True)
+        counts = {v: values.count(v) for v in set(values)}
+        sorted_counts = sorted(counts.items(), key=lambda x: (-x[1], -x[0]))
+        count_values = sorted(counts.values(), reverse=True)
         is_flush = len(set(suits)) == 1
         unique_values = sorted(set(values))
-        is_straight = len(unique_values) == 5 and max(unique_values) - min(unique_values) == 4
+        is_straight = len(unique_values) == 5 and unique_values[-1] - unique_values[0] == 4
 
-        if is_flush and sorted(values) == [10, 11, 12, 13, 14]:
-            return "皇家同花順"
+        if is_flush and values == [10, 11, 12, 13, 14]:
+            return "皇家同花順", [14]
         if is_flush and is_straight:
-            return "同花順"
-        if sorted_counts == [4, 1]:
-            return "鐵支"
-        if sorted_counts == [3, 2]:
-            return "葫蘆"
+            return "同花順", [unique_values[-1]]
+        if count_values == [4, 1]:
+            four = sorted_counts[0][0]
+            kicker = [v for v in values if v != four][0]
+            return "鐵支", [four, kicker]
+        if count_values == [3, 2]:
+            triple = sorted_counts[0][0]
+            pair = sorted_counts[1][0]
+            return "葫蘆", [triple, pair]
         if is_flush:
-            return "同花"
+            return "同花", sorted(values, reverse=True)
         if is_straight:
-            return "順子"
-        if sorted_counts == [3, 1, 1]:
-            return "三條"
-        if sorted_counts == [2, 2, 1]:
-            return "兩對"
-        if sorted_counts == [2, 1, 1, 1]:
-            return "一對"
-        return "高牌"
+            return "順子", [unique_values[-1]]
+        if count_values == [3, 1, 1]:
+            triple = sorted_counts[0][0]
+            kickers = sorted([v for v in values if v != triple], reverse=True)
+            return "三條", [triple] + kickers
+        if count_values == [2, 2, 1]:
+            pair1 = sorted_counts[0][0]
+            pair2 = sorted_counts[1][0]
+            kicker = max([v for v in values if v != pair1 and v != pair2])
+            pair_values = sorted([pair1, pair2], reverse=True)
+            return "兩對", pair_values + [kicker]
+        if count_values == [2, 1, 1, 1]:
+            pair = sorted_counts[0][0]
+            kickers = sorted([v for v in values if v != pair], reverse=True)
+            return "一對", [pair] + kickers
+        return "高牌", sorted(values, reverse=True)
 
     def evaluate_hand(self, cards):
         if len(cards) <= 5:
-            return self.evaluate_five_cards(cards)
+            rank, _ = self.evaluate_five_cards_detailed(cards)
+            return rank
         best_rank = "高牌"
+        best_order = 0
+        best_value = []
         for combo in itertools.combinations(cards, 5):
-            rank = self.evaluate_five_cards(list(combo))
-            if self.rank_order[rank] > self.rank_order[best_rank]:
+            rank, value = self.evaluate_five_cards_detailed(list(combo))
+            order = self.rank_order[rank]
+            if order > best_order or (order == best_order and value > best_value):
+                best_order = order
                 best_rank = rank
+                best_value = value
         return best_rank
+
+    def best_hand_value(self, cards):
+        best_rank = "高牌"
+        best_order = 0
+        best_value = []
+        for combo in itertools.combinations(cards, 5):
+            rank, value = self.evaluate_five_cards_detailed(list(combo))
+            order = self.rank_order[rank]
+            if order > best_order or (order == best_order and value > best_value):
+                best_rank = rank
+                best_order = order
+                best_value = value
+        return best_rank, best_order, best_value
 
     def show_cards(self, cards):
         return "、".join([f"{r}{s}" for r, s in cards])
@@ -1019,16 +1055,15 @@ class PokerButton(discord.ui.View):
     def result_message(self, double: bool = False):
         userid = str(self.command_interaction.user.id)
         data = common.dataload()
-        player_rank = PokerGame(self.bot).evaluate_hand(self.player_cards)
-        bot_rank = PokerGame(self.bot).evaluate_hand(self.bot_cards)
+        player_rank, player_order, player_value = PokerGame(self.bot).best_hand_value(self.player_cards)
+        bot_rank, bot_order, bot_value = PokerGame(self.bot).best_hand_value(self.bot_cards)
         message = Embed(title="撲克牌比大小", color=common.bot_color)
         message.add_field(name=f"你的手牌(牌型:{player_rank})", value=PokerGame(self.bot).show_cards(self.player_cards), inline=False)
         message.add_field(name=f"Natalie的手牌(牌型:{bot_rank})", value=PokerGame(self.bot).show_cards(self.bot_cards), inline=False)
 
-        rank_order = PokerGame(self.bot).rank_order
         data[userid]["poker_round"] += 1
 
-        if rank_order[player_rank] > rank_order[bot_rank]:
+        if player_order > bot_order or (player_order == bot_order and player_value > bot_value):
             data[userid]["poker_win_rate"] += 1
             if double:
                 data[userid]["cake"] += self.bet * 4
@@ -1036,7 +1071,7 @@ class PokerButton(discord.ui.View):
             else:
                 data[userid]["cake"] += self.bet * 2
                 message.add_field(name="結果", value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
-        elif rank_order[player_rank] < rank_order[bot_rank]:
+        elif player_order < bot_order or (player_order == bot_order and player_value < bot_value):
             lose_amount = self.bet * 2 if double else self.bet
             message.add_field(name="結果", value=f"你輸了!\n你失去了**{lose_amount}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
         else:
@@ -1091,6 +1126,7 @@ class PokerButton(discord.ui.View):
             data[userid]["cake"] += refund
             if "poker_round" in data[userid]:
                 data[userid]["poker_round"] += 1
+                data[userid]["poker_tie"] += 1
             data[userid]["poker_playing"] = False
             common.datawrite(data)
         self.double_button.disabled = True
