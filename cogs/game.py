@@ -829,6 +829,7 @@ class BlackJackButton(discord.ui.View):
 
 
 class PokerGame(commands.Cog):
+    """Simple poker showdown using seven-card hands."""
     def __init__(self, client: commands.Bot):
         self.bot = client
         self.refund_rate = 0.2
