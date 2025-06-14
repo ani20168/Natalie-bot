@@ -896,43 +896,6 @@ class PokerGame(commands.Cog):
     def show_cards(self, cards):
         return "、".join([f"{r}{s}" for r, s in cards])
 
-    def create_deck(self):
-        deck = [(r, s) for s in self.suits for r in self.ranks]
-        random.shuffle(deck)
-        return deck
-
-    def evaluate_hand(self, cards):
-        values = [self.rank_value[r] for r, _ in cards]
-        suits = [s for _, s in cards]
-        value_counts = {v: values.count(v) for v in values}
-        sorted_counts = sorted(value_counts.values(), reverse=True)
-        is_flush = len(set(suits)) == 1
-        unique_values = sorted(set(values))
-        is_straight = len(unique_values) == 5 and max(unique_values) - min(unique_values) == 4
-
-        if is_flush and sorted(values) == [10, 11, 12, 13, 14]:
-            return "皇家同花順"
-        if is_flush and is_straight:
-            return "同花順"
-        if sorted_counts == [4, 1]:
-            return "鐵支"
-        if sorted_counts == [3, 2]:
-            return "葫蘆"
-        if is_flush:
-            return "同花"
-        if is_straight:
-            return "順子"
-        if sorted_counts == [3, 1, 1]:
-            return "三條"
-        if sorted_counts == [2, 2, 1]:
-            return "兩對"
-        if sorted_counts == [2, 1, 1, 1]:
-            return "一對"
-        return "高牌"
-
-    def show_cards(self, cards):
-        return "、".join([f"{r}{s}" for r, s in cards])
-
     @app_commands.command(name="poker", description="撲克牌比大小")
     @app_commands.describe(bet="要下多少賭注?(支援all、half以及輸入蛋糕數量)")
     @app_commands.rename(bet="賭注")
