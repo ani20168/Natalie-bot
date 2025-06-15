@@ -1154,7 +1154,7 @@ class PokerButton(discord.ui.View):
         await interaction.response.edit_message(embed=message, view=self)
         self.stop()
 
-    @discord.ui.button(label="顯牌!", style=discord.ButtonStyle.green)
+    @discord.ui.button(label="攤牌!", style=discord.ButtonStyle.green)
     async def reveal_button(self, interaction, button: discord.ui.Button):
         async with common.jsonio_lock:
             message = self.result_message()
