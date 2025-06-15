@@ -1206,13 +1206,15 @@ class SquidRPS(commands.Cog):
     """Squid Game style rock-paper-scissors."""
     def __init__(self, client: commands.Bot):
         self.bot = client
+        # 玩家有六種雙手組合，其中重複出的拳只有玩家能選
+        # 機器人僅會選擇非重複拳的三種組合
         self.combo_choices = [
             ("✊", "✌️"),
             ("✊", "✋"),
-            ("✌️", "✊"),
             ("✌️", "✋"),
-            ("✋", "✊"),
-            ("✋", "✌️"),
+            ("✊", "✊"),
+            ("✌️", "✌️"),
+            ("✋", "✋"),
         ]
         self.bot_choices = [
             ("✊", "✋"),
@@ -1304,6 +1306,7 @@ class SquidRPS(commands.Cog):
             description="請選擇你要出的雙手組合",
             color=common.bot_color,
         )
+        message.add_field(name="手槍彈夾", value=view.clip_display(), inline=False)
         msg = await interaction.followup.send(embed=message, view=view)
         view.message = msg
 
@@ -1319,6 +1322,13 @@ class SquidRPSView(discord.ui.View):
         self.player_combo = None
         self.bot_combo = None
         self.bot_keep = None
+        # 隨機決定實彈位置，並追蹤已扣下的扳機次數
+        self.bullet_position = random.randint(0, 5)
+        self.shots_fired = 0
+
+    def clip_display(self) -> str:
+        """顯示目前彈夾狀態"""
+        return "".join("○" if i < self.shots_fired else "●" for i in range(6))
 
     async def reset_round(self):
         for b in self.combo_buttons:
@@ -1333,6 +1343,7 @@ class SquidRPSView(discord.ui.View):
             description="請選擇你要出的雙手組合",
             color=common.bot_color,
         )
+        embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
         await self.message.edit(embed=embed, view=self)
 
     def compare(self, p, b):
@@ -1353,6 +1364,7 @@ class SquidRPSView(discord.ui.View):
         )
         embed.add_field(name="你的雙手", value=f"{combo[0]}、{combo[1]}")
         embed.add_field(name="Natalie的雙手", value=f"{self.bot_combo[0]}、{self.bot_combo[1]}")
+        embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
         await interaction.response.edit_message(embed=embed, view=self)
 
     @discord.ui.button(label="✊&✌️", style=discord.ButtonStyle.gray)
@@ -1363,21 +1375,21 @@ class SquidRPSView(discord.ui.View):
     async def combo2(self, interaction, button):
         await self.choose_combo(interaction, ("✊", "✋"))
 
-    @discord.ui.button(label="✌️&✊", style=discord.ButtonStyle.gray)
-    async def combo3(self, interaction, button):
-        await self.choose_combo(interaction, ("✌️", "✊"))
-
     @discord.ui.button(label="✌️&✋", style=discord.ButtonStyle.gray)
-    async def combo4(self, interaction, button):
+    async def combo3(self, interaction, button):
         await self.choose_combo(interaction, ("✌️", "✋"))
 
-    @discord.ui.button(label="✋&✊", style=discord.ButtonStyle.gray)
-    async def combo5(self, interaction, button):
-        await self.choose_combo(interaction, ("✋", "✊"))
+    @discord.ui.button(label="✊✊", style=discord.ButtonStyle.gray)
+    async def combo4(self, interaction, button):
+        await self.choose_combo(interaction, ("✊", "✊"))
 
-    @discord.ui.button(label="✋&✌️", style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="✌️✌️", style=discord.ButtonStyle.gray)
+    async def combo5(self, interaction, button):
+        await self.choose_combo(interaction, ("✌️", "✌️"))
+
+    @discord.ui.button(label="✋✋", style=discord.ButtonStyle.gray)
     async def combo6(self, interaction, button):
-        await self.choose_combo(interaction, ("✋", "✌️"))
+        await self.choose_combo(interaction, ("✋", "✋"))
 
     @discord.ui.button(label="收左手", style=discord.ButtonStyle.blurple, disabled=True)
     async def left_button(self, interaction, button):
@@ -1401,12 +1413,15 @@ class SquidRPSView(discord.ui.View):
         if result == 0:
             desc += "，平手!"
             embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
+            embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
             await interaction.response.edit_message(embed=embed, view=self)
             await asyncio.sleep(5)
             await self.reset_round()
             return
 
-        shot = random.randint(1, 6) == 1
+        # 扣下扳機
+        self.shots_fired += 1
+        shot = self.shots_fired - 1 == self.bullet_position
         async with common.jsonio_lock:
             data = common.dataload()
             userid = str(self.command_interaction.user.id)
@@ -1416,14 +1431,21 @@ class SquidRPSView(discord.ui.View):
                     desc += "\n砰! 實彈擊中Natalie，你贏得了遊戲!"
                     data[userid]["cake"] += self.bet * 2
                     data[userid]["squid_playing"] = False
-                    common.datawrite(data)
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
+                    embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+                    embed.add_field(
+                        name="結果",
+                        value=f"你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
+                        inline=False,
+                    )
+                    common.datawrite(data)
                     await interaction.response.edit_message(embed=embed, view=None)
                     self.stop()
                     return
                 else:
                     desc += "\n是空包彈... 下一回合!"
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
+                    embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
                     common.datawrite(data)
                     await interaction.response.edit_message(embed=embed, view=self)
                     await asyncio.sleep(5)
@@ -1432,16 +1454,23 @@ class SquidRPSView(discord.ui.View):
             else:
                 desc += "，你輸了..."
                 if shot:
-                    desc += "\n砰! 你被擊中..." 
+                    desc += "\n砰! 你被擊中..."
                     data[userid]["squid_playing"] = False
-                    common.datawrite(data)
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
+                    embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+                    embed.add_field(
+                        name="結果",
+                        value=f"你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
+                        inline=False,
+                    )
+                    common.datawrite(data)
                     await interaction.response.edit_message(embed=embed, view=None)
                     self.stop()
                     return
                 else:
                     desc += "\n是空包彈... 下一回合!"
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
+                    embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
                     common.datawrite(data)
                     await interaction.response.edit_message(embed=embed, view=self)
                     await asyncio.sleep(5)
