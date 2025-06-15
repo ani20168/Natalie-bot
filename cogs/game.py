@@ -1362,8 +1362,8 @@ class SquidRPSView(discord.ui.View):
             description="選擇要留下哪一手",
             color=common.bot_color,
         )
-        embed.add_field(name="你的雙手", value=f"{combo[0]}、{combo[1]}")
-        embed.add_field(name="Natalie的雙手", value=f"{self.bot_combo[0]}、{self.bot_combo[1]}")
+        embed.add_field(name="Natalie的雙手", value=f"{self.bot_combo[0]}、{self.bot_combo[1]}", inline=False)
+        embed.add_field(name="你的雙手", value=f"{combo[0]}、{combo[1]}", inline=False)
         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
         await interaction.response.edit_message(embed=embed, view=self)
 
