@@ -832,7 +832,8 @@ class PokerGame(commands.Cog):
     """Simple poker showdown using seven-card hands."""
     def __init__(self, client: commands.Bot):
         self.bot = client
-        self.refund_rate = 0.2
+        self.max_bet = 100000 #最多可下注多少
+        self.refund_rate = 0.2 #放棄時，退回本金比例(0.2=20%)
         self.suits = ["\♣️", "\♦️", "\♥️", "\♠️"]
         self.ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
         self.rank_value = {"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
@@ -969,7 +970,7 @@ class PokerGame(commands.Cog):
         return f"你的勝率:{win_rate:.1%} 總場數:{data[userid]['poker_round']}"
 
     @app_commands.command(name="poker", description="撲克牌比大小")
-    @app_commands.describe(bet="要下多少賭注?(支援all、half以及輸入蛋糕數量)")
+    @app_commands.describe(bet="要下多少賭注?(支援all、half以及輸入蛋糕數量，最多下注100000)")
     @app_commands.rename(bet="賭注")
     async def poker(self, interaction, bet: str):
         await interaction.response.defer()
@@ -1003,6 +1004,8 @@ class PokerGame(commands.Cog):
             if data[userid]["cake"] < bet:
                 await interaction.followup.send(embed=Embed(title="撲克牌比大小", description=f"{cake_emoji}不足，無法下注!", color=common.bot_error_color))
                 return
+
+            if bet > self.max_bet: bet = self.max_bet #下注最高上限
 
             data[userid]["cake"] -= bet
             if "poker_tie" not in data[userid]:
