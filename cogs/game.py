@@ -1207,23 +1207,23 @@ class SquidRPS(commands.Cog):
     def __init__(self, client: commands.Bot):
         self.bot = client
         self.combo_choices = [
-            ("石頭", "剪刀"),
-            ("石頭", "布"),
-            ("剪刀", "石頭"),
-            ("剪刀", "布"),
-            ("布", "石頭"),
-            ("布", "剪刀"),
+            ("✊", "✌️"),
+            ("✊", "✋"),
+            ("✌️", "✊"),
+            ("✌️", "✋"),
+            ("✋", "✊"),
+            ("✋", "✌️"),
         ]
         self.bot_choices = [
-            ("石頭", "布"),
-            ("石頭", "剪刀"),
-            ("剪刀", "布"),
+            ("✊", "✋"),
+            ("✊", "✌️"),
+            ("✌️", "✋"),
         ]
 
     def rps_result(self, a: str, b: str) -> int:
         if a == b:
             return 0
-        win_table = {("石頭", "剪刀"), ("剪刀", "布"), ("布", "石頭")}
+        win_table = {("✊", "✌️"), ("✌️", "✋"), ("✋", "✊")}
         if (a, b) in win_table:
             return 1
         return -1
@@ -1355,37 +1355,37 @@ class SquidRPSView(discord.ui.View):
         embed.add_field(name="Natalie的雙手", value=f"{self.bot_combo[0]}、{self.bot_combo[1]}")
         await interaction.response.edit_message(embed=embed, view=self)
 
-    @discord.ui.button(label="石頭&剪刀", style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="✊&✌️", style=discord.ButtonStyle.gray)
     async def combo1(self, interaction, button):
-        await self.choose_combo(interaction, ("石頭", "剪刀"))
+        await self.choose_combo(interaction, ("✊", "✌️"))
 
-    @discord.ui.button(label="石頭&布", style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="✊&✋", style=discord.ButtonStyle.gray)
     async def combo2(self, interaction, button):
-        await self.choose_combo(interaction, ("石頭", "布"))
+        await self.choose_combo(interaction, ("✊", "✋"))
 
-    @discord.ui.button(label="剪刀&石頭", style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="✌️&✊", style=discord.ButtonStyle.gray)
     async def combo3(self, interaction, button):
-        await self.choose_combo(interaction, ("剪刀", "石頭"))
+        await self.choose_combo(interaction, ("✌️", "✊"))
 
-    @discord.ui.button(label="剪刀&布", style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="✌️&✋", style=discord.ButtonStyle.gray)
     async def combo4(self, interaction, button):
-        await self.choose_combo(interaction, ("剪刀", "布"))
+        await self.choose_combo(interaction, ("✌️", "✋"))
 
-    @discord.ui.button(label="布&石頭", style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="✋&✊", style=discord.ButtonStyle.gray)
     async def combo5(self, interaction, button):
-        await self.choose_combo(interaction, ("布", "石頭"))
+        await self.choose_combo(interaction, ("✋", "✊"))
 
-    @discord.ui.button(label="布&剪刀", style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="✋&✌️", style=discord.ButtonStyle.gray)
     async def combo6(self, interaction, button):
-        await self.choose_combo(interaction, ("布", "剪刀"))
+        await self.choose_combo(interaction, ("✋", "✌️"))
 
     @discord.ui.button(label="收左手", style=discord.ButtonStyle.blurple, disabled=True)
     async def left_button(self, interaction, button):
-        await self.keep_hand(interaction, 0)
+        await self.keep_hand(interaction, 1)
 
     @discord.ui.button(label="收右手", style=discord.ButtonStyle.blurple, disabled=True)
     async def right_button(self, interaction, button):
-        await self.keep_hand(interaction, 1)
+        await self.keep_hand(interaction, 0)
 
     @property
     def combo_buttons(self):
@@ -1402,7 +1402,7 @@ class SquidRPSView(discord.ui.View):
             desc += "，平手!"
             embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
             await interaction.response.edit_message(embed=embed, view=self)
-            await asyncio.sleep(3)
+            await asyncio.sleep(5)
             await self.reset_round()
             return
 
@@ -1426,7 +1426,7 @@ class SquidRPSView(discord.ui.View):
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                     common.datawrite(data)
                     await interaction.response.edit_message(embed=embed, view=self)
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(5)
                     await self.reset_round()
                     return
             else:
@@ -1444,7 +1444,7 @@ class SquidRPSView(discord.ui.View):
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                     common.datawrite(data)
                     await interaction.response.edit_message(embed=embed, view=self)
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(5)
                     await self.reset_round()
                     return
 
