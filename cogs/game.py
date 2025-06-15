@@ -1201,6 +1201,272 @@ class PokerButton(discord.ui.View):
                 data[userid]["poker_playing"] = False
                 common.datawrite(data)
 
+
+class SquidRPS(commands.Cog):
+    """Squid Game style rock-paper-scissors."""
+    def __init__(self, client: commands.Bot):
+        self.bot = client
+        self.combo_choices = [
+            ("石頭", "剪刀"),
+            ("石頭", "布"),
+            ("剪刀", "石頭"),
+            ("剪刀", "布"),
+            ("布", "石頭"),
+            ("布", "剪刀"),
+        ]
+        self.bot_choices = [
+            ("石頭", "布"),
+            ("石頭", "剪刀"),
+            ("剪刀", "布"),
+        ]
+
+    def rps_result(self, a: str, b: str) -> int:
+        if a == b:
+            return 0
+        win_table = {("石頭", "剪刀"), ("剪刀", "布"), ("布", "石頭")}
+        if (a, b) in win_table:
+            return 1
+        return -1
+
+    @app_commands.command(name="squid_rps", description="魷魚遊戲的猜拳")
+    @app_commands.describe(bet="要下多少賭注?(支援all、half以及輸入蛋糕數量)")
+    @app_commands.rename(bet="賭注")
+    async def squid_rps(self, interaction, bet: str):
+        await interaction.response.defer()
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(interaction.user.id)
+            cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+
+            if data.get(userid, {}).get("squid_playing"):
+                await interaction.followup.send(
+                    embed=Embed(
+                        title="魷魚猜拳",
+                        description="你現在有進行中的遊戲!",
+                        color=common.bot_error_color,
+                    )
+                )
+                return
+
+            if bet == "all":
+                if data[userid]["cake"] >= 1:
+                    bet = data[userid]["cake"]
+                else:
+                    await interaction.followup.send(
+                        embed=Embed(
+                            title="魷魚猜拳",
+                            description=f"你現在沒有任何{cake_emoji}，無法下注!",
+                            color=common.bot_error_color,
+                        )
+                    )
+                    return
+            elif bet == "half":
+                if data[userid]["cake"] >= 2:
+                    bet = data[userid]["cake"] // 2
+                else:
+                    await interaction.followup.send(
+                        embed=Embed(
+                            title="魷魚猜拳",
+                            description=f"你的{cake_emoji}不足(至少需2個{cake_emoji})，無法下注!",
+                            color=common.bot_error_color,
+                        )
+                    )
+                    return
+            elif bet.isdigit() and int(bet) >= 1:
+                bet = int(bet)
+            else:
+                await interaction.followup.send(
+                    embed=Embed(
+                        title="魷魚猜拳",
+                        description=f"無效的數據。(輸入想賭注的{cake_emoji}數量，或者輸入all下注全部的{cake_emoji})",
+                        color=common.bot_error_color,
+                    )
+                )
+                return
+
+            if data[userid]["cake"] < bet:
+                await interaction.followup.send(
+                    embed=Embed(
+                        title="魷魚猜拳",
+                        description=f"{cake_emoji}不足，無法下注!",
+                        color=common.bot_error_color,
+                    )
+                )
+                return
+
+            data[userid]["cake"] -= bet
+            data[userid]["squid_playing"] = True
+            common.datawrite(data)
+
+        view = SquidRPSView(user=interaction, bet=bet, client=self.bot)
+        message = Embed(
+            title="魷魚猜拳",
+            description="請選擇你要出的雙手組合",
+            color=common.bot_color,
+        )
+        msg = await interaction.followup.send(embed=message, view=view)
+        view.message = msg
+
+
+class SquidRPSView(discord.ui.View):
+    def __init__(self, *, timeout=120, user, bet, client):
+        super().__init__(timeout=timeout)
+        self.command_interaction = user
+        self.bet = bet
+        self.bot = client
+        self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        self.message = None
+        self.player_combo = None
+        self.bot_combo = None
+        self.bot_keep = None
+
+    async def reset_round(self):
+        for b in self.combo_buttons:
+            b.disabled = False
+        self.left_button.disabled = True
+        self.right_button.disabled = True
+        self.player_combo = None
+        self.bot_combo = None
+        self.bot_keep = None
+        embed = Embed(
+            title="魷魚猜拳",
+            description="請選擇你要出的雙手組合",
+            color=common.bot_color,
+        )
+        await self.message.edit(embed=embed, view=self)
+
+    def compare(self, p, b):
+        return SquidRPS(self.bot).rps_result(p, b)
+
+    async def choose_combo(self, interaction, combo):
+        self.player_combo = combo
+        self.bot_combo = random.choice(SquidRPS(self.bot).bot_choices)
+        self.bot_keep = random.randint(0, 1)
+        for b in self.combo_buttons:
+            b.disabled = True
+        self.left_button.disabled = False
+        self.right_button.disabled = False
+        embed = Embed(
+            title="魷魚猜拳",
+            description="選擇要留下哪一手",
+            color=common.bot_color,
+        )
+        embed.add_field(name="你的雙手", value=f"{combo[0]}、{combo[1]}")
+        embed.add_field(name="Natalie的雙手", value=f"{self.bot_combo[0]}、{self.bot_combo[1]}")
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="石頭&剪刀", style=discord.ButtonStyle.gray)
+    async def combo1(self, interaction, button):
+        await self.choose_combo(interaction, ("石頭", "剪刀"))
+
+    @discord.ui.button(label="石頭&布", style=discord.ButtonStyle.gray)
+    async def combo2(self, interaction, button):
+        await self.choose_combo(interaction, ("石頭", "布"))
+
+    @discord.ui.button(label="剪刀&石頭", style=discord.ButtonStyle.gray)
+    async def combo3(self, interaction, button):
+        await self.choose_combo(interaction, ("剪刀", "石頭"))
+
+    @discord.ui.button(label="剪刀&布", style=discord.ButtonStyle.gray)
+    async def combo4(self, interaction, button):
+        await self.choose_combo(interaction, ("剪刀", "布"))
+
+    @discord.ui.button(label="布&石頭", style=discord.ButtonStyle.gray)
+    async def combo5(self, interaction, button):
+        await self.choose_combo(interaction, ("布", "石頭"))
+
+    @discord.ui.button(label="布&剪刀", style=discord.ButtonStyle.gray)
+    async def combo6(self, interaction, button):
+        await self.choose_combo(interaction, ("布", "剪刀"))
+
+    @discord.ui.button(label="收左手", style=discord.ButtonStyle.blurple, disabled=True)
+    async def left_button(self, interaction, button):
+        await self.keep_hand(interaction, 0)
+
+    @discord.ui.button(label="收右手", style=discord.ButtonStyle.blurple, disabled=True)
+    async def right_button(self, interaction, button):
+        await self.keep_hand(interaction, 1)
+
+    @property
+    def combo_buttons(self):
+        return [self.combo1, self.combo2, self.combo3, self.combo4, self.combo5, self.combo6]
+
+    async def keep_hand(self, interaction, index):
+        self.left_button.disabled = True
+        self.right_button.disabled = True
+        player_choice = self.player_combo[index]
+        bot_choice = self.bot_combo[self.bot_keep]
+        result = self.compare(player_choice, bot_choice)
+        desc = f"你出{player_choice}，Natalie出{bot_choice}"
+        if result == 0:
+            desc += "，平手!"
+            embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
+            await interaction.response.edit_message(embed=embed, view=self)
+            await asyncio.sleep(3)
+            await self.reset_round()
+            return
+
+        shot = random.randint(1, 6) == 1
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(self.command_interaction.user.id)
+            if result == 1:
+                desc += "，你贏了!"
+                if shot:
+                    desc += "\n砰! 實彈擊中Natalie，你贏得了遊戲!"
+                    data[userid]["cake"] += self.bet * 2
+                    data[userid]["squid_playing"] = False
+                    common.datawrite(data)
+                    embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
+                    await interaction.response.edit_message(embed=embed, view=None)
+                    self.stop()
+                    return
+                else:
+                    desc += "\n是空包彈... 下一回合!"
+                    embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
+                    common.datawrite(data)
+                    await interaction.response.edit_message(embed=embed, view=self)
+                    await asyncio.sleep(3)
+                    await self.reset_round()
+                    return
+            else:
+                desc += "，你輸了..."
+                if shot:
+                    desc += "\n砰! 你被擊中..." 
+                    data[userid]["squid_playing"] = False
+                    common.datawrite(data)
+                    embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
+                    await interaction.response.edit_message(embed=embed, view=None)
+                    self.stop()
+                    return
+                else:
+                    desc += "\n是空包彈... 下一回合!"
+                    embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
+                    common.datawrite(data)
+                    await interaction.response.edit_message(embed=embed, view=self)
+                    await asyncio.sleep(3)
+                    await self.reset_round()
+                    return
+
+    async def interaction_check(self, interaction) -> bool:
+        if interaction.user != self.command_interaction.user:
+            await interaction.response.send_message(
+                embed=Embed(title="魷魚猜拳", description="你不能遊玩別人建立的遊戲。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_timeout(self) -> None:
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(self.command_interaction.user.id)
+            if data.get(userid, {}).get("squid_playing"):
+                data[userid]["squid_playing"] = False
+                common.datawrite(data)
+
+
+
         
 
 
@@ -1262,3 +1528,4 @@ async def setup(client:commands.Bot):
     await client.add_cog(MiningGame(client))
     await client.add_cog(BlackJack(client))
     await client.add_cog(PokerGame(client))
+    await client.add_cog(SquidRPS(client))
