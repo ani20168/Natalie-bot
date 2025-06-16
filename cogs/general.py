@@ -78,7 +78,7 @@ class General(commands.Cog):
             message.add_field(name="指令表",value=general_commands_list,inline=False)
             message.add_field(
                 name="排行榜",
-                value=f'/level_leaderboard 等級排行榜\n/voice_leaderboard 語音活躍排行榜\n/blackjack_leaderboard 21點勝率排行榜\n/cake_leaderboard 蛋糕排行榜',
+                value=f'/level_leaderboard 等級排行榜\n/voice_leaderboard 語音活躍排行榜\n/blackjack_leaderboard 21點勝率排行榜\n/squid_rps_leaderboard 魷魚猜拳勝率排行榜\n/cake_leaderboard 蛋糕排行榜',
                 inline=False)
             await interaction.response.send_message(embed=message)
 
