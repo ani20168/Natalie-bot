@@ -1452,8 +1452,6 @@ class SquidRPSView(discord.ui.View):
             self.keep_task = None
             index = random.randint(0, 1)
             await self.keep_hand(None, index)
-        embed.set_footer(text=SquidRPS(self.bot).win_rate_show(str(self.command_interaction.user.id)))
-        await interaction.response.edit_message(embed=embed, view=self)
 
 
     @discord.ui.button(label="✊&✌️", style=discord.ButtonStyle.gray)
@@ -1507,10 +1505,8 @@ class SquidRPSView(discord.ui.View):
             desc += "，平手!"
             embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
             embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
-
-            await self._edit_message(interaction, embed=embed, view=self)
             embed.set_footer(text=SquidRPS(self.bot).win_rate_show(str(self.command_interaction.user.id)))
-            await interaction.response.edit_message(embed=embed, view=self)
+            await self._edit_message(interaction, embed=embed, view=self)
 
             await asyncio.sleep(5)
             await self.reset_round()
@@ -1539,9 +1535,8 @@ class SquidRPSView(discord.ui.View):
                     )
                     common.datawrite(data)
 
-                    await self._edit_message(interaction, embed=embed, view=None)
                     embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
-                    await interaction.response.edit_message(embed=embed, view=None)
+                    await self._edit_message(interaction, embed=embed, view=None)
 
                     self.stop()
                     return
@@ -1551,9 +1546,8 @@ class SquidRPSView(discord.ui.View):
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
                     common.datawrite(data)
 
-                    await self._edit_message(interaction, embed=embed, view=self)
                     embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
-                    await interaction.response.edit_message(embed=embed, view=self)
+                    await self._edit_message(interaction, embed=embed, view=self)
 
                     await asyncio.sleep(5)
                     await self.reset_round()
@@ -1573,9 +1567,8 @@ class SquidRPSView(discord.ui.View):
                     )
                     common.datawrite(data)
 
-                    await self._edit_message(interaction, embed=embed, view=None)
                     embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
-                    await interaction.response.edit_message(embed=embed, view=None)
+                    await self._edit_message(interaction, embed=embed, view=None)
                     self.stop()
                     return
                 else:
@@ -1584,9 +1577,8 @@ class SquidRPSView(discord.ui.View):
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
                     common.datawrite(data)
 
-                    await self._edit_message(interaction, embed=embed, view=self)
                     embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
-                    await interaction.response.edit_message(embed=embed, view=self)
+                    await self._edit_message(interaction, embed=embed, view=self)
 
                     await asyncio.sleep(5)
                     await self.reset_round()
