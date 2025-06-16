@@ -1231,8 +1231,6 @@ class SquidRPS(commands.Cog):
         return f"你的勝率:{win_rate:.1%} 總場數:{data[userid]['squid_rps_round']}"
 
     def rps_result(self, a: str, b: str) -> int:
-        if a == b:
-            return 0
         win_table = {("✊", "✌️"), ("✌️", "✋"), ("✋", "✊")}
         if (a, b) in win_table:
             return 1
@@ -1459,14 +1457,6 @@ class SquidRPSView(discord.ui.View):
         bot_choice = self.bot_combo[self.bot_keep]
         result = self.compare(player_choice, bot_choice)
         desc = f"你出{player_choice}，Natalie出{bot_choice}"
-        if result == 0:
-            desc += "，平手!"
-            embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
-            embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
-            await interaction.response.edit_message(embed=embed, view=self)
-            await asyncio.sleep(5)
-            await self.reset_round()
-            return
 
         # 扣下扳機
         self.shots_fired += 1
@@ -1489,8 +1479,8 @@ class SquidRPSView(discord.ui.View):
                         value=f"你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
                         inline=False,
                     )
-                    embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     common.datawrite(data)
+                    embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     await interaction.response.edit_message(embed=embed, view=None)
                     self.stop()
                     return
@@ -1498,8 +1488,8 @@ class SquidRPSView(discord.ui.View):
                     desc += "\n是空包彈... 下一回合!"
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
-                    embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     common.datawrite(data)
+                    embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     await interaction.response.edit_message(embed=embed, view=self)
                     await asyncio.sleep(5)
                     await self.reset_round()
@@ -1517,8 +1507,8 @@ class SquidRPSView(discord.ui.View):
                         value=f"你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
                         inline=False,
                     )
-                    embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     common.datawrite(data)
+                    embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     await interaction.response.edit_message(embed=embed, view=None)
                     self.stop()
                     return
@@ -1526,8 +1516,8 @@ class SquidRPSView(discord.ui.View):
                     desc += "\n是空包彈... 下一回合!"
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
-                    embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     common.datawrite(data)
+                    embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     await interaction.response.edit_message(embed=embed, view=self)
                     await asyncio.sleep(5)
                     await self.reset_round()
