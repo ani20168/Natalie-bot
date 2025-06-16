@@ -1369,9 +1369,16 @@ class SquidRPSView(discord.ui.View):
         self.player_combo = None
         self.bot_combo = None
         self.bot_keep = None
+        self.keep_task = None
         # 隨機決定實彈位置，並追蹤已扣下的扳機次數
         self.bullet_position = random.randint(0, 5)
         self.shots_fired = 0
+
+    async def _edit_message(self, interaction, *, embed, view):
+        if interaction is not None:
+            await interaction.response.edit_message(embed=embed, view=view)
+        else:
+            await self.message.edit(embed=embed, view=view)
 
     def clip_display(self) -> str:
         """顯示目前彈夾狀態"""
@@ -1382,6 +1389,9 @@ class SquidRPSView(discord.ui.View):
             b.disabled = False
         self.left_button.disabled = True
         self.right_button.disabled = True
+        if self.keep_task:
+            self.keep_task.cancel()
+            self.keep_task = None
         self.player_combo = None
         self.bot_combo = None
         self.bot_keep = None
@@ -1413,8 +1423,38 @@ class SquidRPSView(discord.ui.View):
         embed.add_field(name="Natalie的雙手", value=f"{self.bot_combo[0]}、{self.bot_combo[1]}", inline=False)
         embed.add_field(name="你的雙手", value=f"{combo[0]}、{combo[1]}", inline=False)
         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+
+        embed.add_field(name="剩餘時間", value="7秒", inline=False)
+        await self._edit_message(interaction, embed=embed, view=self)
+        if self.keep_task:
+            self.keep_task.cancel()
+        self.keep_task = asyncio.create_task(self._keep_timer())
+
+    async def _keep_timer(self):
+        remaining = 7
+        while remaining > 1:
+            await asyncio.sleep(2)
+            remaining -= 2
+            if self.keep_task is None:
+                return
+            embed = Embed(
+                title="魷魚猜拳",
+                description="選擇要留下哪一手",
+                color=common.bot_color,
+            )
+            embed.add_field(name="Natalie的雙手", value=f"{self.bot_combo[0]}、{self.bot_combo[1]}", inline=False)
+            embed.add_field(name="你的雙手", value=f"{self.player_combo[0]}、{self.player_combo[1]}", inline=False)
+            embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+            embed.add_field(name="剩餘時間", value=f"{max(remaining,0)}秒", inline=False)
+            await self.message.edit(embed=embed, view=self)
+        await asyncio.sleep(1)
+        if self.keep_task:
+            self.keep_task = None
+            index = random.randint(0, 1)
+            await self.keep_hand(None, index)
         embed.set_footer(text=SquidRPS(self.bot).win_rate_show(str(self.command_interaction.user.id)))
         await interaction.response.edit_message(embed=embed, view=self)
+
 
     @discord.ui.button(label="✊&✌️", style=discord.ButtonStyle.gray)
     async def combo1(self, interaction, button):
@@ -1453,6 +1493,9 @@ class SquidRPSView(discord.ui.View):
         return [self.combo1, self.combo2, self.combo3, self.combo4, self.combo5, self.combo6]
 
     async def keep_hand(self, interaction, index):
+        if self.keep_task:
+            self.keep_task.cancel()
+            self.keep_task = None
         self.left_button.disabled = True
         self.right_button.disabled = True
         player_choice = self.player_combo[index]
@@ -1464,8 +1507,11 @@ class SquidRPSView(discord.ui.View):
             desc += "，平手!"
             embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
             embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+
+            await self._edit_message(interaction, embed=embed, view=self)
             embed.set_footer(text=SquidRPS(self.bot).win_rate_show(str(self.command_interaction.user.id)))
             await interaction.response.edit_message(embed=embed, view=self)
+
             await asyncio.sleep(5)
             await self.reset_round()
             return
@@ -1492,8 +1538,11 @@ class SquidRPSView(discord.ui.View):
                         inline=False,
                     )
                     common.datawrite(data)
+
+                    await self._edit_message(interaction, embed=embed, view=None)
                     embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     await interaction.response.edit_message(embed=embed, view=None)
+
                     self.stop()
                     return
                 else:
@@ -1501,8 +1550,11 @@ class SquidRPSView(discord.ui.View):
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
                     common.datawrite(data)
+
+                    await self._edit_message(interaction, embed=embed, view=self)
                     embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     await interaction.response.edit_message(embed=embed, view=self)
+
                     await asyncio.sleep(5)
                     await self.reset_round()
                     return
@@ -1520,6 +1572,8 @@ class SquidRPSView(discord.ui.View):
                         inline=False,
                     )
                     common.datawrite(data)
+
+                    await self._edit_message(interaction, embed=embed, view=None)
                     embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     await interaction.response.edit_message(embed=embed, view=None)
                     self.stop()
@@ -1529,8 +1583,11 @@ class SquidRPSView(discord.ui.View):
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
                     common.datawrite(data)
+
+                    await self._edit_message(interaction, embed=embed, view=self)
                     embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     await interaction.response.edit_message(embed=embed, view=self)
+
                     await asyncio.sleep(5)
                     await self.reset_round()
                     return
