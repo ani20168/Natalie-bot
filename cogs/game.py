@@ -811,7 +811,6 @@ class BlackJackButton(discord.ui.View):
             self.stop()
 
     async def interaction_check(self, interaction) -> bool:
-        data = common.dataload()
         #如果非本人遊玩
         if interaction.user != self.command_interaction.user:
             await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="你不能遊玩別人建立的遊戲。\n(請使用/blackjack遊玩21點)",color=common.bot_error_color), ephemeral=True)
@@ -834,7 +833,7 @@ class PokerGame(commands.Cog):
         self.bot = client
         self.max_bet = 100000 #最多可下注多少
         self.refund_rate = 0.2 #放棄時，退回本金比例(0.2=20%)
-        self.suits = ["\♣️", "\♦️", "\♥️", "\♠️"]
+        self.suits = ["<:natalie_clubs:1384128650013704192>", "<:natalie_diamonds:1384126438545821756>", "<:natalie_hearts:1384128667927449600>", "<:natalie_spades:1384128685094993950>"]
         self.ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
         self.rank_value = {"2": 2, "3": 3, "4": 4, "5": 5, "6": 6, "7": 7, "8": 8, "9": 9, "10": 10, "J": 11, "Q": 12, "K": 13, "A": 14}
         self.rank_order = {
