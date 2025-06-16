@@ -1424,30 +1424,14 @@ class SquidRPSView(discord.ui.View):
         embed.add_field(name="你的雙手", value=f"{combo[0]}、{combo[1]}", inline=False)
         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
 
-        embed.add_field(name="剩餘時間", value="7秒", inline=False)
+        embed.add_field(name="思考時間", value="7秒", inline=False)
         await self._edit_message(interaction, embed=embed, view=self)
         if self.keep_task:
             self.keep_task.cancel()
         self.keep_task = asyncio.create_task(self._keep_timer())
 
     async def _keep_timer(self):
-        remaining = 7
-        while remaining > 1:
-            await asyncio.sleep(2)
-            remaining -= 2
-            if self.keep_task is None:
-                return
-            embed = Embed(
-                title="魷魚猜拳",
-                description="選擇要留下哪一手",
-                color=common.bot_color,
-            )
-            embed.add_field(name="Natalie的雙手", value=f"{self.bot_combo[0]}、{self.bot_combo[1]}", inline=False)
-            embed.add_field(name="你的雙手", value=f"{self.player_combo[0]}、{self.player_combo[1]}", inline=False)
-            embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
-            embed.add_field(name="剩餘時間", value=f"{max(remaining,0)}秒", inline=False)
-            await self.message.edit(embed=embed, view=self)
-        await asyncio.sleep(1)
+        await asyncio.sleep(7)
         if self.keep_task:
             self.keep_task = None
             index = random.randint(0, 1)
