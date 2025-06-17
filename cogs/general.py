@@ -416,7 +416,7 @@ class General(commands.Cog):
             await interaction.user.add_roles(interaction.guild.get_role(self.color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
             await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...<@&{self.color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
 
-    @app_commands.command(name = "set_color",description="更換ID的顏色")
+    @app_commands.command(name = "set_animation_color",description="更換ID的顏色")
     @app_commands.describe(colorchoice="要更換的暱稱顏色")
     @app_commands.rename(colorchoice="選擇動態顏色")
     @app_commands.choices(colorchoice=[
