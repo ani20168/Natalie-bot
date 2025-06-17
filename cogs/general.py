@@ -47,7 +47,11 @@ class General(commands.Cog):
             "珊瑚紅":{"需求等級":20,"role_id":675593108569849856},
             "桃色":{"需求等級":20,"role_id":921046788385943572},
         }
-        self.animation_color_dict = {} #動態身分組
+        self.animation_color_dict = { #動態身分組
+            "全息":{"role_id":1384483657301098506},
+            "杏仁白":{"role_id":1384498130665476107},
+            "櫻桃紅":{"role_id":1384498051791585280},
+        }
 
 
     @app_commands.command(name = "info", description = "關於Natalie...")
@@ -378,9 +382,13 @@ class General(commands.Cog):
         app_commands.Choice(name="香檳黃 LV20", value="香檳黃"),
         app_commands.Choice(name="紫丁香色 LV20", value="紫丁香色"),
         app_commands.Choice(name="珊瑚紅 LV20", value="珊瑚紅"),
-        app_commands.Choice(name="桃色 LV20", value="桃色")
+        app_commands.Choice(name="桃色 LV20", value="桃色"),
+        app_commands.Choice(name="★全息", value="全息"),
+        app_commands.Choice(name="★【漸層】杏仁白", value="杏仁白"),
+        app_commands.Choice(name="★【漸層】櫻桃紅", value="櫻桃紅")
         ])
     async def set_color(self, interaction, colorchoice:app_commands.Choice[str]):
+        animation_whitelist = [] #放白名單會員的ID字串
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
             userlevel = common.LevelSystem().read_info(userid)
@@ -391,8 +399,14 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 <@&{self.color_dict[colorchoice.value]['role_id']}> 了!",color=common.bot_error_color))
             return
 
-        if userlevel.level < self.color_dict[colorchoice.value]['需求等級']:
+        #只有靜態身分組才會看等級
+        if colorchoice.value in self.color_dict and userlevel.level < self.color_dict[colorchoice.value]['需求等級']:
             await interaction.response.send_message(embed=Embed(title="錯誤",description=f"等級不足! <@&{self.color_dict[colorchoice.value]['role_id']}> 需要**{self.color_dict[colorchoice.value]['需求等級']}**等，你目前只有**{userlevel.level}**等。",color=common.bot_error_color))
+            return
+
+        #沒在白名單的
+        if colorchoice.value in self.animation_color_dict and userid not in animation_whitelist:
+            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你當前無法使用 <@&{self.animation_color_dict[colorchoice.value]['role_id']}> !\n動態身分組使用權可以在 #拍賣所 獲得!",color=common.bot_error_color))
             return
 
         for role in user_roles:
@@ -407,8 +421,12 @@ class General(commands.Cog):
                     await interaction.user.remove_roles(role,reason="移除舊的動態顏色身分組")
                     break
         
-        await interaction.user.add_roles(interaction.guild.get_role(self.color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
-        await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...<@&{self.color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
+        if colorchoice.value in self.color_dict:
+            await interaction.user.add_roles(interaction.guild.get_role(self.color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
+            await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...<@&{self.color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
+        elif colorchoice.value in self.animation_color_dict:
+            await interaction.user.add_roles(interaction.guild.get_role(self.animation_color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
+            await interaction.response.send_message(embed=Embed(title="設置動態顏色身分組",description=f"你目前的動態顏色變更為...<@&{self.animation_color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
         
 
     @commands.Cog.listener()
