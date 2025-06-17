@@ -383,12 +383,8 @@ class General(commands.Cog):
         app_commands.Choice(name="紫丁香色 LV20", value="紫丁香色"),
         app_commands.Choice(name="珊瑚紅 LV20", value="珊瑚紅"),
         app_commands.Choice(name="桃色 LV20", value="桃色"),
-        app_commands.Choice(name="★全息", value="全息"),
-        app_commands.Choice(name="★【漸層】杏仁白", value="杏仁白"),
-        app_commands.Choice(name="★【漸層】櫻桃紅", value="櫻桃紅")
         ])
     async def set_color(self, interaction, colorchoice:app_commands.Choice[str]):
-        animation_whitelist = [] #放白名單會員的ID字串
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
             userlevel = common.LevelSystem().read_info(userid)
@@ -402,6 +398,40 @@ class General(commands.Cog):
         #只有靜態身分組才會看等級
         if colorchoice.value in self.color_dict and userlevel.level < self.color_dict[colorchoice.value]['需求等級']:
             await interaction.response.send_message(embed=Embed(title="錯誤",description=f"等級不足! <@&{self.color_dict[colorchoice.value]['role_id']}> 需要**{self.color_dict[colorchoice.value]['需求等級']}**等，你目前只有**{userlevel.level}**等。",color=common.bot_error_color))
+            return
+
+        for role in user_roles:
+            #移除舊的靜態顏色身分組
+            for color, attributes in self.color_dict.items():
+                if role.id == attributes["role_id"]:
+                    await interaction.user.remove_roles(role,reason="移除舊的顏色身分組")
+                    break
+            #移除舊的動態顏色身分組
+            for color, attributes in self.animation_color_dict.items():
+                if role.id == attributes["role_id"]:
+                    await interaction.user.remove_roles(role,reason="移除舊的動態顏色身分組")
+                    break
+        
+        if colorchoice.value in self.color_dict:
+            await interaction.user.add_roles(interaction.guild.get_role(self.color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
+            await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...<@&{self.color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
+
+    @app_commands.command(name = "set_color",description="更換ID的顏色")
+    @app_commands.describe(colorchoice="要更換的暱稱顏色")
+    @app_commands.rename(colorchoice="選擇動態顏色")
+    @app_commands.choices(colorchoice=[
+        app_commands.Choice(name="★全息", value="全息"),
+        app_commands.Choice(name="★【漸層】杏仁白", value="杏仁白"),
+        app_commands.Choice(name="★【漸層】櫻桃紅", value="櫻桃紅")
+        ])
+    async def set_animation_color(self, interaction, colorchoice:app_commands.Choice[str]):
+        animation_whitelist = [] #放白名單會員的ID字串
+        userid = str(interaction.user.id)
+
+        user_roles = interaction.user.roles
+
+        if any(role.name == colorchoice.value for role in user_roles):
+            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 <@&{self.color_dict[colorchoice.value]['role_id']}> 了!",color=common.bot_error_color))
             return
 
         #沒在白名單的
@@ -421,13 +451,10 @@ class General(commands.Cog):
                     await interaction.user.remove_roles(role,reason="移除舊的動態顏色身分組")
                     break
         
-        if colorchoice.value in self.color_dict:
-            await interaction.user.add_roles(interaction.guild.get_role(self.color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
-            await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...<@&{self.color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
-        elif colorchoice.value in self.animation_color_dict:
+        if colorchoice.value in self.animation_color_dict:
             await interaction.user.add_roles(interaction.guild.get_role(self.animation_color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
             await interaction.response.send_message(embed=Embed(title="設置動態顏色身分組",description=f"你目前的動態顏色變更為...<@&{self.animation_color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
-        
+
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
