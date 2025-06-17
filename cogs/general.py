@@ -383,7 +383,7 @@ class General(commands.Cog):
         app_commands.Choice(name="紫丁香色 LV20", value="紫丁香色"),
         app_commands.Choice(name="珊瑚紅 LV20", value="珊瑚紅"),
         app_commands.Choice(name="桃色 LV20", value="桃色"),
-        app_commands.Choice(name="★全息", value="全息"),
+        app_commands.Choice(name="全息", value="全息"),
         app_commands.Choice(name="★【漸層】杏仁白", value="杏仁白"),
         app_commands.Choice(name="★【漸層】櫻桃紅", value="櫻桃紅")
         ])
