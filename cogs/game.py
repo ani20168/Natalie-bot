@@ -1112,24 +1112,59 @@ class PokerButton(discord.ui.View):
 
         data[userid]["poker_round"] += 1
 
-        if player_order > bot_order or (player_order == bot_order and player_value > bot_value):
+        # 高牌相同點數時，無需比較其他牌，直接視為平手
+        if (
+            player_order == bot_order == pg.rank_order["高牌"]
+            and player_value[0] == bot_value[0]
+        ):
+            if double:
+                data[userid]["cake"] += self.bet * 2
+            else:
+                data[userid]["cake"] += self.bet
+            data[userid]["poker_tie"] += 1
+            message.add_field(
+                name="結果",
+                value=f"平手!\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
+                inline=False,
+            )
+        elif player_order > bot_order or (
+            player_order == bot_order and player_value > bot_value
+        ):
             data[userid]["poker_win_rate"] += 1
             if double:
                 data[userid]["cake"] += self.bet * 4
-                message.add_field(name="結果", value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
+                message.add_field(
+                    name="結果",
+                    value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
+                    inline=False,
+                )
             else:
                 data[userid]["cake"] += self.bet * 2
-                message.add_field(name="結果", value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
-        elif player_order < bot_order or (player_order == bot_order and player_value < bot_value):
+                message.add_field(
+                    name="結果",
+                    value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
+                    inline=False,
+                )
+        elif player_order < bot_order or (
+            player_order == bot_order and player_value < bot_value
+        ):
             lose_amount = self.bet * 2 if double else self.bet
-            message.add_field(name="結果", value=f"你輸了!\n你失去了**{lose_amount}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
+            message.add_field(
+                name="結果",
+                value=f"你輸了!\n你失去了**{lose_amount}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
+                inline=False,
+            )
         else:
             if double:
                 data[userid]["cake"] += self.bet * 2
             else:
                 data[userid]["cake"] += self.bet
             data[userid]["poker_tie"] += 1
-            message.add_field(name="結果", value=f"平手!\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}", inline=False)
+            message.add_field(
+                name="結果",
+                value=f"平手!\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
+                inline=False,
+            )
 
         data[userid]["poker_playing"] = False
         common.datawrite(data)
