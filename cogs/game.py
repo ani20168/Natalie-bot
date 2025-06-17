@@ -1393,12 +1393,67 @@ class SquidRPS(commands.Cog):
         )
 
 
+class SquidRPSStrategy:
+    """Strategy for deciding which hand the bot should keep."""
+
+    def __init__(self, *, case3_prob: float = 2/3, case4_prob: float = 3/4):
+        # 機率設定:case3為輸&平手、贏&輸情形留左手的機率
+        self.case3_prob = case3_prob
+        # 機率設定:case4為贏&輸、平手&贏情形留右手的機率
+        self.case4_prob = case4_prob
+
+    @staticmethod
+    def rps_result(a: str, b: str) -> int:
+        """Return 1 if a beats b, 0 if tie, -1 if lose."""
+        if a == b:
+            return 0
+        win_table = {("✊", "✌️"), ("✌️", "✋"), ("✋", "✊")}
+        return 1 if (a, b) in win_table else -1
+
+    def decide(self, bot_combo, player_combo) -> int:
+        """Decide which hand to keep. Return 0 for first, 1 for second."""
+        r0 = (
+            self.rps_result(bot_combo[0], player_combo[0]),
+            self.rps_result(bot_combo[0], player_combo[1]),
+        )
+        r1 = (
+            self.rps_result(bot_combo[1], player_combo[0]),
+            self.rps_result(bot_combo[1], player_combo[1]),
+        )
+
+        # 平手&輸、贏&平手 -> 留右手
+        if r0 == (0, -1) and r1 == (1, 0):
+            return 1
+        # 平手&平手、贏&贏 -> 留右手
+        if r0 == (0, 0) and r1 == (1, 1):
+            return 1
+        # 輸&平手、贏&輸 -> 2/3機率留左手、1/3留右手
+        if r0 == (-1, 0) and r1 == (1, -1):
+            return 0 if random.random() < self.case3_prob else 1
+        # 贏&輸、平手&贏 -> 3/4機率留右手、1/4留左手
+        if r0 == (1, -1) and r1 == (0, 1):
+            return 1 if random.random() < self.case4_prob else 0
+        # 平手&平手、平手&輸 -> 留左手
+        if r0 == (0, 0) and r1 == (0, -1):
+            return 0
+        # 贏&贏、輸&輸 -> 留左手
+        if r0 == (1, 1) and r1 == (-1, -1):
+            return 0
+        # 平手&平手、輸&輸 -> 留左手
+        if r0 == (0, 0) and r1 == (-1, -1):
+            return 0
+        # 其他情形隨機
+        return random.randint(0, 1)
+
+
 class SquidRPSView(discord.ui.View):
     def __init__(self, *, timeout=120, user, bet, client):
         super().__init__(timeout=timeout)
         self.command_interaction = user
         self.bet = bet
         self.bot = client
+        # 建立猜拳策略
+        self.strategy = SquidRPSStrategy()
         self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
         self.message = None
         self.player_combo = None
@@ -1445,7 +1500,8 @@ class SquidRPSView(discord.ui.View):
     async def choose_combo(self, interaction, combo):
         self.player_combo = combo
         self.bot_combo = random.choice(SquidRPS(self.bot).bot_choices)
-        self.bot_keep = random.randint(0, 1)
+        # 使用策略決定收哪一隻手
+        self.bot_keep = self.strategy.decide(self.bot_combo, combo)
         for b in self.combo_buttons:
             b.disabled = True
         self.left_button.disabled = False
