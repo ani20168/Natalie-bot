@@ -1421,8 +1421,14 @@ class SquidRPSStrategy:
             self.rps_result(bot_combo[1], player_combo[1]),
         )
 
-        # 平手&輸、贏&平手 -> 留右手
+        # 平手&輸、贏&平手 -> 留贏&平手的那隻手
         if r0 == (0, -1) and r1 == (1, 0):
+            return 1
+        if r0 == (1, 0) and r1 == (0, -1):
+            return 0
+        if r0 == (0, 1) and r1 == (-1, 0):
+            return 0
+        if r0 == (-1, 0) and r1 == (0, 1):
             return 1
         # 平手&平手、贏&贏 -> 留右手
         if r0 == (0, 0) and r1 == (1, 1):
