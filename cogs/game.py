@@ -1421,27 +1421,42 @@ class SquidRPSStrategy:
             self.rps_result(bot_combo[1], player_combo[1]),
         )
 
-        # 平手&輸、贏&平手 -> 留右手
-        if r0 == (0, -1) and r1 == (1, 0):
-            return 1
-        # 平手&平手、贏&贏 -> 留右手
-        if r0 == (0, 0) and r1 == (1, 1):
-            return 1
-        # 輸&平手、贏&輸 -> 2/3機率留左手、1/3留右手
-        if r0 == (-1, 0) and r1 == (1, -1):
-            return 0 if random.random() < self.case3_prob else 1
-        # 贏&輸、平手&贏 -> 3/4機率留右手、1/4留左手
-        if r0 == (1, -1) and r1 == (0, 1):
-            return 1 if random.random() < self.case4_prob else 0
-        # 平手&平手、平手&輸 -> 留左手
-        if r0 == (0, 0) and r1 == (0, -1):
-            return 0
-        # 贏&贏、輸&輸 -> 留左手
-        if r0 == (1, 1) and r1 == (-1, -1):
-            return 0
-        # 平手&平手、輸&輸 -> 留左手
-        if r0 == (0, 0) and r1 == (-1, -1):
-            return 0
+        result_set = {r0, r1}
+
+        def index_of(target) -> int:
+            """Return the index of the target result tuple."""
+            return 0 if r0 == target else 1
+
+        # 平手&輸、贏&平手 -> 留下贏&平手或平手&贏的手
+        if result_set == {(0, -1), (1, 0)}:
+            return index_of((1, 0))
+        if result_set == {(0, 1), (-1, 0)}:
+            return index_of((0, 1))
+
+        # 平手&平手、贏&贏 -> 留下贏&贏的手
+        if result_set == {(0, 0), (1, 1)}:
+            return index_of((1, 1))
+
+        # 輸&平手、贏&輸 -> 2/3機率留下輸&平手的手
+        if result_set == {(-1, 0), (1, -1)}:
+            return index_of((-1, 0)) if random.random() < self.case3_prob else index_of((1, -1))
+
+        # 贏&輸、平手&贏 -> 3/4機率留下平手&贏的手
+        if result_set == {(1, -1), (0, 1)}:
+            return index_of((0, 1)) if random.random() < self.case4_prob else index_of((1, -1))
+
+        # 平手&平手、平手&輸 -> 留下平手&平手的手
+        if result_set == {(0, 0), (0, -1)}:
+            return index_of((0, 0))
+
+        # 贏&贏、輸&輸 -> 留下贏&贏的手
+        if result_set == {(1, 1), (-1, -1)}:
+            return index_of((1, 1))
+
+        # 平手&平手、輸&輸 -> 留下平手&平手的手
+        if result_set == {(0, 0), (-1, -1)}:
+            return index_of((0, 0))
+
         # 其他情形隨機
         return random.randint(0, 1)
 
