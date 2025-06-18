@@ -115,8 +115,8 @@ class MiningGame(commands.Cog):
             common.datawrite(user_data)
             common.datawrite(mining_data,"data/mining.json")
 
-        #挖礦時間15秒
-        await asyncio.sleep(15)
+        #挖礦時間8秒
+        await asyncio.sleep(8)
 
         async with common.jsonio_lock:
             #等待時間結束後再次讀取，防止回溯問題
@@ -1530,14 +1530,14 @@ class SquidRPSView(discord.ui.View):
         embed.add_field(name="你的雙手", value=f"{combo[0]}、{combo[1]}", inline=False)
         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
 
-        embed.add_field(name="思考時間", value="3秒", inline=False)
+        embed.add_field(name="思考時間", value="5秒", inline=False)
         await self._edit_message(interaction, embed=embed, view=self)
         if self.keep_task:
             self.keep_task.cancel()
         self.keep_task = asyncio.create_task(self._keep_timer())
 
     async def _keep_timer(self):
-        await asyncio.sleep(3)
+        await asyncio.sleep(5)
         if self.keep_task:
             self.keep_task = None
             index = random.randint(0, 1)
@@ -1598,7 +1598,7 @@ class SquidRPSView(discord.ui.View):
             embed.set_footer(text=SquidRPS(self.bot).win_rate_show(str(self.command_interaction.user.id)))
             await self._edit_message(interaction, embed=embed, view=self)
 
-            await asyncio.sleep(5)
+            await asyncio.sleep(3.5) #等3.5秒讓玩家確認結果
             await self.reset_round()
             return
 
@@ -1639,13 +1639,13 @@ class SquidRPSView(discord.ui.View):
                     embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     await self._edit_message(interaction, embed=embed, view=self)
 
-                    await asyncio.sleep(3) #等3秒讓玩家確認結果
+                    await asyncio.sleep(3.5) #等3.5秒讓玩家確認結果
                     await self.reset_round()
                     return
             else:
                 desc += "，你輸了..."
                 if shot:
-                    desc += "\n砰! 你被擊中..."
+                    desc += "\n砰! 你被實彈擊中了..."
                     data[userid]["squid_playing"] = False
                     data[userid]["squid_rps_round"] += 1
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
@@ -1670,7 +1670,7 @@ class SquidRPSView(discord.ui.View):
                     embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     await self._edit_message(interaction, embed=embed, view=self)
 
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(3.5) #等3.5秒讓玩家確認結果
                     await self.reset_round()
                     return
 
