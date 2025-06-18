@@ -1530,14 +1530,14 @@ class SquidRPSView(discord.ui.View):
         embed.add_field(name="你的雙手", value=f"{combo[0]}、{combo[1]}", inline=False)
         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
 
-        embed.add_field(name="思考時間", value="7秒", inline=False)
+        embed.add_field(name="思考時間", value="3秒", inline=False)
         await self._edit_message(interaction, embed=embed, view=self)
         if self.keep_task:
             self.keep_task.cancel()
         self.keep_task = asyncio.create_task(self._keep_timer())
 
     async def _keep_timer(self):
-        await asyncio.sleep(7)
+        await asyncio.sleep(3)
         if self.keep_task:
             self.keep_task = None
             index = random.randint(0, 1)
@@ -1639,7 +1639,7 @@ class SquidRPSView(discord.ui.View):
                     embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
                     await self._edit_message(interaction, embed=embed, view=self)
 
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(3) #等3秒讓玩家確認結果
                     await self.reset_round()
                     return
             else:
