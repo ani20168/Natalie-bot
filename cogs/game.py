@@ -1004,13 +1004,22 @@ class PokerGame(commands.Cog):
                 await interaction.followup.send(embed=Embed(title="撲克牌比大小", description=f"{cake_emoji}不足，無法下注!", color=common.bot_error_color))
                 return
 
-            if bet > self.max_bet: bet = self.max_bet #下注最高上限
+            if bet > self.max_bet:
+                bet = self.max_bet  # 下注最高上限
 
             data[userid]["cake"] -= bet
             if "poker_tie" not in data[userid]:
                 data[userid]["poker_win_rate"] = 0
                 data[userid]["poker_round"] = 0
                 data[userid]["poker_tie"] = 0
+            if "poker_hand_count" not in data[userid]:
+                data[userid]["poker_hand_count"] = {
+                    rank: 0 for rank in self.rank_order.keys()
+                }
+            if "poker_raise" not in data[userid]:
+                data[userid]["poker_raise"] = 0
+            if "poker_fold" not in data[userid]:
+                data[userid]["poker_fold"] = 0
             data[userid]["poker_playing"] = True
             common.datawrite(data)
 
@@ -1067,6 +1076,54 @@ class PokerGame(commands.Cog):
             )
         )
 
+    @app_commands.command(name="poker_statistics", description="撲克牌個人統計")
+    async def poker_statistics(self, interaction):
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(interaction.user.id)
+            if "poker_hand_count" not in data.get(userid, {}):
+                data.setdefault(userid, {})
+                data[userid]["poker_hand_count"] = {
+                    rank: 0 for rank in self.rank_order.keys()
+                }
+            if "poker_raise" not in data[userid]:
+                data[userid]["poker_raise"] = 0
+            if "poker_fold" not in data[userid]:
+                data[userid]["poker_fold"] = 0
+            if "poker_tie" not in data[userid]:
+                data[userid]["poker_win_rate"] = 0
+                data[userid]["poker_round"] = 0
+                data[userid]["poker_tie"] = 0
+            common.datawrite(data)
+
+        order = [
+            "皇家同花順",
+            "同花順",
+            "鐵支",
+            "葫蘆",
+            "同花",
+            "順子",
+            "三條",
+            "兩對",
+            "一對",
+            "高牌",
+        ]
+        hand_lines = "".join(
+            f"{r}:{data[userid]['poker_hand_count'].get(r,0)}\n" for r in order
+        )
+        action_lines = (
+            f"加注:{data[userid]['poker_raise']}\n放棄:{data[userid]['poker_fold']}"
+        )
+        message = Embed(title="撲克牌統計", color=common.bot_color)
+        message.add_field(name="牌型出現次數", value=hand_lines, inline=False)
+        message.add_field(name="行為次數", value=action_lines, inline=False)
+        message.add_field(
+            name="勝率&總場數",
+            value=self.win_rate_show(userid),
+            inline=False,
+        )
+        await interaction.response.send_message(embed=message)
+
 
 class PokerButton(discord.ui.View):
     def __init__(self, *, timeout=120, user, bet, player_cards, bot_cards, client):
@@ -1096,6 +1153,11 @@ class PokerButton(discord.ui.View):
         pg = PokerGame(self.bot)
         player_best = pg.extract_rank_cards(player_combo, player_rank)
         bot_best = pg.extract_rank_cards(bot_combo, bot_rank)
+        if "poker_hand_count" not in data[userid]:
+            data[userid]["poker_hand_count"] = {
+                rank: 0 for rank in pg.rank_order.keys()
+            }
+        data[userid]["poker_hand_count"][player_rank] += 1
         message = Embed(title="撲克牌比大小", color=common.bot_color)
         message.add_field(
             name=f"你的手牌(牌型:{player_rank})",
@@ -1182,6 +1244,9 @@ class PokerButton(discord.ui.View):
                 await interaction.response.edit_message(view=self)
                 return
             data[userid]["cake"] -= self.bet
+            if "poker_raise" not in data[userid]:
+                data[userid]["poker_raise"] = 0
+            data[userid]["poker_raise"] += 1
             common.datawrite(data)
 
         self.double_button.disabled = True
@@ -1211,6 +1276,9 @@ class PokerButton(discord.ui.View):
             if "poker_round" in data[userid]:
                 data[userid]["poker_round"] += 1
                 data[userid]["poker_tie"] += 1
+            if "poker_fold" not in data[userid]:
+                data[userid]["poker_fold"] = 0
+            data[userid]["poker_fold"] += 1
             data[userid]["poker_playing"] = False
             common.datawrite(data)
         self.double_button.disabled = True
