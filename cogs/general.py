@@ -429,7 +429,7 @@ class General(commands.Cog):
         app_commands.Choice(name="★【漸層】矢車菊藍", value="矢車菊藍")
         ])
     async def set_animation_color(self, interaction, colorchoice:app_commands.Choice[str]):
-        animation_whitelist = [] #放白名單會員的ID字串
+        animation_whitelist = ["823967449149603861"] #放白名單會員的ID字串
         userid = str(interaction.user.id)
 
         user_roles = interaction.user.roles
