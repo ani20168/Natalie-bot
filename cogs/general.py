@@ -51,6 +51,8 @@ class General(commands.Cog):
             "全息":{"role_id":1384483657301098506},
             "杏仁白":{"role_id":1384498130665476107},
             "櫻桃紅":{"role_id":1384498051791585280},
+            "霧玫瑰":{"role_id":1384911899702857838},
+            "矢車菊藍":{"role_id":1384920066859995277},
         }
 
 
@@ -422,7 +424,9 @@ class General(commands.Cog):
     @app_commands.choices(colorchoice=[
         app_commands.Choice(name="★全息", value="全息"),
         app_commands.Choice(name="★【漸層】杏仁白", value="杏仁白"),
-        app_commands.Choice(name="★【漸層】櫻桃紅", value="櫻桃紅")
+        app_commands.Choice(name="★【漸層】櫻桃紅", value="櫻桃紅"),
+        app_commands.Choice(name="★【漸層】霧玫瑰", value="霧玫瑰"),
+        app_commands.Choice(name="★【漸層】矢車菊藍", value="矢車菊藍")
         ])
     async def set_animation_color(self, interaction, colorchoice:app_commands.Choice[str]):
         animation_whitelist = [] #放白名單會員的ID字串
