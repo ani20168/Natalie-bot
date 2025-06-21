@@ -76,7 +76,21 @@ class General(commands.Cog):
             message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有**{cake}**塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
             cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
             
-            general_commands_list=f'/info 查看指令表及個人資料\n/eat 餵食Natalie一些{cake_emoji} (1 cake = 1 exp)\n/cake_give 給予他人{cake_emoji}\n/mining_info 挖礦小遊戲資訊\n/blackjack 21點遊戲\n/poker 撲克牌比大小\n/check_sevencolor_restday 確認七色有沒有休假'
+            # general_commands_list=f'/info 查看指令表及個人資料\n/eat 餵食Natalie一些{cake_emoji} (1 cake = 1 exp)\n/cake_give 給予他人{cake_emoji}\n/mining_info 挖礦小遊戲資訊\n/blackjack 21點遊戲\n/poker 撲克牌比大小\n/check_sevencolor_restday 確認七色有沒有休假'
+            general_commands_list = [
+                "/info 查看指令表及個人資料",
+                f"/eat 餵食Natalie一些{cake_emoji} (1 cake = 1 exp)",
+                f"/cake_give 給予他人{cake_emoji}",
+                "/mining_info 挖礦小遊戲資訊",
+                "/blackjack 21點遊戲",
+                "/poker 撲克牌比大小",
+                "/poker_statistics 撲克牌比大小個人統計",
+                "/squid_rps 魷魚遊戲猜拳",
+                "/check_sevencolor_restday 確認七色有沒有休假",
+                "/set_color 更換ID的顏色(靜態)",
+                "/set_animation_color 更換ID的顏色(動態)"
+            ]
+            general_commands_list = "\n".join(general_commands_list)
             #如果等級>=5 且沒有在 抽獎仔/VIP 身分內，則顯示指令
             if userlevel.level >= 5 and all(role.id not in [621764669929160715, 605730134531637249] for role in interaction.user.roles):
                 general_commands_list += "\n/giveaway_join 加入抽獎頻道"
@@ -429,7 +443,9 @@ class General(commands.Cog):
         app_commands.Choice(name="★【漸層】矢車菊藍", value="矢車菊藍")
         ])
     async def set_animation_color(self, interaction, colorchoice:app_commands.Choice[str]):
-        animation_whitelist = ["823967449149603861"] #放白名單會員的ID字串
+        animation_whitelist = [
+            "823967449149603861" #小八
+        ] #放白名單會員的ID字串
         userid = str(interaction.user.id)
 
         user_roles = interaction.user.roles

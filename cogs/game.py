@@ -75,7 +75,7 @@ class MiningGame(commands.Cog):
 
 
     @app_commands.command(name = "mining", description = "挖礦!")
-    @app_commands.checks.cooldown(1, 15)
+    @app_commands.checks.cooldown(1, 8)
     async def mining(self,interaction):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
