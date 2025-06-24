@@ -53,6 +53,7 @@ class General(commands.Cog):
             "櫻桃紅":{"role_id":1384498051791585280},
             "霧玫瑰":{"role_id":1384911899702857838},
             "矢車菊藍":{"role_id":1384920066859995277},
+            "印度紅":{"role_id":1387017589418496092},
         }
 
 
@@ -440,7 +441,8 @@ class General(commands.Cog):
         app_commands.Choice(name="★【漸層】杏仁白", value="杏仁白"),
         app_commands.Choice(name="★【漸層】櫻桃紅", value="櫻桃紅"),
         app_commands.Choice(name="★【漸層】霧玫瑰", value="霧玫瑰"),
-        app_commands.Choice(name="★【漸層】矢車菊藍", value="矢車菊藍")
+        app_commands.Choice(name="★【漸層】矢車菊藍", value="矢車菊藍"),
+        app_commands.Choice(name="★【漸層】印度紅", value="印度紅")
         ])
     async def set_animation_color(self, interaction, colorchoice:app_commands.Choice[str]):
         animation_whitelist = [
@@ -608,7 +610,7 @@ class General(commands.Cog):
             weekday = datetime.now().weekday()  # 0: Monday, 6: Sunday
             weekday_url_map = {
                 0: 'https://thumbor.4gamers.com.tw/YyXxQ71ug_5LkjjKm7zSOavPjAg=/adaptive-fit-in/1200x1200/filters:no_upscale():extract_cover():format(jpeg):quality(85)/https%3A%2F%2Fugc-media.4gamers.com.tw%2Fpuku-prod-zh%2Fanonymous-story%2F75919057-ef63-443a-ae83-f951b7747ba1.jpg',  # 星期一
-                1: 'https://truth.bahamut.com.tw/s01/202211/b013b3ef353c7fa2a906483ceb102bde.JPG',  # 星期二
+                1: 'https://megapx-assets.dcard.tw/images/395cc8dc-0ea1-4414-b662-cf035ba1a9d4/640.webp',  # 星期二
                 2: 'https://i.imgur.com/hQ5TYGC.jpeg',  # 星期三
                 3: 'https://megapx-assets.dcard.tw/images/272898db-892d-48d1-95dc-79ccc1800a4a/1280.jpeg',  # 星期四
                 4: 'https://i.ytimg.com/vi/QM6uCrDYaiM/maxresdefault.jpg',  # 星期五

@@ -1591,7 +1591,7 @@ class SquidRPSView(discord.ui.View):
         self.right_button.disabled = False
         embed = Embed(
             title="魷魚猜拳",
-            description="選擇要留下哪一手",
+            description="選擇要收掉哪隻手",
             color=common.bot_color,
         )
         embed.add_field(name="Natalie的雙手", value=f"{self.bot_combo[0]}、{self.bot_combo[1]}", inline=False)
