@@ -1543,6 +1543,8 @@ class SquidRPSView(discord.ui.View):
         self.bot_combo = None
         self.bot_keep = None
         self.keep_task = None
+        # 確保每回合只處理一次收拳結果
+        self.hand_selected = False
         # 隨機決定實彈位置，並追蹤已扣下的扳機次數
         self.bullet_position = random.randint(0, 5)
         self.shots_fired = 0
@@ -1568,6 +1570,7 @@ class SquidRPSView(discord.ui.View):
         self.player_combo = None
         self.bot_combo = None
         self.bot_keep = None
+        self.hand_selected = False
         embed = Embed(
             title="魷魚猜拳",
             description="請選擇你要出的雙手組合",
@@ -1649,6 +1652,18 @@ class SquidRPSView(discord.ui.View):
         return [self.combo1, self.combo2, self.combo3, self.combo4, self.combo5, self.combo6]
 
     async def keep_hand(self, interaction, index):
+        if self.hand_selected:
+            if interaction is not None:
+                await interaction.response.send_message(
+                    embed=Embed(
+                        title="魷魚猜拳",
+                        description="這回合已經收拳了!",
+                        color=common.bot_error_color,
+                    ),
+                    ephemeral=True,
+                )
+            return
+        self.hand_selected = True
         if self.keep_task:
             self.keep_task.cancel()
             self.keep_task = None
