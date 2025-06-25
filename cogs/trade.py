@@ -180,15 +180,18 @@ class AuctionLoop:
 
     def __init__(self):
         self.active: dict[int, Auction] = {}  # message_id -> Auction
+        self.last_update: dict[int, float] = {}
         self.task = asyncio.create_task(self._run())
 
     def track(self, auction: Auction):
         """加入追蹤。"""
         self.active[auction.message.id] = auction
+        self.last_update[auction.message.id] = 0.0
 
     async def _run(self):
         while True:
-            await asyncio.sleep(2)  # 每 2 秒更新
+            await asyncio.sleep(2)  # 固定輪詢間隔
+            now = asyncio.get_event_loop().time()
             finished: list[int] = []
             for msg_id, auction in list(self.active.items()):
                 remaining = auction.remaining()
@@ -196,9 +199,14 @@ class AuctionLoop:
                     finished.append(msg_id)
                     await self._settle(auction)  # 結算
                 else:
-                    await AuctionView.update_embed(auction)  # 更新剩餘時間
+                    interval = 60 if remaining > 180 else 2
+                    last = self.last_update.get(msg_id, 0.0)
+                    if now - last >= interval:
+                        await AuctionView.update_embed(auction)
+                        self.last_update[msg_id] = now
             for msg_id in finished:
                 del self.active[msg_id]
+                self.last_update.pop(msg_id, None)
 
     async def _settle(self, auction: Auction):
         # 1. 禁用按鈕並顯示 00:00
