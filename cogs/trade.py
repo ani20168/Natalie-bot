@@ -279,9 +279,9 @@ def generate_embed(auction: Auction) -> Embed:
 class Trade(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
-        # self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID
+        self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID
         # self.auction_channel_id = 597738018698428416  #測試用 (MOD頻道)
-        self.auction_channel_id = common.admin_log_channel  #測試用 (日誌)
+        # self.auction_channel_id = common.admin_log_channel  #測試用 (日誌)
 
     # =====================================================
     #  建立競標指令
