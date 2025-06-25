@@ -190,7 +190,7 @@ class AuctionLoop:
 
     async def _run(self):
         while True:
-            await asyncio.sleep(2)  # 固定輪詢間隔
+            await asyncio.sleep(1)  # 固定輪詢間隔
             now = asyncio.get_event_loop().time()
             finished: list[int] = []
             for msg_id, auction in list(self.active.items()):
