@@ -611,7 +611,7 @@ class BlackJack(commands.Cog):
             data[userid]["blackjack_playing"] = True
             common.datawrite(data)
         #選項給予
-        message.set_footer(text=self.win_rate_show(userid))
+        message.set_footer(text=self.win_rate_show(userid, difficulty))
         await interaction.followup.send(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
 
 
@@ -1324,14 +1324,32 @@ class SquidRPS(commands.Cog):
             ("✌️", "✋"),
         ]
 
-    def win_rate_show(self, userid: str) -> str:
+    def _ensure_stats(self, data, userid: str):
+        """Ensure squid_rps_stats exists and migrate old keys if needed."""
+        user_data = data.setdefault(userid, {"cake": 0})
+        if "squid_rps_stats" not in user_data:
+            stats = {
+                "normal": {
+                    "win": user_data.get("squid_rps_win_rate", 0),
+                    "round": user_data.get("squid_rps_round", 0),
+                },
+                "hard": {"win": 0, "round": 0},
+            }
+            user_data["squid_rps_stats"] = stats
+            common.datawrite(data)
+        return user_data["squid_rps_stats"]
+
+    def win_rate_show(self, userid: str, difficulty: str | None = None) -> str:
         data = common.dataload()
-        if "squid_rps_round" not in data.get(userid, {}):
-            return "你的勝率:未知 總場數:0"
-        if data[userid]["squid_rps_round"] == 0:
-            return f"你的勝率:未知 總場數:{data[userid]['squid_rps_round']}"
-        win_rate = data[userid]["squid_rps_win_rate"] / data[userid]["squid_rps_round"]
-        return f"你的勝率:{win_rate:.1%} 總場數:{data[userid]['squid_rps_round']}"
+        stats = self._ensure_stats(data, userid)
+        if difficulty is None:
+            difficulty = data.get(userid, {}).get("squid_rps_difficulty", "normal")
+        win = stats[difficulty]["win"]
+        round_count = stats[difficulty]["round"]
+        if round_count == 0:
+            return f"你的勝率:未知 總場數:{round_count}"
+        win_rate = win / round_count
+        return f"你的勝率:{win_rate:.1%} 總場數:{round_count}"
 
     def rps_result(self, a: str, b: str) -> int:
         if a == b:
@@ -1408,9 +1426,7 @@ class SquidRPS(commands.Cog):
                 return
 
             data[userid]["cake"] -= bet
-            if "squid_rps_win_rate" not in data[userid]:
-                data[userid]["squid_rps_win_rate"] = 0
-                data[userid]["squid_rps_round"] = 0
+            stats = self._ensure_stats(data, userid)
             if "squid_rps_difficulty" not in data[userid]:
                 data[userid]["squid_rps_difficulty"] = "normal"
             difficulty = data[userid]["squid_rps_difficulty"]
@@ -1444,6 +1460,7 @@ class SquidRPS(commands.Cog):
             userid = str(interaction.user.id)
             if userid not in data:
                 data[userid] = {"cake": 0}
+            self._ensure_stats(data, userid)
             data[userid]["squid_rps_difficulty"] = level.value
             common.datawrite(data)
         await interaction.response.send_message(embed=Embed(title="魷魚猜拳難度設置", description=f"已設定為{level.value}", color=common.bot_color))
@@ -1453,34 +1470,48 @@ class SquidRPS(commands.Cog):
         async with common.jsonio_lock:
             data = common.dataload()
             userid = str(interaction.user.id)
-            if "squid_rps_win_rate" not in data.get(userid, {}):
-                data[userid]["squid_rps_win_rate"] = 0
-                data[userid]["squid_rps_round"] = 0
-                common.datawrite(data)
+            stats = self._ensure_stats(data, userid)
 
-        players = []
+        leaderboards = {"normal": [], "hard": []}
         for user_id, user_data in data.items():
-            if isinstance(user_data, dict) and "squid_rps_round" in user_data and user_data["squid_rps_round"] >= 50:
-                win_rate = user_data["squid_rps_win_rate"] / user_data["squid_rps_round"]
-                players.append({"user_id": user_id, "win_rate": win_rate, "round": user_data["squid_rps_round"]})
+            if not isinstance(user_data, dict):
+                continue
+            user_stats = self._ensure_stats(data, user_id)
+            for diff in ("normal", "hard"):
+                if user_stats[diff]["round"] >= 50:
+                    win_rate = user_stats[diff]["win"] / user_stats[diff]["round"]
+                    leaderboards[diff].append({
+                        "user_id": user_id,
+                        "win_rate": win_rate,
+                        "round": user_stats[diff]["round"],
+                    })
 
-        players.sort(key=lambda x: x["win_rate"], reverse=True)
-        top_players = players[:5]
-        message = ""
-        for i, player in enumerate(top_players):
-            user_object = self.bot.get_user(int(player["user_id"]))
-            message += f"{i+1}.{user_object.display_name} 勝率:**{player['win_rate']:.1%}** 總場數:**{player['round']}**\n"
+        for diff in leaderboards:
+            leaderboards[diff].sort(key=lambda x: x["win_rate"], reverse=True)
 
-        if data[userid]["squid_rps_round"] == 0:
-            interaction_user_win_rate = 0
-        else:
-            interaction_user_win_rate = data[userid]["squid_rps_win_rate"] / data[userid]["squid_rps_round"]
+        def fmt_board(players):
+            msg = ""
+            for i, player in enumerate(players[:5]):
+                user_obj = self.bot.get_user(int(player["user_id"]))
+                msg += f"{i+1}.{user_obj.display_name} 勝率:**{player['win_rate']:.1%}** 總場數:**{player['round']}**\n"
+            return msg or "無資料\n"
+
+        msg_normal = fmt_board(leaderboards["normal"])
+        msg_hard = fmt_board(leaderboards["hard"])
+
+        normal_rate = stats["normal"]["win"] / stats["normal"]["round"] if stats["normal"]["round"] else 0
+        hard_rate = stats["hard"]["win"] / stats["hard"]["round"] if stats["hard"]["round"] else 0
+
+        desc = (
+            "注意:需要遊玩至少50場才會記錄至排行榜。\n"
+            f"\n**Normal**\n{msg_normal}"
+            f"\n**Hard**\n{msg_hard}"
+            f"\n你在normal難度下勝率為:{normal_rate:.1%} 總場數:{stats['normal']['round']}"
+            f"\n你在hard難度下勝率為:{hard_rate:.1%} 總場數:{stats['hard']['round']}"
+        )
+
         await interaction.response.send_message(
-            embed=Embed(
-                title="魷魚猜拳勝率排行榜",
-                description=f"注意:需要遊玩至少50場才會記錄至排行榜。\n{message}\n你的勝率為:**{interaction_user_win_rate:.1%}** 總場數:**{data[userid]['squid_rps_round']}**",
-                color=common.bot_color,
-            )
+            embed=Embed(title="魷魚猜拳勝率排行榜", description=desc, color=common.bot_color)
         )
 
 
@@ -1580,7 +1611,8 @@ class SquidRPSView(discord.ui.View):
 
     def hp_display(self) -> str:
         """顯示Natalie目前血量"""
-        return "".join("●" for _ in range(self.natalie_hp))
+        lost = self.max_hp - self.natalie_hp
+        return "".join("○" if i < lost else "●" for i in range(self.max_hp))
 
     async def _edit_message(self, interaction, *, embed, view):
         if interaction is not None:
@@ -1613,7 +1645,11 @@ class SquidRPSView(discord.ui.View):
         if self.difficulty == "hard":
             embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
-        embed.set_footer(text=SquidRPS(self.bot).win_rate_show(str(self.command_interaction.user.id)))
+        embed.set_footer(
+            text=SquidRPS(self.bot).win_rate_show(
+                str(self.command_interaction.user.id), self.difficulty
+            )
+        )
         await self.message.edit(embed=embed, view=self)
 
     def compare(self, p, b):
@@ -1720,7 +1756,11 @@ class SquidRPSView(discord.ui.View):
             if self.difficulty == "hard":
                 embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
             embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
-            embed.set_footer(text=SquidRPS(self.bot).win_rate_show(str(self.command_interaction.user.id)))
+            embed.set_footer(
+                text=SquidRPS(self.bot).win_rate_show(
+                    str(self.command_interaction.user.id), self.difficulty
+                )
+            )
             await self._edit_message(interaction, embed=embed, view=self)
 
             await asyncio.sleep(3.5) #等3.5秒讓玩家確認結果
@@ -1743,10 +1783,12 @@ class SquidRPSView(discord.ui.View):
                     if self.natalie_hp == 0:
                         desc += "\n砰! 實彈擊中Natalie，你贏得了遊戲!"
                         reward = self.bet * (4 if self.difficulty == "hard" else 2)
+                        gain = reward - self.bet
                         data[userid]["cake"] += reward
                         data[userid]["squid_playing"] = False
-                        data[userid]["squid_rps_win_rate"] += 1
-                        data[userid]["squid_rps_round"] += 1
+                        stats = SquidRPS(self.bot)._ensure_stats(data, userid)
+                        stats[self.difficulty]["win"] += 1
+                        stats[self.difficulty]["round"] += 1
                         embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                         embed.add_field(name="難度", value=self.difficulty, inline=False)
                         if self.difficulty == "hard":
@@ -1754,12 +1796,14 @@ class SquidRPSView(discord.ui.View):
                         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
                         embed.add_field(
                             name="結果",
-                            value=f"你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
+                            value=f"你獲得了**{gain}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
                             inline=False,
                         )
                         common.datawrite(data)
 
-                        embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
+                        embed.set_footer(
+                            text=SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
+                        )
                         await self._edit_message(interaction, embed=embed, view=None)
 
                         self.stop()
@@ -1772,7 +1816,9 @@ class SquidRPSView(discord.ui.View):
                         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
                         common.datawrite(data)
 
-                        embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
+                        embed.set_footer(
+                            text=SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
+                        )
                         await self._edit_message(interaction, embed=embed, view=self)
 
                         await asyncio.sleep(3.5)
@@ -1787,7 +1833,9 @@ class SquidRPSView(discord.ui.View):
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
                     common.datawrite(data)
 
-                    embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
+                    embed.set_footer(
+                        text=SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
+                    )
                     await self._edit_message(interaction, embed=embed, view=self)
 
                     await asyncio.sleep(3.5)  # 等3.5秒讓玩家確認結果
@@ -1798,7 +1846,8 @@ class SquidRPSView(discord.ui.View):
                 if shot:
                     desc += "\n砰! 你被實彈擊中了..."
                     data[userid]["squid_playing"] = False
-                    data[userid]["squid_rps_round"] += 1
+                    stats = SquidRPS(self.bot)._ensure_stats(data, userid)
+                    stats[self.difficulty]["round"] += 1
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                     embed.add_field(name="難度", value=self.difficulty, inline=False)
                     if self.difficulty == "hard":
@@ -1811,7 +1860,9 @@ class SquidRPSView(discord.ui.View):
                     )
                     common.datawrite(data)
 
-                    embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
+                    embed.set_footer(
+                        text=SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
+                    )
                     await self._edit_message(interaction, embed=embed, view=None)
                     self.stop()
                     return
@@ -1824,7 +1875,9 @@ class SquidRPSView(discord.ui.View):
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
                     common.datawrite(data)
 
-                    embed.set_footer(text=SquidRPS(self.bot).win_rate_show(userid))
+                    embed.set_footer(
+                        text=SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
+                    )
                     await self._edit_message(interaction, embed=embed, view=self)
 
                     await asyncio.sleep(3.5)  # 等3.5秒讓玩家確認結果
