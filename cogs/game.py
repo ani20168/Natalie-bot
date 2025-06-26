@@ -1794,9 +1794,14 @@ class SquidRPSView(discord.ui.View):
                         if self.difficulty == "hard":
                             embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
                         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+                        if self.difficulty == "normal":
+                            result_message = f"你獲得了**{gain}**塊{self.cake_emoji}\n"
+                        elif self.difficulty == "hard":
+                            result_message = f"你獲得了**{gain}**塊{self.cake_emoji} (hard * 3)\n"
+                        result_message += f"你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}"
                         embed.add_field(
                             name="結果",
-                            value=f"你獲得了**{gain}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
+                            value=result_message,
                             inline=False,
                         )
                         common.datawrite(data)
