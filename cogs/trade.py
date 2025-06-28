@@ -199,7 +199,7 @@ class AuctionLoop:
                     finished.append(msg_id)
                     await self._settle(auction)  # 結算
                 else:
-                    interval = 60 if remaining > 180 else 2
+                    interval = 60 if remaining > 60 else 5
                     last = self.last_update.get(msg_id, 0.0)
                     if now - last >= interval:
                         await AuctionView.update_embed(auction)
