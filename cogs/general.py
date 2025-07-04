@@ -448,7 +448,8 @@ class General(commands.Cog):
     async def set_animation_color(self, interaction, colorchoice:app_commands.Choice[str]):
         animation_whitelist = [
             "823967449149603861", #小八
-            "277828424872230912" #七色
+            "277828424872230912", #七色
+            "1190971324647092237" #泥巴
         ] #放白名單會員的ID字串
         userid = str(interaction.user.id)
 
