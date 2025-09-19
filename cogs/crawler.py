@@ -8,7 +8,7 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import re
-
+import traceback
 
 
 
@@ -66,7 +66,8 @@ class SteamFreeGameCrawler(commands.Cog):
                     return None
                 return await response.text()
         except Exception as e:
-            print(f"web_request get except, URL: {url},errormsg:{e},time:{datetime.now().strftime('%m/%d %H:%M:%S')}")
+            print(f"web_request get except, URL: {url} ,time:{datetime.now().strftime('%m/%d %H:%M:%S')}")
+            traceback.print_exc()
             return None
 
     async def bahamut_source(self):
