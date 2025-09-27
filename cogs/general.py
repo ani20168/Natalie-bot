@@ -457,6 +457,7 @@ class General(commands.Cog):
             "543126405978783765", #一ㄈ
             "399210985304489985", #小Q
             "472308372616773632", #tako
+            "587934995063111681", #xu6
         ] #放白名單會員的ID字串
         userid = str(interaction.user.id)
 
