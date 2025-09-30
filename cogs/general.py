@@ -57,6 +57,7 @@ class General(commands.Cog):
             "青瓷綠":{"role_id":1390282584361144330},
             "李紫":{"role_id":1395357795213250642},
             "亮粉紅":{"role_id":1395359026879004744},
+            "動態淺紫紅":{"role_id":1422416437036711976},
         }
 
 
@@ -448,6 +449,7 @@ class General(commands.Cog):
         app_commands.Choice(name="★【漸層】青瓷綠", value="青瓷綠"),
         app_commands.Choice(name="★【漸層】李紫", value="李紫"),
         app_commands.Choice(name="★【漸層】亮粉紅", value="亮粉紅"),
+        app_commands.Choice(name="★【漸層】動態淺紫紅", value="動態淺紫紅"),
         ])
     async def set_animation_color(self, interaction, colorchoice:app_commands.Choice[str]):
         animation_whitelist = [
