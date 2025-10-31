@@ -17,7 +17,8 @@ class Auction:
     EXTEND_DURATION = 30   # 每次延長的秒數
 
     def __init__(self, *, item: str, start_price: int, increment: int,
-                 end_time: datetime, author_id: int, message: discord.Message):
+                 end_time: datetime, author_id: int, message: discord.Message,
+                 bot: commands.Bot, start_time: datetime | None = None):
         self.item = item                        # 商品名稱
         self.start_price = start_price          # 起標價
         self.increment = increment              # 每次最小加價
@@ -25,6 +26,7 @@ class Auction:
         self.author_id = author_id              # 建立者 ID
         self.message = message                  # Discord 訊息物件 (用來更新)
         self.view: "AuctionView | None" = None  # 留存 View 物件以便後續更新
+        self.bot = bot                          # Bot 實例，供後續通知使用
 
         # 競標狀態
         self.highest_bid = start_price - increment  # 設為 "尚未有人出價" 的前置值
@@ -35,10 +37,24 @@ class Auction:
         safe_name = self._safe_filename(self.item)          # ← 轉成安全檔名
         self.log_path = Path("log/bid") / f"{safe_name}_{message.id}.txt"
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.start_time = start_time or datetime.now(timezone.utc)
+        self.reminder_users: set[int] = set()       # 記錄希望提醒的用戶
+        now = datetime.now(timezone.utc)
+        self.start_event_handled: bool = self.start_time <= now
+        self.reminder_notified: bool = False
 
     # ----------------------------------------------------
     # 工具函式
     # ----------------------------------------------------
+    @property
+    def started(self) -> bool:
+        """判斷競標是否已經開始。"""
+        return datetime.now(timezone.utc) >= self.start_time
+
+    def time_until_start(self) -> int:
+        """回傳距離開始還有幾秒 (小於 0 代表已開始)。"""
+        return int((self.start_time - datetime.now(timezone.utc)).total_seconds())
+
     def next_price(self) -> int:
         """計算下一次出價需要的金額。"""
         return self.highest_bid + self.increment
@@ -71,6 +87,8 @@ class Auction:
     async def place_bid(self, interaction: discord.Interaction):
         """處理按鈕互動產生的出價。必須於 self.lock 內呼叫。"""
         bidder_id = interaction.user.id
+        if not self.started:
+            raise ValueError("競標尚未開始，請稍候再出價")
         # 固定最高價者不得連續出價
         if bidder_id == self.highest_bidder:
             raise ValueError("你已是最高出價者，無法再次出價")
@@ -115,6 +133,38 @@ class Auction:
             line
         )
 
+    async def notify_reminders(self):
+        """通知設定提醒的用戶競標已經開始。"""
+        if not self.reminder_users or self.reminder_notified:
+            return
+        self.reminder_notified = True
+        message = (
+            f"競標 **{self.item}** 已經開始囉！\n"
+            f"直接前往：{self.message.jump_url}"
+        )
+        for user_id in list(self.reminder_users):
+            user = self.bot.get_user(user_id)
+            if user is None:
+                try:
+                    user = await self.bot.fetch_user(user_id)
+                except discord.HTTPException:
+                    continue
+            if user is None:
+                continue
+            try:
+                await user.send(message)
+            except (discord.Forbidden, discord.HTTPException):
+                continue
+
+    async def handle_start(self):
+        """處理競標從預備狀態轉為正式開始時的工作。"""
+        if self.start_event_handled:
+            return
+        self.start_event_handled = True
+        if self.view:
+            await self.view.transition_to_bidding()
+        await self.notify_reminders()
+
     @staticmethod
     def _safe_filename(name: str) -> str:
         # Windows 禁止: \ / : * ? " < > |   ── 全平台最大公約數
@@ -146,14 +196,41 @@ class BidButton(discord.ui.Button):
         await AuctionView.update_embed(self.auction)
         await self.auction.write_log(interaction.user.display_name)
 
+class ReminderButton(discord.ui.Button):
+    """競標尚未開始時提供提醒的按鈕。"""
+
+    def __init__(self, auction: Auction):
+        super().__init__(label="開始後提醒我!", style=discord.ButtonStyle.blurple)
+        self.auction = auction
+
+    async def callback(self, interaction: discord.Interaction):
+        """收集希望在競標開始時收到通知的使用者。"""
+        if self.auction.started:
+            await interaction.response.send_message("競標已經開始囉，快去出價吧!", ephemeral=True)
+            return
+
+        user_id = interaction.user.id
+        if user_id in self.auction.reminder_users:
+            await interaction.response.send_message("提醒已設定，開始時會傳送私訊通知你。", ephemeral=True)
+            return
+
+        self.auction.reminder_users.add(user_id)
+        await interaction.response.send_message("提醒設置成功! 競標開始時會以私訊提醒你。", ephemeral=True)
+
 class AuctionView(discord.ui.View):
     """提供按鈕並定期更新 embed 的 View。"""
 
     def __init__(self, auction: Auction):
         super().__init__(timeout=None)
         self.auction = auction
-        self.bid_button = BidButton(auction)
-        self.add_item(self.bid_button)
+        self.bid_button: BidButton | None = None
+        self.reminder_button: ReminderButton | None = None
+        if auction.started:
+            self.bid_button = BidButton(auction)
+            self.add_item(self.bid_button)
+        else:
+            self.reminder_button = ReminderButton(auction)
+            self.add_item(self.reminder_button)
         auction.view = self
         # 將競標交給背景迴圈持續追蹤
         AuctionLoop.instance().track(auction)
@@ -161,6 +238,16 @@ class AuctionView(discord.ui.View):
     async def on_timeout(self):
         # 由 AuctionLoop 統一處理結束，不在此處理
         pass
+
+    async def transition_to_bidding(self):
+        """競標開始後，把提醒按鈕換成出價按鈕。"""
+        if self.bid_button is not None:
+            return
+        self.clear_items()
+        self.reminder_button = None
+        self.bid_button = BidButton(self.auction)
+        self.add_item(self.bid_button)
+        await AuctionView.update_embed(self.auction)
 
     @staticmethod
     async def update_embed(auction: Auction):
@@ -194,6 +281,18 @@ class AuctionLoop:
             now = asyncio.get_event_loop().time()
             finished: list[int] = []
             for msg_id, auction in list(self.active.items()):
+                if not auction.start_event_handled and auction.started:
+                    await auction.handle_start()
+                    self.last_update[msg_id] = now
+
+                if not auction.started:
+                    interval = 10
+                    last = self.last_update.get(msg_id, 0.0)
+                    if now - last >= interval:
+                        await AuctionView.update_embed(auction)
+                        self.last_update[msg_id] = now
+                    continue
+
                 remaining = auction.remaining()
                 if remaining <= 0:
                     finished.append(msg_id)
@@ -238,25 +337,34 @@ class AuctionLoop:
 # ------------------------------------------------------------
 
 def generate_embed(auction: Auction) -> Embed:
-    remaining = max(0, auction.remaining())
-    h, rem = divmod(remaining, 3600)
-    m, s = divmod(rem, 60)
+    def format_span(seconds: int) -> str:
+        seconds = max(0, seconds)
+        h, rem = divmod(seconds, 3600)
+        m, s = divmod(rem, 60)
+        if h:
+            return f"{h:02d}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
 
-    # 動態格式：>=1 小時顯示 HH:MM:SS，否則顯示 MM:SS
-    if h:
-        remain_str = f"{h:02d}:{m:02d}:{s:02d}"
-    else:
-        remain_str = f"{m:02d}:{s:02d}"
-
-    # 將結束時間轉為 UTC+8 並格式化
     tz_taipei = timezone(timedelta(hours=8))
     end_local = auction.end_time.astimezone(tz_taipei)
     end_str = end_local.strftime("%Y-%m-%d %H:%M:%S")
 
-    description = (
-        f"剩餘時間: **{remain_str}**\n"
-        f"結束時間: {end_str} (UTC+8)"
-    )
+    if not auction.started:
+        start_remaining = auction.time_until_start()
+        start_local = auction.start_time.astimezone(tz_taipei)
+        start_str = start_local.strftime("%Y-%m-%d %H:%M:%S")
+        duration_seconds = int((auction.end_time - auction.start_time).total_seconds())
+        description = (
+            f"競標開始剩餘時間: **{format_span(start_remaining)}**\n"
+            f"預計開始時間: {start_str} (UTC+8)\n"
+            f"競標時長: {format_span(duration_seconds)}"
+        )
+    else:
+        remaining = auction.remaining()
+        description = (
+            f"剩餘時間: **{format_span(remaining)}**\n"
+            f"結束時間: {end_str} (UTC+8)"
+        )
 
     embed = Embed(title="🎉 競標中 – " + auction.item,
                   description=description,
@@ -282,7 +390,7 @@ class Trade(commands.Cog):
         self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID
         # self.auction_channel_id = 597738018698428416  #測試用 (MOD頻道)
         # self.auction_channel_id = common.admin_log_channel  #測試用 (日誌)
-
+        
     # =====================================================
     #  建立競標指令
     # =====================================================
@@ -292,6 +400,7 @@ class Trade(commands.Cog):
         start_price = discord.ui.TextInput(label="起標價", placeholder="輸入數字", required=True)
         increment = discord.ui.TextInput(label="增額出價", placeholder="每次最少加多少", required=True)
         duration = discord.ui.TextInput(label="持續時間 (分鐘)", placeholder="例如 10", required=True)
+        preparation = discord.ui.TextInput(label="準備時間 (分鐘)", placeholder="例如 5 (可留白)", required=False)
 
         def __init__(self, parent_cog: "Trade"):
             super().__init__()
@@ -303,13 +412,17 @@ class Trade(commands.Cog):
                 start = int(self.start_price.value)
                 inc = int(self.increment.value)
                 dur_minutes = int(self.duration.value)
-                if start <= 0 or inc <= 0 or dur_minutes <= 0:
+                prep_value = self.preparation.value.strip()
+                prep_minutes = int(prep_value) if prep_value else 0
+                if start <= 0 or inc <= 0 or dur_minutes <= 0 or prep_minutes < 0:
                     raise ValueError
             except ValueError:
                 await interaction.response.send_message("輸入格式錯誤，請確認皆為正整數。", ephemeral=True)
                 return
 
-            end_time = datetime.now(timezone.utc) + timedelta(minutes=dur_minutes)
+            now = datetime.now(timezone.utc)
+            start_time = now + timedelta(minutes=prep_minutes)
+            end_time = start_time + timedelta(minutes=dur_minutes)
             channel = interaction.guild.get_channel(self.parent_cog.auction_channel_id)
             if channel is None:
                 await interaction.response.send_message("找不到拍賣所頻道，請先設定。", ephemeral=True)
@@ -323,7 +436,9 @@ class Trade(commands.Cog):
                 increment=inc,
                 end_time=end_time,
                 author_id=interaction.user.id,
-                message=dummy_msg
+                message=dummy_msg,
+                bot=self.parent_cog.bot,
+                start_time=start_time
             )
 
             embed = generate_embed(auction)
