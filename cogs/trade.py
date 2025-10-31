@@ -329,8 +329,13 @@ class AuctionLoop:
                 common.datawrite(data)
 
         # 4. 公告結果
-        winner = f"<@{auction.highest_bidder}>" if auction.highest_bidder else "無人"
-        await auction.message.channel.send(f"競標結束! 恭喜 {winner} 以 **{auction.highest_bid}** 塊{common.cake_emoji}得標 **{auction.item}** !")
+        if auction.highest_bidder is None:
+            await auction.message.channel.send(f"競標結束! **{auction.item}** 流標了!")
+        else:
+            winner = f"<@{auction.highest_bidder}>"
+            await auction.message.channel.send(
+                f"競標結束! 恭喜 {winner} 以 **{auction.highest_bid}** 塊{common.cake_emoji}得標 **{auction.item}** !"
+            )
 
 # ------------------------------------------------------------
 #  產生 embed 區塊
