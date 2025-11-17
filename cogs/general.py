@@ -589,13 +589,13 @@ class General(commands.Cog):
                 if len(channel_ids) == 3:  # Check if all channel IDs are unique
                     # Log the potential bot activity
                     member = message.author
-                    asyncio.create_task(self.mute_10_mins(member))
-                    block_embed = Embed(title="Bot Detection",description="你在「偽造妹妹」的伺服器，發送訊息的行為異常，為了保護社群成員的帳號安全，我們已將你暫時禁言，並刪除最近的訊息。\n如果你有任何問題，請向ANI(ani20168)回報。",color=common.bot_error_color)
+                    await self.mute_permanent(member)
+                    block_embed = Embed(title="Bot Detection",description="你在「偽造妹妹」的伺服器，發送訊息的行為異常，為了保護社群成員的帳號安全，我們已將你永久禁言，並刪除最近的訊息。\n如果你有任何問題，請向ANI(ani20168)回報。",color=common.bot_error_color)
                     block_embed.set_footer(text="Natalie 機器人防護系統")
                     await member.send(embed=block_embed)
                     admin_channel = self.bot.get_channel(common.admin_log_channel)
                     await admin_channel.send(f"偵測到機器人行為，使用者ID:<@{memberid}>")
-                    asyncio.create_task(self.delete_messages(messages))
+                    asyncio.create_task(self.delete_recent_messages(member))
 
     async def oh_totato_detect(self, message:discord.Message):
         """
@@ -634,25 +634,40 @@ class General(commands.Cog):
             if url:
                 await message.channel.send(url)
 
-    async def mute_10_mins(self, member:discord.Member):
+    async def mute_permanent(self, member:discord.Member):
         mute_role = member.guild.get_role(563285841384833024)
-        await member.add_roles(mute_role,reason="發送訊息的行為異常。暫時禁言10分鐘")
-        await asyncio.sleep(600)
-        await member.remove_roles(mute_role,reason="禁言10分鐘結束")
+        await member.add_roles(mute_role,reason="發送訊息的行為異常。永久禁言")
 
-    async def delete_messages(self, messages:list):
-        for msg in messages:
-            channel = self.bot.get_channel(msg['channel_id'])
-            if channel:
-                try:
-                    message_to_delete = await channel.fetch_message(msg['message_id'])
-                    await message_to_delete.delete()
-                except discord.NotFound:
-                    print(f"Message {msg['message_id']} not found.")
-                except discord.Forbidden:
-                    print("Do not have permissions to delete the message.")
-                except discord.HTTPException as e:
-                    print(f"Failed to delete message {msg['message_id']}: {e}")
+    async def delete_recent_messages(self, member:discord.Member):
+        """
+        刪除該用戶最近1分鐘內的所有訊息
+        """
+        cutoff_time = datetime.now(timezone.utc) - timedelta(minutes=1)
+        deleted_count = 0
+        
+        # 遍歷伺服器所有文字頻道
+        for channel in member.guild.text_channels:
+            try:
+                # 查詢該頻道中最近1分鐘的歷史訊息（限制100條，對於1分鐘內應該足夠）
+                async for message in channel.history(limit=100, after=cutoff_time):
+                    # 檢查訊息是否在1分鐘內且為該用戶發送
+                    if message.author.id == member.id and message.created_at >= cutoff_time:
+                        try:
+                            await message.delete()
+                            deleted_count += 1
+                        except discord.NotFound:
+                            pass  # 訊息已被刪除
+                        except discord.Forbidden:
+                            print(f"Do not have permissions to delete message in {channel.name}.")
+                        except discord.HTTPException as e:
+                            print(f"Failed to delete message in {channel.name}: {e}")
+            except discord.Forbidden:
+                print(f"Do not have permissions to read history in {channel.name}.")
+            except Exception as e:
+                print(f"Error processing channel {channel.name}: {e}")
+        
+        if deleted_count > 0:
+            await self.bot.get_channel(common.admin_log_channel).send(f"[Bot Detection] 刪除 {member.display_name} 最近一分鐘內的{deleted_count} 筆訊息")
 
 
     @commands.Cog.listener()
