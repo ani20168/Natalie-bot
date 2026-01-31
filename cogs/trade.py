@@ -409,7 +409,8 @@ class Trade(commands.Cog):
             self.parent_cog = parent_cog
             self.selected_channel: discord.TextChannel | None = None
 
-        @discord.ui.channel_select(
+        @discord.ui.select(
+            cls=discord.ui.ChannelSelect,
             placeholder="選擇要發布競標的頻道",
             channel_types=[discord.ChannelType.text]
         )
