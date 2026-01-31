@@ -392,13 +392,37 @@ def generate_embed(auction: Auction) -> Embed:
 class Trade(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
-        self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID
-        # self.auction_channel_id = 597738018698428416  #測試用 (MOD頻道)
-        # self.auction_channel_id = common.admin_log_channel  #測試用 (日誌)
+        # 頻道選擇已改為在建立競標時通過 UI 選擇，不再需要硬編碼頻道 ID
+        # self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID (已棄用)
+        # self.auction_channel_id = 597738018698428416  #測試用 (MOD頻道) (已棄用)
+        # self.auction_channel_id = common.admin_log_channel  #測試用 (日誌) (已棄用)
         
     # =====================================================
     #  建立競標指令
     # =====================================================
+
+    class ChannelSelectView(discord.ui.View):
+        """頻道選擇 View，用於選擇競標發布頻道。"""
+        
+        def __init__(self, parent_cog: "Trade"):
+            super().__init__(timeout=300)  # 5分鐘超時
+            self.parent_cog = parent_cog
+            self.selected_channel: discord.TextChannel | None = None
+
+        @discord.ui.channel_select(
+            placeholder="選擇要發布競標的頻道",
+            channel_types=[discord.ChannelType.text]
+        )
+        async def channel_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect):
+            """處理頻道選擇。"""
+            self.selected_channel = select.values[0]
+            # 顯示 Modal
+            modal = self.parent_cog.CreateBidModal(self.parent_cog, self.selected_channel.id)
+            await interaction.response.send_modal(modal)
+
+        async def on_timeout(self):
+            """View 超時時清理。"""
+            self.stop()
 
     class CreateBidModal(discord.ui.Modal, title="建立競標"):
         item = discord.ui.TextInput(label="商品", placeholder="300元禮物卡", required=True)
@@ -407,9 +431,10 @@ class Trade(commands.Cog):
         duration = discord.ui.TextInput(label="持續時間 (分鐘)", placeholder="例如 10", required=True)
         preparation = discord.ui.TextInput(label="準備時間 (分鐘)", placeholder="例如 5 (可留白)", required=False)
 
-        def __init__(self, parent_cog: "Trade"):
+        def __init__(self, parent_cog: "Trade", channel_id: int):
             super().__init__()
             self.parent_cog = parent_cog
+            self.channel_id = channel_id
 
         async def on_submit(self, interaction: discord.Interaction):
             # 參數驗證
@@ -428,9 +453,9 @@ class Trade(commands.Cog):
             now = datetime.now(timezone.utc)
             start_time = now + timedelta(minutes=prep_minutes)
             end_time = start_time + timedelta(minutes=dur_minutes)
-            channel = interaction.guild.get_channel(self.parent_cog.auction_channel_id)
+            channel = interaction.guild.get_channel(self.channel_id)
             if channel is None:
-                await interaction.response.send_message("找不到拍賣所頻道，請先設定。", ephemeral=True)
+                await interaction.response.send_message("找不到指定的頻道，請重新選擇。", ephemeral=True)
                 return
 
             dummy_msg = await channel.send("稍等…正在建立競標…")
@@ -453,8 +478,14 @@ class Trade(commands.Cog):
 
     @app_commands.command(name="create_bid", description="建立競標交易")
     async def create_bid(self, interaction: discord.Interaction):
-        """跳出 Modal 讓使用者輸入競標資訊。"""
-        await interaction.response.send_modal(self.CreateBidModal(self))
+        """先選擇頻道，然後跳出 Modal 讓使用者輸入競標資訊。"""
+        view = self.ChannelSelectView(self)
+        embed = Embed(
+            title="建立競標",
+            description="請先選擇要發布競標的頻道",
+            color=common.bot_color
+        )
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
 
     #Nitro Booster 每月可以兌換一次稱號
