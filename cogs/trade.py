@@ -193,14 +193,14 @@ class BidButton(discord.ui.Button):
         self.label = f"出價!({self.auction.next_price()})"
         success_embed = Embed(title="✅ 出價成功", description=f"你成功以 **{self.auction.highest_bid}** 塊{common.cake_emoji}出價!", color=common.bot_color)
         await interaction.response.send_message(embed=success_embed, ephemeral=True)
-        # 4 秒後自動刪除訊息
+        # 4 秒後自動刪除出價成功訊息
         async def delete_after_delay():
             try:
                 await asyncio.sleep(4)
                 msg = await interaction.original_response()
                 await msg.delete()
             except (discord.NotFound, discord.HTTPException):
-                pass  # 訊息可能已被刪除或無法刪除（ephemeral 訊息無法刪除）
+                pass  # 訊息可能已被user刪除
         asyncio.create_task(delete_after_delay())
         await AuctionView.update_embed(self.auction)
         await self.auction.write_log(interaction.user.display_name)
@@ -307,9 +307,18 @@ class AuctionLoop:
                     finished.append(msg_id)
                     await self._settle(auction)  # 結算
                 else:
-                    interval = 60 if remaining > 60 else 5
-                    last = self.last_update.get(msg_id, 0.0)
-                    if now - last >= interval:
+                    should_update = False
+                    if remaining > 60:
+                        # 剩餘時間 > 60 秒時，每 60 秒更新一次
+                        interval = 60
+                        last = self.last_update.get(msg_id, 0.0)
+                        if now - last >= interval:
+                            should_update = True
+                    else:
+                        # 剩餘時間 <= 60 秒時，在特定時間點更新（30、15、5 秒）
+                        if remaining == 30 or remaining == 15 or remaining == 5:
+                            should_update = True
+                    if should_update:
                         await AuctionView.update_embed(auction)
                         self.last_update[msg_id] = now
             for msg_id in finished:
