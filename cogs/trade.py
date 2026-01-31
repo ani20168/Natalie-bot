@@ -392,10 +392,6 @@ def generate_embed(auction: Auction) -> Embed:
 class Trade(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
-        # 頻道選擇已改為在建立競標時通過 UI 選擇，不再需要硬編碼頻道 ID
-        # self.auction_channel_id = 1370620274650648667  #拍賣所 頻道 ID (已棄用)
-        # self.auction_channel_id = 597738018698428416  #測試用 (MOD頻道) (已棄用)
-        # self.auction_channel_id = common.admin_log_channel  #測試用 (日誌) (已棄用)
         
     # =====================================================
     #  建立競標指令
