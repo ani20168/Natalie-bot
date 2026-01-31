@@ -640,7 +640,7 @@ class General(commands.Cog):
         """
         偵測"想當大俠"關鍵字並讓bot回應wwm的圖
         """
-        if message.content != "想當大俠": return
+        if "想當大俠" not in message.content: return
         await message.channel.send("https://cdn.discordapp.com/attachments/419108485435883533/1465181393486090334/image.png?ex=697ec381&is=697d7201&hm=005b855bc1db5a156696345d6262aef9f120a3dd7f8fdda66bcb0c09ba996876")
 
     async def mute_permanent(self, member:discord.Member):
