@@ -859,6 +859,17 @@ class PokerGame(commands.Cog):
         return rank
 
     def evaluate_five_cards_detailed(self, cards):
+        """
+        評估五張牌的詳細牌型和比較值
+        
+        Args:
+            cards: 五張牌的列表，每張牌為 (rank, suit) 元組
+                  範例: [("A", "<:natalie_hearts:...>"), ("K", "<:natalie_spades:...>"), ...]
+        
+        Returns:
+            tuple: (牌型名稱, 比較值列表)
+                   範例: ("同花順", [14]) 或 ("兩對", [13, 9, 7])
+        """
         values = sorted([self.rank_value[r] for r, _ in cards])
         suits = [s for _, s in cards]
         counts = {v: values.count(v) for v in set(values)}
@@ -901,6 +912,18 @@ class PokerGame(commands.Cog):
         return "高牌", sorted(values, reverse=True)
 
     def evaluate_hand(self, cards):
+        """
+        評估手牌的最佳牌型（僅返回牌型名稱）
+        
+        Args:
+            cards: 手牌列表，每張牌為 (rank, suit) 元組
+                  範例: [("A", "<:natalie_hearts:...>"), ("K", "<:natalie_spades:...>"), ...]
+                  可以是5張或7張牌
+        
+        Returns:
+            str: 最佳牌型名稱
+                 範例: "同花順" 或 "兩對"
+        """
         if len(cards) <= 5:
             rank, _ = self.evaluate_five_cards_detailed(cards)
             return rank
@@ -917,6 +940,18 @@ class PokerGame(commands.Cog):
         return best_rank
 
     def best_hand_value(self, cards):
+        """
+        評估手牌的最佳牌型，返回完整信息
+        
+        Args:
+            cards: 手牌列表，每張牌為 (rank, suit) 元組
+                  範例: [("A", "<:natalie_hearts:...>"), ("K", "<:natalie_spades:...>"), ...]
+                  可以是5張或7張牌
+        
+        Returns:
+            tuple: (牌型名稱, 牌型順序, 比較值列表, 最佳五張牌組合)
+                   範例: ("同花順", 9, [14], [("A", "..."), ("K", "..."), ...])
+        """
         best_rank = "高牌"
         best_order = 0
         best_value = []
@@ -932,6 +967,20 @@ class PokerGame(commands.Cog):
         return best_rank, best_order, best_value, best_combo
 
     def extract_rank_cards(self, combo, rank):
+        """
+        從五張牌組合中提取構成特定牌型的關鍵牌
+        
+        Args:
+            combo: 五張牌的列表，每張牌為 (rank, suit) 元組
+                   範例: [("A", "<:natalie_hearts:...>"), ("K", "<:natalie_spades:...>"), ...]
+            rank: 牌型名稱
+                  範例: "兩對" 或 "三條"
+        
+        Returns:
+            list: 構成該牌型的關鍵牌列表
+                  範例: 對於"兩對"可能返回 [("9", "..."), ("9", "..."), ("6", "..."), ("6", "...")]
+                  對於"三條"可能返回 [("K", "..."), ("K", "..."), ("K", "...")]
+        """
         values = [self.rank_value[r] for r, _ in combo]
         counts = {v: values.count(v) for v in set(values)}
 
@@ -954,7 +1003,77 @@ class PokerGame(commands.Cog):
         return [card for card in combo if self.rank_value[card[0]] == high]
 
     def show_cards(self, cards):
+        """
+        將牌列表轉換為顯示用的字符串
+        
+        Args:
+            cards: 牌列表，每張牌為 (rank, suit) 元組
+                   範例: [("A", "<:natalie_hearts:...>"), ("K", "<:natalie_spades:...>")]
+        
+        Returns:
+            str: 用頓號連接的牌面字符串
+                 範例: "A<:natalie_hearts:...>、K<:natalie_spades:...>"
+        """
         return "、".join([f"{r}{s}" for r, s in cards])
+
+    def sort_best_cards(self, cards, rank):
+        """
+        根據牌型對最好牌型進行排序，使顯示更整齊
+        
+        Args:
+            cards: 牌列表，每張牌為 (rank, suit) 元組
+                   範例: [("6", "..."), ("6", "..."), ("6", "..."), ("8", "..."), ("8", "...")]
+            rank: 牌型名稱
+                  範例: "葫蘆" 或 "兩對" 或 "順子"
+        
+        Returns:
+            list: 排序後的牌列表
+                  範例: 對於"葫蘆"可能返回 [("6", "..."), ("6", "..."), ("6", "..."), ("8", "..."), ("8", "...")]
+                  對於"兩對"可能返回 [("9", "..."), ("9", "..."), ("6", "..."), ("6", "...")]
+                  對於"順子"可能返回 [("5", "..."), ("6", "..."), ("7", "..."), ("8", "..."), ("9", "...")]
+        """
+        if not cards:
+            return cards
+        
+        # 計算每張牌的點數和出現次數
+        values = [self.rank_value[r] for r, _ in cards]
+        counts = {v: values.count(v) for v in set(values)}
+        
+        if rank == "順子":
+            # 順子：點數從小到大排
+            return sorted(cards, key=lambda card: self.rank_value[card[0]])
+        elif rank == "葫蘆":
+            # 葫蘆：3+2的3排前面，2排後面（如66688）
+            triple_val = max(v for v, c in counts.items() if c == 3)
+            pair_val = max(v for v, c in counts.items() if c == 2)
+            triple_cards = [card for card in cards if self.rank_value[card[0]] == triple_val]
+            pair_cards = [card for card in cards if self.rank_value[card[0]] == pair_val]
+            return triple_cards + pair_cards
+        elif rank == "兩對":
+            # 兩對：大的數字排前面（9966）
+            pair_vals = sorted([v for v, c in counts.items() if c == 2], reverse=True)
+            sorted_cards = []
+            for val in pair_vals:
+                sorted_cards.extend([card for card in cards if self.rank_value[card[0]] == val])
+            return sorted_cards
+        elif rank == "皇家同花順" or rank == "同花順":
+            # 同花順：點數從小到大排
+            return sorted(cards, key=lambda card: self.rank_value[card[0]])
+        elif rank == "同花":
+            # 同花：點數從大到小排
+            return sorted(cards, key=lambda card: self.rank_value[card[0]], reverse=True)
+        elif rank == "鐵支":
+            # 鐵支：四張相同點數的牌（已經是同一個點數，保持原順序即可）
+            return cards
+        elif rank == "三條":
+            # 三條：三張相同點數的牌（已經是同一個點數，保持原順序即可）
+            return cards
+        elif rank == "一對":
+            # 一對：兩張相同點數的牌（已經是同一個點數，保持原順序即可）
+            return cards
+        else:  # 高牌
+            # 高牌：從大到小排
+            return sorted(cards, key=lambda card: self.rank_value[card[0]], reverse=True)
 
     #顯示勝率跟場數(給embed footer以及leaderboard用的)
     def win_rate_show(self, userid: str) -> str:
@@ -1162,13 +1281,13 @@ class PokerButton(discord.ui.View):
         message.add_field(
             name=f"你的手牌(牌型:{player_rank})",
             value=pg.show_cards(self.player_cards)
-            + "\n最好牌型:" + pg.show_cards(player_best),
+            + "\n最好牌型:" + pg.show_cards(pg.sort_best_cards(player_best, player_rank)),
             inline=False,
         )
         message.add_field(
             name=f"Natalie的手牌(牌型:{bot_rank})",
             value=pg.show_cards(self.bot_cards)
-            + "\n最好牌型:" + pg.show_cards(bot_best),
+            + "\n最好牌型:" + pg.show_cards(pg.sort_best_cards(bot_best, bot_rank)),
             inline=False,
         )
 
