@@ -33,6 +33,13 @@ class RedPacketGrabView(discord.ui.View):
         self.session = session
         self.add_item(RedPacketGrabButton())
 
+    def finish_grab_button(self, label: str) -> None:
+        for child in self.children:
+            if isinstance(child, RedPacketGrabButton):
+                child.label = label
+                child.disabled = True
+                return
+
     async def on_timeout(self) -> None:
         message = self.session.announce_message
         if message is None:
@@ -120,10 +127,6 @@ class General(commands.Cog):
         parts = [positions[index + 1] - positions[index] for index in range(people)]
         random.shuffle(parts)
         return parts
-
-    @staticmethod
-    def red_packet_target_channel_ok(channel: discord.abc.GuildChannel) -> bool:
-        return channel.guild.id == common.fake_sister_server_id and channel.id in common.red_packet_allowed_channel_ids
 
     @app_commands.command(name = "info", description = "關於Natalie...")
     async def info(self,interaction):
@@ -577,12 +580,17 @@ class General(commands.Cog):
             return
         uid = interaction.user.id
         async with session.lock:
-            if session.ended:
-                await interaction.response.send_message(embed=Embed(title="搶紅包", description="這個紅包已經結束了。", color=common.bot_error_color), ephemeral=True)
-                return
-            if datetime.now(timezone.utc) >= session.ends_at:
+            ended = session.ended
+            expired = datetime.now(timezone.utc) >= session.ends_at
+        if ended:
+            await interaction.response.send_message(embed=Embed(title="搶紅包", description="這個紅包已經結束了。", color=common.bot_error_color), ephemeral=True)
+            return
+        if expired:
+            await self.finalize_red_packet(session, interaction.message, view, timed_out=True, interaction=interaction)
+            if not interaction.response.is_done():
                 await interaction.response.send_message(embed=Embed(title="搶紅包", description="這個紅包已經過期了。", color=common.bot_error_color), ephemeral=True)
-                return
+            return
+        async with session.lock:
             if uid == session.creator_id:
                 await interaction.response.send_message(embed=Embed(title="搶紅包", description="不能領取自己發的紅包。", color=common.bot_error_color), ephemeral=True)
                 return
@@ -614,17 +622,26 @@ class General(commands.Cog):
     async def finalize_red_packet(self, session: RedPacketSession, message: discord.Message, view: RedPacketGrabView, *, timed_out: bool = False, interaction: discord.Interaction | None = None) -> None:
         async with session.lock:
             if session.ended:
-                return
-            session.ended = True
-            distributed = sum(part[2] for part in session.claimed_order)
-            refund = session.total_budget - distributed
+                already_ended = True
+            else:
+                already_ended = False
+                session.ended = True
+                refund = session.total_budget - sum(part[2] for part in session.claimed_order)
+        if already_ended:
+            if interaction is not None and not interaction.response.is_done():
+                await interaction.response.send_message(
+                    embed=Embed(title="搶紅包", description="這個紅包已經結束了。", color=common.bot_error_color),
+                    ephemeral=True,
+                )
+            return
         async with common.jsonio_lock:
             data = common.dataload()
             oid = str(session.creator_id)
             data.setdefault(oid, {"cake": 0})
             data[oid]["cake"] += refund
             common.datawrite(data)
-        view.clear_items()
+        finish_label = "紅包已過期" if timed_out else "紅包已被搶完"
+        view.finish_grab_button(finish_label)
         embed = self.build_red_packet_embed(session)
         try:
             if interaction is not None:
@@ -646,7 +663,7 @@ class General(commands.Cog):
         )
         async def channel_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect) -> None:
             channel = select.values[0]
-            if not self.parent_cog.red_packet_target_channel_ok(channel):
+            if channel.id not in common.red_packet_allowed_channel_ids:
                 await interaction.response.send_message(
                     embed=Embed(title="搶紅包", description="只能選擇 **#大廳**、**#機器人指令區** 文字頻道。", color=common.bot_error_color),
                     ephemeral=True,
