@@ -658,7 +658,7 @@ class General(commands.Cog):
 
         @discord.ui.select(
             cls=discord.ui.ChannelSelect,
-            placeholder="選擇頻道（#大廳／#機器人指令區／#日誌）",
+            placeholder="選擇頻道（#大廳／#機器人指令區）",
             channel_types=[discord.ChannelType.text],
         )
         async def channel_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect) -> None:
@@ -743,13 +743,13 @@ class General(commands.Cog):
                 ephemeral=True,
             )
 
-    @app_commands.command(name="red_packet", description="搶紅包：在 #大廳／#機器人指令區／#日誌 發放蛋糕紅包")
+    @app_commands.command(name="red_packet", description="搶紅包：在 #大廳／#機器人指令區 發放蛋糕紅包")
     async def red_packet(self, interaction: discord.Interaction) -> None:
         if interaction.guild is None or interaction.guild.id != common.fake_sister_server_id:
             await interaction.response.send_message(embed=Embed(title="搶紅包", description="此指令僅能在「偽造妹妹」伺服器使用。", color=common.bot_error_color), ephemeral=True)
             return
         view = General.RedPacketChannelView(self)
-        embed = Embed(title="搶紅包", description="請先選擇要發佈紅包的文字頻道（**#大廳**、**#機器人指令區** 或 **#日誌**），接著設定人數與總金額。\n時長固定 **5 分鐘**；未搶完的蛋糕會退回給你。", color=common.bot_color)
+        embed = Embed(title="搶紅包", description="請先選擇要發佈紅包的文字頻道（**#大廳**、**#機器人指令區**），接著設定人數與總金額。\n時長固定 **5 分鐘**；未搶完的蛋糕會退回給你。", color=common.bot_color)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @commands.Cog.listener()
