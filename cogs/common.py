@@ -11,12 +11,12 @@ cake_emoji_id = 896670335326371840       #蛋糕ID
 cake_emoji = f"<:cake:{cake_emoji_id}>"  #直接顯示蛋糕emoji
 fake_sister_server_id = 419108485435883531
 
-# 搶紅包：允許的頻道 ID（名稱備援見 red_packet_channel_names；#日誌 的 ID 通常與 admin/mod 日誌常數不同）
-red_packet_allowed_channel_ids = frozenset({
+# 搶紅包允許發佈的文字頻道 ID：大廳、機器人指令區、日誌
+red_packet_allowed_channel_ids = [
     419108485435883533,  # 大廳
     545599471875260467,  # 機器人指令區
-})
-red_packet_channel_names = frozenset({"大廳", "機器人指令區", "日誌"})
+    admin_log_channel,  # 日誌
+]
 
 #讀寫保護鎖
 jsonio_lock = asyncio.Lock()

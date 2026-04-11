@@ -123,14 +123,7 @@ class General(commands.Cog):
 
     @staticmethod
     def red_packet_target_channel_ok(channel: discord.abc.GuildChannel) -> bool:
-        if channel.guild.id != common.fake_sister_server_id:
-            return False
-        if not isinstance(channel, discord.TextChannel):
-            return False
-        if channel.id in common.red_packet_allowed_channel_ids:
-            return True
-        # 成員看到的 #日誌 頻道 ID 常與 admin_log_channel／mod_log_channel 不同，改以頻道名稱對應三個公開頻道
-        return channel.name in common.red_packet_channel_names
+        return channel.guild.id == common.fake_sister_server_id and channel.id in common.red_packet_allowed_channel_ids
 
     @app_commands.command(name = "info", description = "關於Natalie...")
     async def info(self,interaction):
@@ -646,12 +639,16 @@ class General(commands.Cog):
             super().__init__(timeout=300.0)
             self.parent_cog = parent_cog
 
-        @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="選擇頻道（#大廳／#機器人指令區／#日誌）", channel_types=[discord.ChannelType.text])
+        @discord.ui.select(
+            cls=discord.ui.ChannelSelect,
+            placeholder="選擇頻道（#大廳／#機器人指令區／#日誌）",
+            channel_types=[discord.ChannelType.text],
+        )
         async def channel_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect) -> None:
             channel = select.values[0]
             if not self.parent_cog.red_packet_target_channel_ok(channel):
                 await interaction.response.send_message(
-                    embed=Embed(title="搶紅包", description="只能選擇 **#大廳**、**#機器人指令區** 或 **#日誌** 文字頻道。", color=common.bot_error_color),
+                    embed=Embed(title="搶紅包", description="只能選擇 **#大廳**、**#機器人指令區** 文字頻道。", color=common.bot_error_color),
                     ephemeral=True,
                 )
                 return
