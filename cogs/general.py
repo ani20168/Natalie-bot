@@ -127,7 +127,10 @@ class General(commands.Cog):
             return False
         if not isinstance(channel, discord.TextChannel):
             return False
-        return channel.id in common.red_packet_allowed_channel_ids
+        if channel.id in common.red_packet_allowed_channel_ids:
+            return True
+        # 成員看到的 #日誌 頻道 ID 常與 admin_log_channel／mod_log_channel 不同，改以頻道名稱對應三個公開頻道
+        return channel.name in common.red_packet_channel_names
 
     @app_commands.command(name = "info", description = "關於Natalie...")
     async def info(self,interaction):
