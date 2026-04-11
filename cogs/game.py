@@ -511,6 +511,10 @@ class BlackJack(commands.Cog):
                 hand_points -= 10
         return hand_points
 
+    #莊家是否為兩張牌的自然21點(用於保險結算)
+    def dealer_natural_blackjack(self, bot_cards) -> bool:
+        return len(bot_cards) == 2 and self.calculate_point(bot_cards) == 21
+
     #顯示牌面
     def show_cards(self,player_cards):
         return '、'.join([list(card.keys())[0] for card in player_cards])
@@ -612,7 +616,8 @@ class BlackJack(commands.Cog):
             common.datawrite(data)
         #選項給予
         message.set_footer(text=self.win_rate_show(userid))
-        await interaction.followup.send(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards))
+        cake_after_bet = data[userid]['cake']
+        await interaction.followup.send(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards,cake_after_bet=cake_after_bet))
 
 
     @app_commands.command(name = "blackjack_leaderboard", description = "21點勝率排行榜")
@@ -656,7 +661,7 @@ class BlackJack(commands.Cog):
         
 
 class BlackJackButton(discord.ui.View):
-    def __init__(self, *,timeout= 120,user,bet,player_cards,bot_cards,playing_deck,client,display_bot_points,display_bot_cards):
+    def __init__(self, *,timeout= 120,user,bet,player_cards,bot_cards,playing_deck,client,display_bot_points,display_bot_cards,cake_after_bet):
         super().__init__(timeout=timeout)
         self.command_interaction = user
         self.bet = bet
@@ -667,13 +672,79 @@ class BlackJackButton(discord.ui.View):
         self.display_bot_points = display_bot_points
         self.display_bot_cards = display_bot_cards
         self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        self.insurance_bet_amount = bet // 2
+        self.insurance_purchased = False
+        self.player_moved_for_insurance = False
+        self.configure_insurance_button_state(cake_after_bet)
 
-    @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green)
+    def configure_insurance_button_state(self, cake_balance: int):
+        """配置保險按鈕的狀態
+
+        Args:
+            cake_balance (int): 玩家目前的蛋糕數量
+        """
+        ib = self.insurance_bet_amount
+        dealer_ace_up = list(self.bot_cards[0].keys())[0] == "A"
+        can_buy = dealer_ace_up and self.bet >= 2 and ib >= 1 and cake_balance >= ib and not self.player_moved_for_insurance
+        if self.insurance_purchased:
+            self.insurance_button.label = "已購買保險"
+            self.insurance_button.disabled = True
+            return
+        if can_buy:
+            self.insurance_button.label = "購買保險"
+            self.insurance_button.disabled = False
+        else:
+            self.insurance_button.label = "保險:不可購買"
+            self.insurance_button.disabled = True
+
+    def resolve_insurance_payout(self, data, userid: str, dealer_natural: bool):
+        """結算保險的賠償
+
+        Args:
+            data (dict): 玩家資料
+            userid (str): 玩家ID
+            dealer_natural (bool): 莊家是否為兩張牌的自然21點
+        """
+        if not self.insurance_purchased:
+            return None
+        if dealer_natural:
+            payout = 2 * self.insurance_bet_amount
+            data[userid]["cake"] += payout
+            return f"獲得**{payout}**個{self.cake_emoji}賠償"
+        return "保險金沒收"
+
+    @discord.ui.button(label="保險:不可購買",style=discord.ButtonStyle.blurple,row=1)
+    async def insurance_button(self,interaction,button: discord.ui.Button):
+        async with common.jsonio_lock:
+            data = common.dataload()
+            userid = str(interaction.user.id)
+            ib = self.insurance_bet_amount
+            dealer_ace_up = list(self.bot_cards[0].keys())[0] == "A"
+            if self.insurance_purchased or self.player_moved_for_insurance or not dealer_ace_up or self.bet < 2 or ib < 1:
+                await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="目前無法購買保險。",color=common.bot_error_color), ephemeral=True)
+                return
+            if data[userid]["cake"] < ib:
+                await interaction.response.send_message(embed=Embed(title="Natalie 21點",description=f"{self.cake_emoji}不足，無法購買保險。",color=common.bot_error_color), ephemeral=True)
+                return
+            data[userid]["cake"] -= ib
+            self.insurance_purchased = True
+            common.datawrite(data)
+            self.configure_insurance_button_state(data[userid]["cake"])
+            message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+            message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
+            message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
+            message.set_footer(text=BlackJack(self.bot).win_rate_show(userid))
+            await interaction.response.edit_message(embed=message,view=self)
+
+    @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green,row=0)
     async def hit_button(self,interaction,button: discord.ui.Button):
         async with common.jsonio_lock:
             data = common.dataload()
+            userid = str(interaction.user.id)
             #關閉雙倍下注
             self.double_button.disabled = True
+            self.player_moved_for_insurance = True
+            self.configure_insurance_button_state(data[userid]["cake"])
             #加牌
             BlackJack(self.bot).deal_card(self,self.playing_deck,self.player_cards)
 
@@ -683,75 +754,100 @@ class BlackJackButton(discord.ui.View):
             
             #爆牌
             if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
-                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+                if self.insurance_purchased:
+                    message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
+                insurance_text = self.resolve_insurance_payout(data, userid, BlackJack(self.bot).dealer_natural_blackjack(self.bot_cards))
+                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+                if insurance_text is not None:
+                    message.add_field(name="保險", value=insurance_text, inline=False)
                 self.hit_button.disabled = True
                 self.stand_button.disabled = True
-                data[str(interaction.user.id)]["blackjack_playing"] = False
-                data[str(interaction.user.id)]["blackjack_round"] += 1
+                self.insurance_button.disabled = True
+                data[userid]["blackjack_playing"] = False
+                data[userid]["blackjack_round"] += 1
                 self.stop()
             #過五關
             elif len(self.player_cards) >= 5:
-                data[str(interaction.user.id)]['cake'] += int(self.bet + (self.bet*3))
-                data[str(interaction.user.id)]["blackjack_win_rate"] += 1
-                message.add_field(name="結果",value=f"**過五關!**\n你獲得了**{int(self.bet*3)}**塊{self.cake_emoji}(過五關 x 3.0)\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
+                data[userid]['cake'] += int(self.bet + (self.bet*3))
+                data[userid]["blackjack_win_rate"] += 1
+                if self.insurance_purchased:
+                    message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
+                insurance_text = self.resolve_insurance_payout(data, userid, BlackJack(self.bot).dealer_natural_blackjack(self.bot_cards))
+                message.add_field(name="結果",value=f"**過五關!**\n你獲得了**{int(self.bet*3)}**塊{self.cake_emoji}(過五關 x 3.0)\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+                if insurance_text is not None:
+                    message.add_field(name="保險", value=insurance_text, inline=False)
                 self.hit_button.disabled = True
                 self.stand_button.disabled = True
-                data[str(interaction.user.id)]["blackjack_playing"] = False
-                data[str(interaction.user.id)]["blackjack_round"] += 1
+                self.insurance_button.disabled = True
+                data[userid]["blackjack_playing"] = False
+                data[userid]["blackjack_round"] += 1
                 self.stop()
 
 
             common.datawrite(data)
-            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
+            message.set_footer(text=BlackJack(self.bot).win_rate_show(userid))
             await interaction.response.edit_message(embed=message,view=self)
             
 
-    @discord.ui.button(label="停牌!",style=discord.ButtonStyle.red)
+    @discord.ui.button(label="停牌!",style=discord.ButtonStyle.red,row=0)
     async def stand_button(self,interaction,button: discord.ui.Button):
         async with common.jsonio_lock:
             data = common.dataload()
+            userid = str(interaction.user.id)
             #關閉所有按鈕
             self.double_button.disabled = True
             self.hit_button.disabled = True
             self.stand_button.disabled = True
+            self.insurance_button.disabled = True
 
             #莊家點數未達17點的話，則加牌直到點數>=17點
             while BlackJack(self.bot).calculate_point(self.bot_cards) < 17:
                 BlackJack(self.bot).deal_card(self,self.playing_deck,self.bot_cards)
             
+            dealer_natural = BlackJack(self.bot).dealer_natural_blackjack(self.bot_cards)
             message = Embed(title="Natalie 21點",description="",color=common.bot_color)
             message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
             message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False) 
-            data[str(interaction.user.id)]["blackjack_round"] += 1
+            data[userid]["blackjack_round"] += 1
 
+            bot_pts = BlackJack(self.bot).calculate_point(self.bot_cards)
+            player_pts = BlackJack(self.bot).calculate_point(self.player_cards)
             #莊家爆牌或者莊家點數比玩家小
-            if BlackJack(self.bot).calculate_point(self.bot_cards) > 21 or (BlackJack(self.bot).calculate_point(self.bot_cards) < BlackJack(self.bot).calculate_point(self.player_cards)):
-                data[str(interaction.user.id)]['cake'] += self.bet * 2
-                data[str(interaction.user.id)]["blackjack_win_rate"] += 1
-                message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-                   
+            if bot_pts > 21 or (bot_pts < player_pts):
+                data[userid]['cake'] += self.bet * 2
+                data[userid]["blackjack_win_rate"] += 1
             #莊家的牌比玩家大
-            if (BlackJack(self.bot).calculate_point(self.bot_cards) > BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
-                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-
+            elif (bot_pts > player_pts) and bot_pts <= 21:
+                pass
             #平手
-            if (BlackJack(self.bot).calculate_point(self.bot_cards) == BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
-                data[str(interaction.user.id)]['cake'] += self.bet
-                data[str(interaction.user.id)]["blackjack_tie"] += 1
-                message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-            
-            data[str(interaction.user.id)]["blackjack_playing"] = False
+            elif (bot_pts == player_pts) and bot_pts <= 21:
+                data[userid]['cake'] += self.bet
+                data[userid]["blackjack_tie"] += 1
+
+            insurance_text = self.resolve_insurance_payout(data, userid, dealer_natural)
+
+            if bot_pts > 21 or (bot_pts < player_pts):
+                message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+            elif (bot_pts > player_pts) and bot_pts <= 21:
+                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+            elif (bot_pts == player_pts) and bot_pts <= 21:
+                message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+
+            if insurance_text is not None:
+                message.add_field(name="保險", value=insurance_text, inline=False)
+            data[userid]["blackjack_playing"] = False
             common.datawrite(data)
-            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
+            message.set_footer(text=BlackJack(self.bot).win_rate_show(userid))
             await interaction.response.edit_message(embed=message,view=self)
             self.stop()
 
-    @discord.ui.button(label="雙倍下注!",style=discord.ButtonStyle.gray)
+    @discord.ui.button(label="雙倍下注!",style=discord.ButtonStyle.gray,row=0)
     async def double_button(self,interaction,button: discord.ui.Button):
         async with common.jsonio_lock:
             data = common.dataload()
+            userid = str(interaction.user.id)
             #如果賭注不足以使用雙倍下注
-            if data[str(interaction.user.id)]['cake'] < self.bet:
+            if data[userid]['cake'] < self.bet:
                 self.double_button.disabled = True
                 self.double_button.label = "雙倍下注!(蛋糕不足)"
                 await interaction.response.edit_message(view=self)
@@ -761,23 +857,33 @@ class BlackJackButton(discord.ui.View):
             self.double_button.disabled = True
             self.hit_button.disabled = True
             self.stand_button.disabled = True
+            self.player_moved_for_insurance = True
+            self.configure_insurance_button_state(data[userid]["cake"])
 
             #雙倍下注要扣的蛋糕
-            data[str(interaction.user.id)]['cake'] -= self.bet
+            data[userid]['cake'] -= self.bet
             #加牌
             BlackJack(self.bot).deal_card(self,self.playing_deck,self.player_cards)
 
             message = Embed(title="Natalie 21點",description="",color=common.bot_color)
             message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
-            data[str(interaction.user.id)]["blackjack_round"] += 1
+            data[userid]["blackjack_round"] += 1
 
             #玩家爆牌
             if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
-                message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
-                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-                data[str(interaction.user.id)]["blackjack_playing"] = False
+                if self.insurance_purchased:
+                    message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
+                    insurance_text = self.resolve_insurance_payout(data, userid, BlackJack(self.bot).dealer_natural_blackjack(self.bot_cards))
+                else:
+                    insurance_text = None
+                    message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
+                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+                if insurance_text is not None:
+                    message.add_field(name="保險", value=insurance_text, inline=False)
+                self.insurance_button.disabled = True
+                data[userid]["blackjack_playing"] = False
                 common.datawrite(data)
-                message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
+                message.set_footer(text=BlackJack(self.bot).win_rate_show(userid))
                 await interaction.response.edit_message(embed=message,view=self)
                 self.stop()
                 return
@@ -786,27 +892,38 @@ class BlackJackButton(discord.ui.View):
             while BlackJack(self.bot).calculate_point(self.bot_cards) < 17:
                 BlackJack(self.bot).deal_card(self,self.playing_deck,self.bot_cards)
 
+            dealer_natural = BlackJack(self.bot).dealer_natural_blackjack(self.bot_cards)
             message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
 
+            bot_pts = BlackJack(self.bot).calculate_point(self.bot_cards)
+            player_pts = BlackJack(self.bot).calculate_point(self.player_cards)
             #莊家爆牌或者莊家點數比玩家小
-            if BlackJack(self.bot).calculate_point(self.bot_cards) > 21 or (BlackJack(self.bot).calculate_point(self.bot_cards) < BlackJack(self.bot).calculate_point(self.player_cards)):
-                data[str(interaction.user.id)]['cake'] += self.bet * 4
-                data[str(interaction.user.id)]["blackjack_win_rate"] += 1
-                message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-            
+            if bot_pts > 21 or (bot_pts < player_pts):
+                data[userid]['cake'] += self.bet * 4
+                data[userid]["blackjack_win_rate"] += 1
             #莊家的牌比玩家大
-            if (BlackJack(self.bot).calculate_point(self.bot_cards) > BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
-                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-
+            elif (bot_pts > player_pts) and bot_pts <= 21:
+                pass
             #平手
-            if (BlackJack(self.bot).calculate_point(self.bot_cards) == BlackJack(self.bot).calculate_point(self.player_cards)) and BlackJack(self.bot).calculate_point(self.bot_cards) <= 21:
-                data[str(interaction.user.id)]['cake'] += self.bet * 2
-                data[str(interaction.user.id)]["blackjack_tie"] += 1
-                message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[str(interaction.user.id)]['cake']}**塊{self.cake_emoji}",inline=False)
-            
-            data[str(interaction.user.id)]["blackjack_playing"] = False
+            elif (bot_pts == player_pts) and bot_pts <= 21:
+                data[userid]['cake'] += self.bet * 2
+                data[userid]["blackjack_tie"] += 1
+
+            insurance_text = self.resolve_insurance_payout(data, userid, dealer_natural)
+
+            if bot_pts > 21 or (bot_pts < player_pts):
+                message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+            elif (bot_pts > player_pts) and bot_pts <= 21:
+                message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+            elif (bot_pts == player_pts) and bot_pts <= 21:
+                message.add_field(name="結果",value=f"平手!\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+
+            if insurance_text is not None:
+                message.add_field(name="保險", value=insurance_text, inline=False)
+            self.insurance_button.disabled = True
+            data[userid]["blackjack_playing"] = False
             common.datawrite(data)
-            message.set_footer(text=BlackJack(self.bot).win_rate_show(str(interaction.user.id)))
+            message.set_footer(text=BlackJack(self.bot).win_rate_show(userid))
             await interaction.response.edit_message(embed=message,view=self)
             self.stop()
 
@@ -1635,7 +1752,7 @@ class SquidRPS(commands.Cog):
 
 
 class SquidRPSStrategy:
-    """Strategy for deciding which hand the bot should keep."""
+    """猜拳策略"""
 
     def __init__(self, *, case3_prob: float = 2/3, case4_prob: float = 3/4):
         # 機率設定:case3為輸&平手、贏&輸情形留左手的機率
