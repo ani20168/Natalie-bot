@@ -127,9 +127,7 @@ class General(commands.Cog):
             return False
         if not isinstance(channel, discord.TextChannel):
             return False
-        if channel.id in common.red_packet_allowed_channel_ids:
-            return True
-        return channel.name in common.red_packet_channel_names
+        return channel.id in common.red_packet_allowed_channel_ids
 
     @app_commands.command(name = "info", description = "關於Natalie...")
     async def info(self,interaction):
