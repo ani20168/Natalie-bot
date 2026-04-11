@@ -708,9 +708,10 @@ class BlackJackButton(discord.ui.View):
         if not self.insurance_purchased:
             return None
         if dealer_natural:
-            payout = 2 * self.insurance_bet_amount
-            data[userid]["cake"] += payout
-            return f"獲得**{payout}**個{self.cake_emoji}賠償"
+            ib = self.insurance_bet_amount
+            # 取回先前支付的保險額 + 雙倍保險額獎金(2:1 賠率)
+            data[userid]["cake"] += ib + 2 * ib
+            return f"取回**{ib}**個{self.cake_emoji}保險額，並獲得**{2 * ib}**個{self.cake_emoji}賠償"
         return "保險金沒收"
 
     @discord.ui.button(label="保險:不可購買",style=discord.ButtonStyle.blurple,row=1)
