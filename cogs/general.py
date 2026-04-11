@@ -6,10 +6,47 @@ from dateutil.parser import parse
 import json
 import discord
 import time
+import random
 from typing import Optional
 from collections import deque
 import asyncio
 
+
+class RedPacketSession:
+    def __init__(self, creator_id: int, total_budget: int, people: int, amounts: list[int], ends_at: datetime):
+        self.creator_id = creator_id
+        self.total_budget = total_budget
+        self.people = people
+        self.remaining_amounts: deque[int] = deque(amounts)
+        self.claimed_order: list[tuple[int, str, int]] = []
+        self.claimed_user_ids: set[int] = set()
+        self.lock = asyncio.Lock()
+        self.ended = False
+        self.ends_at = ends_at
+        self.announce_message: discord.Message | None = None
+
+
+class RedPacketGrabView(discord.ui.View):
+    def __init__(self, cog: "General", session: RedPacketSession):
+        super().__init__(timeout=300.0)
+        self.cog = cog
+        self.session = session
+        self.add_item(RedPacketGrabButton())
+
+    async def on_timeout(self) -> None:
+        message = self.session.announce_message
+        if message is None:
+            return
+        await self.cog.finalize_red_packet(self.session, message, self, timed_out=True)
+
+
+class RedPacketGrabButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="搶紅包!", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction):
+        view: RedPacketGrabView = self.view  # type: ignore[assignment]
+        await view.cog.handle_red_packet_claim(interaction, view.session, view)
 
 
 class General(commands.Cog):
@@ -60,6 +97,39 @@ class General(commands.Cog):
             "動態淺紫紅":{"role_id":1422416437036711976},
         }
 
+    @staticmethod
+    def compute_red_packet_amounts(total: int, people: int) -> list[int]:
+        """依規則切分紅包金額（整數蛋糕），回傳長度為 people 的清單，加總為 total。"""
+        if people < 1 or people > 15:
+            raise ValueError("人數需在 1～15 之間")
+        if total < 1:
+            raise ValueError("總金額須為正整數")
+        if people == 1:
+            return [total]
+        if people == 2:
+            if total < 2:
+                raise ValueError("兩人紅包時總金額至少為 2")
+            cut = random.randint(1, total - 1)
+            parts = [cut, total - cut]
+            random.shuffle(parts)
+            return parts
+        if total < people:
+            raise ValueError(f"總金額至少需等於人數（每人至少 1 塊{common.cake_emoji}）")
+        cuts = sorted(random.sample(range(1, total), people - 1))
+        positions = [0] + cuts + [total]
+        parts = [positions[index + 1] - positions[index] for index in range(people)]
+        random.shuffle(parts)
+        return parts
+
+    @staticmethod
+    def red_packet_target_channel_ok(channel: discord.abc.GuildChannel) -> bool:
+        if channel.guild.id != common.fake_sister_server_id:
+            return False
+        if not isinstance(channel, discord.TextChannel):
+            return False
+        if channel.id in common.red_packet_allowed_channel_ids:
+            return True
+        return channel.name in common.red_packet_channel_names
 
     @app_commands.command(name = "info", description = "關於Natalie...")
     async def info(self,interaction):
@@ -92,7 +162,8 @@ class General(commands.Cog):
                 "/squid_rps 魷魚遊戲猜拳",
                 "/check_sevencolor_restday 確認七色有沒有休假",
                 "/set_color 更換ID的顏色(靜態)",
-                "/set_animation_color 更換ID的顏色(動態)"
+                "/set_animation_color 更換ID的顏色(動態)",
+                "/red_packet 搶紅包（蛋糕）"
             ]
             #如果等級>=5 且沒有在 抽獎仔/VIP 身分內，則顯示指令
             if userlevel.level >= 5 and all(role.id not in [621764669929160715, 605730134531637249] for role in interaction.user.roles):
@@ -490,6 +561,181 @@ class General(commands.Cog):
             await interaction.user.add_roles(interaction.guild.get_role(self.animation_color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
             await interaction.response.send_message(embed=Embed(title="設置動態顏色身分組",description=f"你目前的動態顏色變更為...<@&{self.animation_color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
 
+    def build_red_packet_embed(self, session: RedPacketSession) -> Embed:
+        cake_e = common.cake_emoji
+        end_line = discord.utils.format_dt(session.ends_at.astimezone(timezone(timedelta(hours=8))), style="F")
+        if session.claimed_order:
+            claim_lines = "\n".join(f"**{name}** — {amount} 塊{cake_e}" for _, name, amount in session.claimed_order)
+        else:
+            claim_lines = "尚無"
+        remaining = len(session.remaining_amounts)
+        embed = Embed(title="🧧 搶紅包", description=f"發包者：<@{session.creator_id}>", color=0xE74C3C)
+        embed.add_field(name="結束時間", value=f"{end_line} (UTC+8)", inline=False)
+        embed.add_field(name="人數", value=f"**{session.people}** 人", inline=True)
+        embed.add_field(name="總金額", value=f"**{session.total_budget}** 塊{cake_e}", inline=True)
+        embed.add_field(name="已領取紅包的人", value=claim_lines, inline=False)
+        embed.set_footer(text=f"剩餘份數：{remaining}／{session.people}" + (" ｜已結束" if session.ended else ""))
+        return embed
+
+    async def handle_red_packet_claim(self, interaction: discord.Interaction, session: RedPacketSession, view: RedPacketGrabView) -> None:
+        if interaction.guild is None or interaction.guild.id != common.fake_sister_server_id:
+            await interaction.response.send_message(embed=Embed(title="搶紅包", description="僅能在妹妹群使用。", color=common.bot_error_color), ephemeral=True)
+            return
+        uid = interaction.user.id
+        async with session.lock:
+            if session.ended:
+                await interaction.response.send_message(embed=Embed(title="搶紅包", description="這個紅包已經結束了。", color=common.bot_error_color), ephemeral=True)
+                return
+            if datetime.now(timezone.utc) >= session.ends_at:
+                await interaction.response.send_message(embed=Embed(title="搶紅包", description="這個紅包已經過期了。", color=common.bot_error_color), ephemeral=True)
+                return
+            if uid == session.creator_id:
+                await interaction.response.send_message(embed=Embed(title="搶紅包", description="不能領取自己發的紅包。", color=common.bot_error_color), ephemeral=True)
+                return
+            if uid in session.claimed_user_ids:
+                await interaction.response.send_message(embed=Embed(title="搶紅包", description="你已經領過這個紅包了。", color=common.bot_error_color), ephemeral=True)
+                return
+            if not session.remaining_amounts:
+                await interaction.response.send_message(embed=Embed(title="搶紅包", description="紅包已經被搶完了。", color=common.bot_error_color), ephemeral=True)
+                return
+            amount = session.remaining_amounts.popleft()
+            display_name = interaction.user.display_name
+            session.claimed_user_ids.add(uid)
+            session.claimed_order.append((uid, display_name, amount))
+            done_all = len(session.remaining_amounts) == 0
+        async with common.jsonio_lock:
+            data = common.dataload()
+            rid = str(uid)
+            data.setdefault(rid, {"cake": 0})
+            data[rid]["cake"] += amount
+            common.datawrite(data)
+        embed = self.build_red_packet_embed(session)
+        if done_all:
+            await self.finalize_red_packet(session, interaction.message, view, timed_out=False, interaction=interaction)
+            await interaction.followup.send(embed=Embed(title="搶紅包", description=f"你搶到了 **{amount}** 塊{common.cake_emoji}！", color=common.bot_color), ephemeral=True)
+            return
+        await interaction.response.edit_message(embed=embed, view=view)
+        await interaction.followup.send(embed=Embed(title="搶紅包", description=f"你搶到了 **{amount}** 塊{common.cake_emoji}！", color=common.bot_color), ephemeral=True)
+
+    async def finalize_red_packet(self, session: RedPacketSession, message: discord.Message, view: RedPacketGrabView, *, timed_out: bool = False, interaction: discord.Interaction | None = None) -> None:
+        async with session.lock:
+            if session.ended:
+                return
+            session.ended = True
+            distributed = sum(part[2] for part in session.claimed_order)
+            refund = session.total_budget - distributed
+        async with common.jsonio_lock:
+            data = common.dataload()
+            oid = str(session.creator_id)
+            data.setdefault(oid, {"cake": 0})
+            data[oid]["cake"] += refund
+            common.datawrite(data)
+        view.clear_items()
+        embed = self.build_red_packet_embed(session)
+        try:
+            if interaction is not None:
+                await interaction.response.edit_message(embed=embed, view=view)
+            else:
+                await message.edit(embed=embed, view=view)
+        except discord.HTTPException:
+            pass
+
+    class RedPacketChannelView(discord.ui.View):
+        def __init__(self, parent_cog: "General"):
+            super().__init__(timeout=300.0)
+            self.parent_cog = parent_cog
+
+        @discord.ui.select(cls=discord.ui.ChannelSelect, placeholder="選擇頻道（#大廳／#機器人指令區／#日誌）", channel_types=[discord.ChannelType.text])
+        async def channel_select(self, interaction: discord.Interaction, select: discord.ui.ChannelSelect) -> None:
+            channel = select.values[0]
+            if not self.parent_cog.red_packet_target_channel_ok(channel):
+                await interaction.response.send_message(
+                    embed=Embed(title="搶紅包", description="只能選擇 **#大廳**、**#機器人指令區** 或 **#日誌** 文字頻道。", color=common.bot_error_color),
+                    ephemeral=True,
+                )
+                return
+            modal = General.RedPacketModal(self.parent_cog, channel.id)
+            await interaction.response.send_modal(modal)
+
+        async def on_timeout(self) -> None:
+            self.stop()
+
+    class RedPacketModal(discord.ui.Modal, title="搶紅包設定"):
+        people_field = discord.ui.TextInput(label="人數 (1～15)", placeholder="要發給幾個人", required=True, max_length=2)
+        total_field = discord.ui.TextInput(label="總金額 (蛋糕)", placeholder="整數，未搶完會退回剩餘", required=True, max_length=12)
+
+        def __init__(self, parent_cog: "General", channel_id: int):
+            super().__init__()
+            self.parent_cog = parent_cog
+            self.channel_id = channel_id
+
+        async def on_submit(self, interaction: discord.Interaction) -> None:
+            if interaction.guild is None or interaction.guild.id != common.fake_sister_server_id:
+                await interaction.response.send_message(embed=Embed(title="搶紅包", description="僅能在妹妹群使用。", color=common.bot_error_color), ephemeral=True)
+                return
+            try:
+                people = int(self.people_field.value.strip())
+                total = int(self.total_field.value.strip())
+            except ValueError:
+                await interaction.response.send_message(embed=Embed(title="搶紅包", description="人數與總金額請輸入正整數。", color=common.bot_error_color), ephemeral=True)
+                return
+            try:
+                amounts = self.parent_cog.compute_red_packet_amounts(total, people)
+            except ValueError as error:
+                await interaction.response.send_message(embed=Embed(title="搶紅包", description=str(error), color=common.bot_error_color), ephemeral=True)
+                return
+            creator_id = interaction.user.id
+            async with common.jsonio_lock:
+                data = common.dataload()
+                oid = str(creator_id)
+                data.setdefault(oid, {"cake": 0})
+                if data[oid]["cake"] < total:
+                    await interaction.response.send_message(
+                        embed=Embed(title="搶紅包", description=f"蛋糕不足，你目前有 **{data[oid]['cake']}** 塊{common.cake_emoji}。", color=common.bot_error_color),
+                        ephemeral=True,
+                    )
+                    return
+                data[oid]["cake"] -= total
+                common.datawrite(data)
+            ends_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+            session = RedPacketSession(creator_id, total, people, amounts, ends_at)
+            channel = interaction.guild.get_channel(self.channel_id)
+            if channel is None or not isinstance(channel, discord.TextChannel):
+                async with common.jsonio_lock:
+                    data = common.dataload()
+                    data[str(creator_id)]["cake"] += total
+                    common.datawrite(data)
+                await interaction.response.send_message(embed=Embed(title="搶紅包", description="找不到指定的文字頻道，已退回蛋糕。", color=common.bot_error_color), ephemeral=True)
+                return
+            view = RedPacketGrabView(self.parent_cog, session)
+            embed = self.parent_cog.build_red_packet_embed(session)
+            await interaction.response.defer(ephemeral=True)
+            try:
+                msg = await channel.send(embed=embed, view=view)
+            except discord.HTTPException:
+                async with common.jsonio_lock:
+                    data = common.dataload()
+                    data[str(creator_id)]["cake"] += total
+                    common.datawrite(data)
+                await interaction.followup.send(
+                    embed=Embed(title="搶紅包", description="無法在該頻道發送紅包訊息，已退回蛋糕。", color=common.bot_error_color),
+                    ephemeral=True,
+                )
+                return
+            session.announce_message = msg
+            await interaction.followup.send(
+                embed=Embed(title="搶紅包", description=f"已發佈至 {channel.mention}，時長 **5 分鐘**。", color=common.bot_color),
+                ephemeral=True,
+            )
+
+    @app_commands.command(name="red_packet", description="搶紅包：在 #大廳／#機器人指令區／#日誌 發放蛋糕紅包")
+    async def red_packet(self, interaction: discord.Interaction) -> None:
+        if interaction.guild is None or interaction.guild.id != common.fake_sister_server_id:
+            await interaction.response.send_message(embed=Embed(title="搶紅包", description="此指令僅能在「偽造妹妹」伺服器使用。", color=common.bot_error_color), ephemeral=True)
+            return
+        view = General.RedPacketChannelView(self)
+        embed = Embed(title="搶紅包", description="請先選擇要發佈紅包的文字頻道（**#大廳**、**#機器人指令區** 或 **#日誌**），接著設定人數與總金額。\n時長固定 **5 分鐘**；未搶完的蛋糕會退回給你。", color=common.bot_color)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
