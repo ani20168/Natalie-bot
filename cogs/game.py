@@ -4,6 +4,7 @@ from discord.ext import commands
 from . import common
 import random
 import itertools
+from typing import Optional
 import asyncio
 import time
 
@@ -497,6 +498,19 @@ class BlackJack(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
         self.deck = [{"2": 2}, {"3": 3}, {"4": 4}, {"5": 5}, {"6": 6}, {"7": 7}, {"8": 8}, {"9": 9}, {"10": 10}, {"J": 10}, {"Q": 10}, {"K": 10}, {"A": 11}] * 4
+        # 邊注例牌賠率(利潤倍數，派彩時另加還原邊注本金)
+        self.side_bet_payout = {
+            "straight": 15,
+            "trips": 25,
+            "bj_straight_678": 30,
+            "bj_trips_7": 45,
+        }
+        self.side_bet_labels = {
+            "straight": "順子",
+            "trips": "三條",
+            "bj_straight_678": "21點順子(6、7、8)",
+            "bj_trips_7": "21點三條(7、7、7)",
+        }
 
     #加牌
     def deal_card(self,interaction,playing_deck, recipient):
@@ -519,6 +533,54 @@ class BlackJack(commands.Cog):
     def show_cards(self,player_cards):
         return '、'.join([list(card.keys())[0] for card in player_cards])
 
+    # 從單張牌 dict 取出牌面字串(如 "7"、"K")
+    def card_rank_name(self, card) -> str:
+        return list(card.keys())[0]
+
+    # 順子判定用：把牌面轉成連續整數；A 可當 1(A-2-3)或 14(Q-K-A)
+    def rank_straight_values(self, rank: str) -> list[int]:
+        if rank == "A":
+            return [1, 14]
+        if rank == "J":
+            return [11]
+        if rank == "Q":
+            return [12]
+        if rank == "K":
+            return [13]
+        # "2"~"10" 對應點數序
+        return [int(rank)]
+
+    # 三張牌面是否為順子(不含三條)；窮舉 A 的兩種取值後檢查是否連號
+    def is_three_card_straight_ranks(self, rank_a: str, rank_b: str, rank_c: str) -> bool:
+        if rank_a == rank_b == rank_c:
+            return False
+        for combo in itertools.product(
+            self.rank_straight_values(rank_a),
+            self.rank_straight_values(rank_b),
+            self.rank_straight_values(rank_c),
+        ):
+            sorted_vals = sorted(combo)
+            # 三個數字遞增且相鄰差皆為 1
+            if sorted_vals[2] - sorted_vals[1] == 1 and sorted_vals[1] - sorted_vals[0] == 1:
+                return True
+        return False
+
+    # 莊家第一張 + 玩家兩張是否符合邊注例牌；回傳類別鍵或 None
+    def side_bet_pattern(self, dealer_first_card, player_cards) -> Optional[str]:
+        dealer_rank = self.card_rank_name(dealer_first_card)
+        rank_p0 = self.card_rank_name(player_cards[0])
+        rank_p1 = self.card_rank_name(player_cards[1])
+        three = (dealer_rank, rank_p0, rank_p1)
+        if dealer_rank == "7" and rank_p0 == "7" and rank_p1 == "7":
+            return "bj_trips_7"
+        if set(three) == {"6", "7", "8"}:
+            return "bj_straight_678"
+        if dealer_rank == rank_p0 == rank_p1:
+            return "trips"
+        if self.is_three_card_straight_ranks(dealer_rank, rank_p0, rank_p1):
+            return "straight"
+        return None
+
     #顯示勝率跟場數(給embed footer以及leaderboard用的)
     def win_rate_show(self, userid: str, data: dict | None = None) -> str:
         if data is None:
@@ -532,9 +594,12 @@ class BlackJack(commands.Cog):
 
 
     @app_commands.command(name = "blackjack", description = "21點!")
-    @app_commands.describe(bet="要下多少賭注?(支援all、half以及輸入蛋糕數量)")
-    @app_commands.rename(bet="賭注")
-    async def blackjack(self,interaction,bet: str):
+    @app_commands.describe(
+        bet="要下多少賭注?(支援all、half以及輸入蛋糕數量)",
+        side_bet="邊注：三張例牌(順子/三條/21點順子/21點三條)額外賭注，留空表示不玩邊注",
+    )
+    @app_commands.rename(bet="賭注", side_bet="邊注")
+    async def blackjack(self, interaction, bet: str, side_bet: Optional[str] = None):
         #增加回應推遲，避免來不及發送embed造成遊戲狀態鎖死的問題
         await interaction.response.defer()
         async with common.jsonio_lock:
@@ -548,8 +613,10 @@ class BlackJack(commands.Cog):
                 return
 
             #檢查要下注的蛋糕數據
+            main_bet_is_all = False
             #下全部
             if bet == "all":
+                main_bet_is_all = True
                 if data[userid]['cake'] >= 1:
                     bet = data[userid]['cake']
                 else:
@@ -569,11 +636,32 @@ class BlackJack(commands.Cog):
                 await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"無效的數據。(輸入想賭注的{cake_emoji}數量，或者輸入all下注全部的{cake_emoji})",color=common.bot_error_color))
                 return
 
+            side_bet_amount = 0
+            if side_bet is not None and str(side_bet).strip() != "":
+                sb = str(side_bet).strip()
+                if main_bet_is_all:
+                    await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"主注已使用 all 時無法再下邊注。",color=common.bot_error_color))
+                    return
+                if sb == "all":
+                    await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"邊注不支援 all，請輸入數字、half 或留空。",color=common.bot_error_color))
+                    return
+                if sb == "half":
+                    if bet < 2:
+                        await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"主注至少需 2 個{cake_emoji}才能使用邊注 half。",color=common.bot_error_color))
+                        return
+                    side_bet_amount = bet // 2
+                elif sb.isdigit() and int(sb) >= 1:
+                    side_bet_amount = int(sb)
+                else:
+                    await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"無效的邊注。(輸入{cake_emoji}數量、half，或留空不玩邊注)",color=common.bot_error_color))
+                    return
+
             #檢查蛋糕是否足夠
-            if data[userid]['cake'] < bet:
-                await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"{cake_emoji}不足，無法下注!",color=common.bot_error_color))
+            total_stake = bet + side_bet_amount
+            if data[userid]["cake"] < total_stake:
+                await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"{cake_emoji}不足，無法下注!(主注+邊注共需**{total_stake}**)",color=common.bot_error_color))
                 return
-            data[userid]['cake'] -= bet
+            data[userid]["cake"] -= total_stake
 
             #檢查玩家是否有勝場資料
             # win rate = 勝場數
@@ -602,6 +690,29 @@ class BlackJack(commands.Cog):
             message = Embed(title="Natalie 21點",description="",color=common.bot_color)
             message.add_field(name=f"你的手牌點數:**{self.calculate_point(player_cards)}**",value=f"{self.show_cards(player_cards)}",inline=False)
             message.add_field(name=f"Natalie的手牌點數:**{display_bot_points}**",value=f"{display_bot_cards}",inline=False)
+            if side_bet_amount > 0:
+                pattern = self.side_bet_pattern(bot_cards[0], player_cards)
+                if pattern is not None:
+                    mult = self.side_bet_payout[pattern]
+                    label = self.side_bet_labels[pattern]
+                    side_return = side_bet_amount * (1 + mult)
+                    data[userid]["cake"] += bet * 2 + side_return
+                    data[userid]["blackjack_win_rate"] += 1
+                    data[userid]["blackjack_round"] += 1
+                    common.datawrite(data)
+                    message.add_field(
+                        name="結果",
+                        value=(
+                            f"**例牌邊注命中！{label}**\n"
+                            f"你獲得了**{bet * 2}**塊{cake_emoji}(主注)\n"
+                            f"你獲得了**{side_return}**塊{cake_emoji}（邊注×{mult}）\n"
+                            f"你現在有**{data[userid]['cake']}**塊{cake_emoji}"
+                        ),
+                        inline=False,
+                    )
+                    message.set_footer(text=self.win_rate_show(userid))
+                    await interaction.followup.send(embed=message)
+                    return
             #玩家如果是blackjack(持有兩張牌且點數剛好為21)
             if self.calculate_point(player_cards) == 21:
                 data[userid]['cake'] += int(bet + (bet*1.5))
@@ -616,9 +727,11 @@ class BlackJack(commands.Cog):
             data[userid]["blackjack_playing"] = True
             common.datawrite(data)
         #選項給予
+        if side_bet_amount > 0:
+            message.description = f"本局邊注:**{side_bet_amount}**塊{cake_emoji}"
         message.set_footer(text=self.win_rate_show(userid))
         cake_after_bet = data[userid]['cake']
-        await interaction.followup.send(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards,cake_after_bet=cake_after_bet))
+        await interaction.followup.send(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards,cake_after_bet=cake_after_bet,side_bet_amount=side_bet_amount,cake_emoji=cake_emoji))
 
 
     @app_commands.command(name = "blackjack_leaderboard", description = "21點勝率排行榜")
@@ -662,17 +775,18 @@ class BlackJack(commands.Cog):
         
 
 class BlackJackButton(discord.ui.View):
-    def __init__(self, *,timeout= 120,user,bet,player_cards,bot_cards,playing_deck,client,display_bot_points,display_bot_cards,cake_after_bet):
+    def __init__(self, *,timeout= 120,user,bet,player_cards,bot_cards,playing_deck,client,display_bot_points,display_bot_cards,cake_after_bet,side_bet_amount=0,cake_emoji=None):
         super().__init__(timeout=timeout)
         self.command_interaction = user
         self.bet = bet
+        self.side_bet_amount = side_bet_amount
         self.player_cards = player_cards
         self.bot_cards = bot_cards
         self.playing_deck = playing_deck
         self.bot = client
         self.display_bot_points = display_bot_points
         self.display_bot_cards = display_bot_cards
-        self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        self.cake_emoji = cake_emoji if cake_emoji is not None else self.bot.get_emoji(common.cake_emoji_id)
         self.insurance_bet_amount = bet // 2
         self.insurance_purchased = False
         self.player_moved_for_insurance = False
@@ -697,6 +811,11 @@ class BlackJackButton(discord.ui.View):
         else:
             self.insurance_button.label = "保險:不可購買"
             self.insurance_button.disabled = True
+
+    def side_bet_description(self) -> Optional[str]:
+        if self.side_bet_amount <= 0:
+            return None
+        return f"本局邊注:**{self.side_bet_amount}**塊{self.cake_emoji}"
 
     def resolve_insurance_payout(self, data, userid: str, dealer_natural: bool):
         """結算保險的賠償
@@ -738,6 +857,9 @@ class BlackJackButton(discord.ui.View):
             return
         self.configure_insurance_button_state(cake_after)
         message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+        sb_desc = self.side_bet_description()
+        if sb_desc is not None:
+            message.description = sb_desc
         message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
         message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
         message.set_footer(text=BlackJack(self.bot).win_rate_show(userid, data))
@@ -756,6 +878,9 @@ class BlackJackButton(discord.ui.View):
             BlackJack(self.bot).deal_card(self,self.playing_deck,self.player_cards)
 
             message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+            sb_desc = self.side_bet_description()
+            if sb_desc is not None:
+                message.description = sb_desc
             message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
             message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
             
@@ -812,6 +937,9 @@ class BlackJackButton(discord.ui.View):
             
             dealer_natural = BlackJack(self.bot).dealer_natural_blackjack(self.bot_cards)
             message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+            sb_desc = self.side_bet_description()
+            if sb_desc is not None:
+                message.description = sb_desc
             message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
             message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False) 
             data[userid]["blackjack_round"] += 1
@@ -872,6 +1000,9 @@ class BlackJackButton(discord.ui.View):
                 BlackJack(self.bot).deal_card(self,self.playing_deck,self.player_cards)
 
                 message = Embed(title="Natalie 21點",description="",color=common.bot_color)
+                sb_desc = self.side_bet_description()
+                if sb_desc is not None:
+                    message.description = sb_desc
                 message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
                 data[userid]["blackjack_round"] += 1
 
