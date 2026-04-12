@@ -703,7 +703,8 @@ class BlackJack(commands.Cog):
                     message.add_field(
                         name="結果",
                         value=(
-                            f"**例牌邊注命中！{label}**\n"
+                            f"**例牌邊注命中！**\n"
+                            f"牌型: **{label}**\n"
                             f"你獲得了**{bet * 2}**塊{cake_emoji}(主注)\n"
                             f"你獲得了**{side_return}**塊{cake_emoji}（邊注×{mult}）\n"
                             f"你現在有**{data[userid]['cake']}**塊{cake_emoji}"
