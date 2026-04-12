@@ -164,19 +164,18 @@ class Startup(commands.Cog):
             if nowtime.hour == 0 and nowtime.minute == 0:
                 #如果用戶資料內有voice_active_minutes且>10分鐘
                 sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
-                #列出前三名，並給予獎勵
+                #列出前三名，並給予獎勵（基礎 600/400/200；分鐘>=180 二倍、>=300 三倍）
                 data['yesterday_voice_leaderboard'] = ""
+                base_rewards = (600, 400, 200)
                 for i, (userid, userdata) in enumerate(sorted_data[:3]):
                     user = self.bot.get_user(int(userid))
-                    if i == 0:
-                        data[userid]['cake'] += 300
-                        data['yesterday_voice_leaderboard'] += f"{i + 1}.{user.display_name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得300塊蛋糕)\n"
-                    elif i == 1:
-                        data[userid]['cake'] += 200
-                        data['yesterday_voice_leaderboard'] += f"{i + 1}.{user.display_name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得200塊蛋糕)\n"
-                    elif i == 2:
-                        data[userid]['cake'] += 100
-                        data['yesterday_voice_leaderboard'] += f"{i + 1}.{user.display_name} 語音分鐘數:**{userdata['voice_active_minutes']}** (獲得100塊蛋糕)"
+                    minutes = userdata['voice_active_minutes']
+                    multiplier = 3 if minutes >= 300 else (2 if minutes >= 180 else 1)
+                    reward = base_rewards[i] * multiplier
+                    data[userid]['cake'] += reward
+                    bonus_note = f"，{multiplier}倍" if multiplier > 1 else ""
+                    line = f"{i + 1}.{user.display_name} 語音分鐘數:**{minutes}** (獲得{reward}塊蛋糕{bonus_note})"
+                    data['yesterday_voice_leaderboard'] += line + ("\n" if i < 2 else "")
                 #隔日重置        
                 for userid, userdata in data.items():
                     if isinstance(userdata, dict) and 'voice_active_minutes' in userdata:
