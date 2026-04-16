@@ -21,12 +21,13 @@ class MiningGame(commands.Cog):
         "不要鎬": {"耐久度": 1000, "需求等級": 25, "價格": 5000}
         }
         self.mineral_chancelist = {
-        "森林礦坑": {"石頭": 0.3, "鐵礦": 0.45, "金礦": 0.25, "鈦晶": 0, "鑽石": 0},
-        "荒野高原": {"石頭": 0.1, "鐵礦": 0.45, "金礦": 0.25, "鈦晶": 0.2, "鑽石": 0},
-        "蛋糕仙境": {"石頭": 0, "鐵礦": 0.38, "金礦": 0.32, "鈦晶": 0.25, "鑽石": 0.05},
-        "永世凍土": {"石頭": 0, "鐵礦": 0.25, "金礦": 0.36, "鈦晶": 0.27, "鑽石": 0.12},
-        "熾熱火炎山": {"石頭": 0, "鐵礦": 0, "金礦": 0.43, "鈦晶": 0.35, "鑽石": 0.22},
-        "虛空洞穴": {"石頭": 0, "鐵礦": 0, "金礦": 0.3, "鈦晶": 0.4, "鑽石": 0.3}
+        "森林礦坑": {"石頭": 0.3, "鐵礦": 0.45, "金礦": 0.25, "鈦晶": 0, "鑽石": 0, "輝煌水晶": 0},
+        "荒野高原": {"石頭": 0.1, "鐵礦": 0.45, "金礦": 0.25, "鈦晶": 0.2, "鑽石": 0, "輝煌水晶": 0},
+        "蛋糕仙境": {"石頭": 0, "鐵礦": 0.38, "金礦": 0.32, "鈦晶": 0.25, "鑽石": 0.05, "輝煌水晶": 0},
+        "永世凍土": {"石頭": 0, "鐵礦": 0.25, "金礦": 0.36, "鈦晶": 0.27, "鑽石": 0.12, "輝煌水晶": 0},
+        "熾熱火炎山": {"石頭": 0, "鐵礦": 0, "金礦": 0.43, "鈦晶": 0.35, "鑽石": 0.22, "輝煌水晶": 0},
+        "虛空洞穴": {"石頭": 0, "鐵礦": 0, "金礦": 0.3, "鈦晶": 0.4, "鑽石": 0.3, "輝煌水晶": 0},
+        "天境之地": {"石頭": 0, "鐵礦": 0, "金礦": 0.15, "鈦晶": 0.25, "鑽石": 0.4, "輝煌水晶": 0.2}
         }
         self.mine_levellimit = {
             "森林礦坑": 1,
@@ -34,7 +35,8 @@ class MiningGame(commands.Cog):
             "蛋糕仙境": 18,
             "永世凍土": 26,
             "熾熱火炎山": 34,
-            "虛空洞穴": 42
+            "虛空洞穴": 42,
+            "天境之地": 70
         }
         self.collection_list = {
         "森林礦坑": ["昆蟲化石", "遠古的妖精翅膀", "萬年神木之根", "古代陶器碎片"],
@@ -42,13 +44,15 @@ class MiningGame(commands.Cog):
         "蛋糕仙境": ["不滅的蠟燭", "蛋糕製造機", "異界之門鑰匙"],
         "永世凍土": ["雪怪排泄物", "冰鎮草莓甜酒", "冰凍章魚觸手"],
         "熾熱火炎山": ["上古琥珀", "火龍遺骨", "地獄辣炒年糕"],
-        "虛空洞穴": ["反物質研究手稿", "異星生物黏液", "深淵的彼岸花"]
+        "虛空洞穴": ["反物質研究手稿", "異星生物黏液", "深淵的彼岸花"],
+        "天境之地": ["沉沒的三叉戟"]
         }
         self.mineral_pricelist = {
             "鐵礦": 5,
             "金礦": 10,
             "鈦晶": 20,
-            "鑽石": 50
+            "鑽石": 50,
+            "輝煌水晶": 120
         }
 
 
@@ -70,6 +74,17 @@ class MiningGame(commands.Cog):
         if "machine_amount" not in data[userid]:
             data[userid]["machine_amount"] = 0
             data[userid]["machine_mine"] = "森林礦坑"
+            common.datawrite(data,"data/mining.json")
+
+        # 新礦場上線時補齊每日挖掘量條目
+        if "mine_mininglimit" not in data:
+            data["mine_mininglimit"] = {}
+        mine_limit_updated = False
+        for mine_name in self.mineral_chancelist.keys():
+            if mine_name not in data["mine_mininglimit"]:
+                data["mine_mininglimit"][mine_name] = 500
+                mine_limit_updated = True
+        if mine_limit_updated:
             common.datawrite(data,"data/mining.json")
 
         return data
@@ -154,9 +169,9 @@ class MiningGame(commands.Cog):
                             message.description += f"\n你額外獲得了**{bonus_mineral}**個**{reward}**!"
                     break
 
-            #開始抽收藏品(0.5%機會)
+            #開始抽收藏品(1%機會)
             random_num = random.random()
-            if random_num < 0.005:
+            if random_num < 0.01:
                 collection = random.choice(self.collection_list[mining_data[userid]["mine"]])
                 if collection not in mining_data[userid]["collections"]:
                     mining_data[userid]["collections"][collection] = 0
@@ -165,7 +180,7 @@ class MiningGame(commands.Cog):
 
             #高風險礦場機率爆裝
             random_num = random.random()
-            if random_num < 0.05 and (mining_data[userid]["mine"] == "熾熱火炎山" or mining_data[userid]["mine"] == "虛空洞穴"):
+            if random_num < 0.05 and (mining_data[userid]["mine"] == "熾熱火炎山" or mining_data[userid]["mine"] == "虛空洞穴" or mining_data[userid]["mine"] == "天境之地"):
                 mining_data[userid]["pickaxe_health"] = 0
                 message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
@@ -334,8 +349,9 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="荒野高原  10等", value="荒野高原"),
         app_commands.Choice(name="蛋糕仙境  18等", value="蛋糕仙境"),
         app_commands.Choice(name="永世凍土  26等", value="永世凍土"),
-        app_commands.Choice(name="熾熱火炎山  34等", value="熾熱火炎山"),
-        app_commands.Choice(name="虛空洞穴  42等", value="虛空洞穴")
+        app_commands.Choice(name="熾熱火炎山(高風險)  34等", value="熾熱火炎山"),
+        app_commands.Choice(name="虛空洞穴(高風險)  42等", value="虛空洞穴"),
+        app_commands.Choice(name="天境之地(高風險)  70等", value="天境之地")
         ])
     async def mine(self,interaction,choices: app_commands.Choice[str]):
         async with common.jsonio_lock:
@@ -439,8 +455,9 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="荒野高原  10等", value="荒野高原"),
         app_commands.Choice(name="蛋糕仙境  18等", value="蛋糕仙境"),
         app_commands.Choice(name="永世凍土  26等", value="永世凍土"),
-        app_commands.Choice(name="熾熱火炎山  34等", value="熾熱火炎山"),
-        app_commands.Choice(name="虛空洞穴  42等", value="虛空洞穴")
+        app_commands.Choice(name="熾熱火炎山(高風險)  34等", value="熾熱火炎山"),
+        app_commands.Choice(name="虛空洞穴(高風險)  42等", value="虛空洞穴"),
+        app_commands.Choice(name="天境之地(高風險)  70等", value="天境之地")
         ])
     async def mining_machine_mine(self,interaction,choices: app_commands.Choice[str]):
         userid = str(interaction.user.id)
