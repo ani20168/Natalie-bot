@@ -4,7 +4,8 @@ from discord.ext import commands
 from . import common
 import random
 import itertools
-from typing import Optional
+import re
+from typing import Optional, Tuple, Union
 import asyncio
 import time
 
@@ -265,6 +266,20 @@ class MiningGame(commands.Cog):
         mining_data[userid]["equipped_bag_slot"] = None
 
 
+    def parse_mining_bag_drop_arg(self, raw: str) -> Tuple[str, Union[None, int, Tuple[int, int]]]:
+        """解析丟棄輸入：all | 單格 1～7 | 區間 "1-3"（數字可含空白）。"""
+        text = raw.strip()
+        if not text:
+            raise ValueError("empty")
+        if text.lower() == "all":
+            return "all", None
+        range_match = re.match(r"^\s*(\d+)\s*-\s*(\d+)\s*$", raw)
+        if range_match:
+            a, b = int(range_match.group(1)), int(range_match.group(2))
+            return "range", (min(a, b), max(a, b))
+        return "single", int(text)
+
+
     @app_commands.command(name = "mining", description = "挖礦!")
     async def mining(self,interaction):
         dig_sleep = 8.0
@@ -461,7 +476,7 @@ class MiningGame(commands.Cog):
         async with common.jsonio_lock:
             mining_data = self.miningdata_read(userid)
 
-        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 收藏品交易\n/collection_sell 販賣收藏品給Natalie\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_use 裝備背包內礦鎬\n/mining_bag_drop 丟棄背包內礦鎬\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
+        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 收藏品交易\n/collection_sell 販賣收藏品給Natalie\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_use 裝備背包內礦鎬\n/mining_bag_drop 丟棄背包內礦鎬(單格/1-3/all)\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
         equip_slot = mining_data[userid].get("equipped_bag_slot")
         pickaxe_line = f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}"
         if equip_slot is not None:
@@ -647,7 +662,7 @@ class MiningGame(commands.Cog):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
             mining_data = self.miningdata_read(userid)
-        message = Embed(title="Natalie 挖礦｜裝備背包", description="共 7 格。使用 `/mining_bag_use` 裝備、`/mining_bag_drop` 丟棄、`/mining_bag_unequip` 卸下技能鎬。", color=common.bot_color)
+        message = Embed(title="Natalie 挖礦｜裝備背包", description="共 7 格。使用 `/mining_bag_use` 裝備、`/mining_bag_drop` 丟棄（單格／`1-3`／`all`）、`/mining_bag_unequip` 卸下技能鎬。", color=common.bot_color)
         equipped = mining_data[userid].get("equipped_bag_slot")
         for index in range(self.pickaxe_bag_size):
             entry = mining_data[userid]["pickaxe_bag"][index]
@@ -665,25 +680,78 @@ class MiningGame(commands.Cog):
             message.add_field(name=field_name, value=field_value, inline=False)
         await interaction.response.send_message(embed=message)
 
-    @app_commands.command(name = "mining_bag_drop", description = "丟棄裝備背包第 N 格的礦鎬")
-    @app_commands.describe(slot="格子編號 1~7")
-    @app_commands.rename(slot="格子編號")
-    async def mining_bag_drop(self, interaction, slot: int):
+    @app_commands.command(name = "mining_bag_drop", description = "丟棄裝備背包內的技能礦鎬")
+    @app_commands.describe(slot="允許單個、區間如 1-3、或 all（會保留裝備中的道具）")
+    @app_commands.rename(slot="編號")
+    async def mining_bag_drop(self, interaction, slot: str):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
             mining_data = self.miningdata_read(userid)
-            if slot < 1 or slot > self.pickaxe_bag_size:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"格子編號須為 **1**～**{self.pickaxe_bag_size}**。", color=common.bot_error_color))
+            try:
+                mode, payload = self.parse_mining_bag_drop_arg(slot)
+            except (ValueError, TypeError):
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="格式錯誤。請輸入單格 **1～7**、區間如 **1-3**，或 **all**。", color=common.bot_error_color))
                 return
-            idx = slot - 1
-            if mining_data[userid]["pickaxe_bag"][idx] is None:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="該格沒有物品。", color=common.bot_error_color))
+
+            bag = mining_data[userid]["pickaxe_bag"]
+            equipped_idx = mining_data[userid].get("equipped_bag_slot")
+
+            if mode == "all":
+                dropped_slots = []
+                for index in range(self.pickaxe_bag_size):
+                    if index == equipped_idx:
+                        continue
+                    if bag[index] is not None:
+                        bag[index] = None
+                        dropped_slots.append(str(index + 1))
+                common.datawrite(mining_data, "data/mining.json")
+                if not dropped_slots:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="沒有可丟棄的礦鎬（其餘空格或僅剩裝備中）。", color=common.bot_error_color))
+                    return
+                slots_text = "、".join(dropped_slots)
+                equip_hint = f"\n（已保留裝備中第 **{equipped_idx + 1}** 格）" if equipped_idx is not None else ""
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"已丟棄 **{len(dropped_slots)}** 把礦鎬（第 **{slots_text}** 格）。{equip_hint}", color=common.bot_color))
                 return
-            if mining_data[userid].get("equipped_bag_slot") == idx:
-                self.restore_legacy_pickaxe_to_top(mining_data, userid)
-            mining_data[userid]["pickaxe_bag"][idx] = None
+
+            if mode == "single":
+                slot_num = payload
+                if slot_num < 1 or slot_num > self.pickaxe_bag_size:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"格子編號須為 **1**～**{self.pickaxe_bag_size}**。", color=common.bot_error_color))
+                    return
+                idx = slot_num - 1
+                if equipped_idx == idx:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="無法丟棄**裝備中**的礦鎬，請先 `/mining_bag_unequip` 卸下。", color=common.bot_error_color))
+                    return
+                if bag[idx] is None:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="該格沒有物品。", color=common.bot_error_color))
+                    return
+                bag[idx] = None
+                common.datawrite(mining_data, "data/mining.json")
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"已丟棄背包第 **{slot_num}** 格的礦鎬。", color=common.bot_color))
+                return
+
+            # range
+            lo, hi = payload
+            if lo < 1 or hi > self.pickaxe_bag_size or lo > hi:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"區間須在 **1**～**{self.pickaxe_bag_size}** 內，且左不大於右。", color=common.bot_error_color))
+                return
+            if equipped_idx is not None:
+                equip_num = equipped_idx + 1
+                if lo <= equip_num <= hi:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"區間內包含**裝備中**的第 **{equip_num}** 格，無法丟棄。請先卸下或改用 **all**（會保留裝備格）。", color=common.bot_error_color))
+                    return
+            dropped_slots = []
+            for slot_num in range(lo, hi + 1):
+                idx = slot_num - 1
+                if bag[idx] is not None:
+                    bag[idx] = None
+                    dropped_slots.append(str(slot_num))
             common.datawrite(mining_data, "data/mining.json")
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"已丟棄背包第 **{slot}** 格的礦鎬。", color=common.bot_color))
+            if not dropped_slots:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="該區間內沒有礦鎬可丟棄。", color=common.bot_error_color))
+                return
+            slots_text = "、".join(dropped_slots)
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"已丟棄 **{len(dropped_slots)}** 把礦鎬（第 **{slots_text}** 格）。", color=common.bot_color))
 
     @app_commands.command(name = "mining_bag_use", description = "裝備裝備背包第 N 格的礦鎬")
     @app_commands.describe(slot="格子編號 1~7")
