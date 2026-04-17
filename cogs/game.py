@@ -182,7 +182,7 @@ class MiningGame(commands.Cog):
             return "（無隨機技能）"
         lines = []
         if "bonus_chance_add" in skills:
-            lines.append(f"增加{int(round(skills['bonus_chance_add'] * 100))}%獲得額外礦物的機率")
+            lines.append(f"增加**{int(round(skills['bonus_chance_add'] * 100))}%**獲得額外礦物的機率")
         if "bonus_extra_on_proc" in skills:
             lines.append(f"觸發額外礦物時，額外礦物再增加**{skills['bonus_extra_on_proc']}**個")
         if "dig_time_reduce_sec" in skills:
@@ -190,7 +190,7 @@ class MiningGame(commands.Cog):
         if skills.get("bonus_force_highest_value"):
             lines.append("額外礦物必為該礦場最高價值礦物")
         if "collection_chance_add" in skills:
-            lines.append(f"增加{int(round(skills['collection_chance_add'] * 100))}%獲得收藏品的機率")
+            lines.append(f"增加**{int(round(skills['collection_chance_add'] * 100))}%**獲得收藏品的機率")
         if skills.get("durability_half_skip"):
             lines.append("每次挖礦有**50%**機率不消耗耐久")
         return "\n".join(lines)
