@@ -54,6 +54,11 @@ class MiningGame(commands.Cog):
             "鑽石": 50,
             "輝煌水晶": 120
         }
+        self.pickaxe_bag_size = 7
+        self.skill_pickaxe_shop = {
+            "災禍鎬": {"需求等級": 50, "價格": 20000},
+            "附魔迷你船錨": {"需求等級": 64, "價格": 40000},
+        }
 
 
     def miningdata_read(self,userid: str):
@@ -76,6 +81,26 @@ class MiningGame(commands.Cog):
             data[userid]["machine_mine"] = "森林礦坑"
             common.datawrite(data,"data/mining.json")
 
+        # 技能礦鎬裝備背包（7 格）與卸下還原用快照
+        bag_migrated = False
+        if "pickaxe_bag" not in data[userid]:
+            data[userid]["pickaxe_bag"] = [None] * self.pickaxe_bag_size
+            bag_migrated = True
+        elif len(data[userid]["pickaxe_bag"]) != self.pickaxe_bag_size:
+            new_bag = [None] * self.pickaxe_bag_size
+            for index in range(min(len(data[userid]["pickaxe_bag"]), self.pickaxe_bag_size)):
+                new_bag[index] = data[userid]["pickaxe_bag"][index]
+            data[userid]["pickaxe_bag"] = new_bag
+            bag_migrated = True
+        if "equipped_bag_slot" not in data[userid]:
+            data[userid]["equipped_bag_slot"] = None
+            bag_migrated = True
+        if "legacy_pickaxe_state" not in data[userid]:
+            data[userid]["legacy_pickaxe_state"] = None
+            bag_migrated = True
+        if bag_migrated:
+            common.datawrite(data,"data/mining.json")
+
         # 新礦場上線時補齊每日挖掘量條目
         if "mine_mininglimit" not in data:
             data["mine_mininglimit"] = {}
@@ -90,14 +115,162 @@ class MiningGame(commands.Cog):
         return data
 
 
+    def roll_random_pickaxe_durability(self) -> int:
+        """技能鎬：骰出 10～1000、且為 10 倍數的耐久上限。"""
+        return random.randint(1, 100) * 10
+
+
+    def roll_disaster_pickaxe_skills(self) -> dict:
+        """災禍鎬：各技能獨立骰是否取得，並骰出數值／旗標寫入 dict。"""
+        skills = {}
+        if random.random() < 0.30:
+            skills["bonus_chance_add"] = random.randint(1, 40) / 100.0
+        if random.random() < 0.20:
+            skills["bonus_extra_on_proc"] = random.randint(1, 3)
+        if random.random() < 0.15:
+            skills["dig_time_reduce_sec"] = random.randint(1, 3)
+        if random.random() < 0.20:
+            skills["bonus_force_highest_value"] = True
+        if random.random() < 0.40:
+            skills["durability_half_skip"] = True
+        return skills
+
+
+    def roll_anchor_pickaxe_skills(self) -> dict:
+        """附魔迷你船錨：各技能獨立骰是否取得，並骰出數值／旗標寫入 dict。"""
+        skills = {}
+        if random.random() < 0.40:
+            skills["bonus_chance_add"] = random.randint(20, 100) / 100.0
+        if random.random() < 0.25:
+            skills["bonus_extra_on_proc"] = random.randint(1, 8)
+        if random.random() < 0.15:
+            skills["dig_time_reduce_sec"] = random.randint(1, 7)
+        if random.random() < 0.20:
+            skills["bonus_force_highest_value"] = True
+        if random.random() < 0.05:
+            skills["collection_chance_add"] = random.randint(1, 15) / 100.0
+        if random.random() < 0.40:
+            skills["durability_half_skip"] = True
+        return skills
+
+
+    def roll_skill_pickaxe_instance(self, template: str) -> dict:
+        """購買技能鎬時產生一筆背包資料：template、耐久與 skills。"""
+        max_health = self.roll_random_pickaxe_durability()
+        if template == "災禍鎬":
+            skills = self.roll_disaster_pickaxe_skills()
+        else:
+            skills = self.roll_anchor_pickaxe_skills()
+        return {"template": template, "max_health": max_health, "current_health": max_health, "skills": skills}
+
+
+    def skill_pickaxe_lines_for_embed(self, skills: dict) -> str:
+        """把 skills dict 轉成 embed 用多行中文說明。"""
+        if not skills:
+            return "（無隨機技能）"
+        lines = []
+        if "bonus_chance_add" in skills:
+            lines.append(f"增加{int(round(skills['bonus_chance_add'] * 100))}%獲得額外礦物的機率")
+        if "bonus_extra_on_proc" in skills:
+            lines.append(f"觸發額外礦物時，額外礦物再增加**{skills['bonus_extra_on_proc']}**個")
+        if "dig_time_reduce_sec" in skills:
+            lines.append(f"減少**{skills['dig_time_reduce_sec']}**秒挖掘時間")
+        if skills.get("bonus_force_highest_value"):
+            lines.append("額外礦物必為該礦場最高價值礦物")
+        if "collection_chance_add" in skills:
+            lines.append(f"增加{int(round(skills['collection_chance_add'] * 100))}%獲得收藏品的機率")
+        if skills.get("durability_half_skip"):
+            lines.append("每次挖礦有**50%**機率不消耗耐久")
+        return "\n".join(lines)
+
+
+    def get_active_skills_from_user(self, mining_data: dict, userid: str) -> dict:
+        """目前裝備若來自背包格，回傳該格物品的技能 dict；否則空 dict。"""
+        slot = mining_data[userid].get("equipped_bag_slot")
+        if slot is None:
+            return {}
+        bag = mining_data[userid]["pickaxe_bag"]
+        if slot >= len(bag) or bag[slot] is None:
+            return {}
+        return bag[slot].get("skills") or {}
+
+
+    def sync_equipped_pickaxe_to_bag_slot(self, mining_data: dict, userid: str) -> None:
+        """把頂層 pickaxe_health／max 寫回目前裝備的背包格，避免資料分歧。"""
+        slot = mining_data[userid].get("equipped_bag_slot")
+        if slot is None:
+            return
+        bag = mining_data[userid]["pickaxe_bag"]
+        if slot >= len(bag) or bag[slot] is None:
+            return
+        bag[slot]["current_health"] = mining_data[userid]["pickaxe_health"]
+        bag[slot]["max_health"] = mining_data[userid]["pickaxe_maxhealth"]
+
+
+    def effective_pickaxe_required_level(self, mining_data: dict, userid: str) -> int:
+        """目前顯示鎬名對應的「需求等級」（傳統鎬或技能鎬商店表），供 pickaxe_buy 比較。"""
+        name = mining_data[userid]["pickaxe"]
+        if name in self.pickaxe_list:
+            return self.pickaxe_list[name]["需求等級"]
+        if name in self.skill_pickaxe_shop:
+            return self.skill_pickaxe_shop[name]["需求等級"]
+        return 1
+
+
+    def highest_priced_mineral_in_mine(self, mine_name: str) -> Optional[str]:
+        """該礦場掉落表內（排除石頭、機率 0）單價最高之礦物名；同價取字串較大者。"""
+        table = self.mineral_chancelist[mine_name]
+        best_pair = None
+        for mineral, probability in table.items():
+            if mineral == "石頭" or probability <= 0:
+                continue
+            price = self.mineral_pricelist.get(mineral, 0)
+            pair = (price, mineral)
+            if best_pair is None or pair > best_pair:
+                best_pair = pair
+        return best_pair[1] if best_pair else None
+
+
+    def first_empty_pickaxe_bag_index(self, mining_data: dict, userid: str) -> Optional[int]:
+        """裝備背包第一個空格子的索引（0-based）；已滿則 None。"""
+        bag = mining_data[userid]["pickaxe_bag"]
+        for index, entry in enumerate(bag):
+            if entry is None:
+                return index
+        return None
+
+
+    def restore_legacy_pickaxe_to_top(self, mining_data: dict, userid: str) -> None:
+        """卸下技能鎬：還原 legacy_pickaxe_state 到頂層鎬欄位，並清空 equipped_bag_slot。"""
+        legacy = mining_data[userid].get("legacy_pickaxe_state")
+        if legacy and isinstance(legacy, dict) and "name" in legacy:
+            mining_data[userid]["pickaxe"] = legacy["name"]
+            mining_data[userid]["pickaxe_health"] = legacy["pickaxe_health"]
+            mining_data[userid]["pickaxe_maxhealth"] = legacy["pickaxe_maxhealth"]
+        else:
+            mining_data[userid]["pickaxe"] = "基本礦鎬"
+            mining_data[userid]["pickaxe_health"] = 100
+            mining_data[userid]["pickaxe_maxhealth"] = 100
+        mining_data[userid]["equipped_bag_slot"] = None
+
+
     @app_commands.command(name = "mining", description = "挖礦!")
-    @app_commands.checks.cooldown(1, 8)
     async def mining(self,interaction):
+        dig_sleep = 8.0
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
             user_data = common.dataload()
             mining_data = self.miningdata_read(userid)
-            userlevel = common.LevelSystem().read_info(userid)
+            skills_pre = self.get_active_skills_from_user(mining_data, userid)
+            dig_reduce = int(skills_pre.get("dig_time_reduce_sec") or 0)
+            # 冷卻與挖掘縮秒同源（下限 1 秒），避免固定 8 秒冷卻與技能縮時不一致
+            cooldown_sec = max(1.0, 8.0 - dig_reduce)
+            last_mining_ts = float(mining_data[userid].get("mining_cooldown_last") or 0)
+            elapsed = time.time() - last_mining_ts
+            if last_mining_ts > 0 and elapsed < cooldown_sec:
+                wait_sec = max(1, int(cooldown_sec - elapsed + 0.99))
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"挖太快了!請在**{wait_sec}**秒後再試一次。", color=common.bot_error_color), ephemeral=True)
+                return
 
             #確認是否正在重啟保護狀態?
             if time.time() - user_data['restart_time'] <= 15:
@@ -119,20 +292,27 @@ class MiningGame(commands.Cog):
                         return
                     mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
                     user_data[userid]["cake"] -= 10
+                    self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
                 else:
                     await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
                     return
 
+            dig_sleep = max(0.5, 8.0 - dig_reduce)
 
             mining_data['mine_mininglimit'][mining_data[userid]['mine']] -= 1
-            mining_data[userid]["pickaxe_health"] -=10
+            consume_dura = True
+            if skills_pre.get("durability_half_skip") and random.random() < 0.5:
+                consume_dura = False
+            if consume_dura:
+                mining_data[userid]["pickaxe_health"] -= 10
+            self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
+            mining_data[userid]["mining_cooldown_last"] = time.time()
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
             #寫入檔案防止回溯
             common.datawrite(user_data)
             common.datawrite(mining_data,"data/mining.json")
 
-        #挖礦時間8秒
-        await asyncio.sleep(8)
+        await asyncio.sleep(dig_sleep)
 
         async with common.jsonio_lock:
             #等待時間結束後再次讀取，防止回溯問題
@@ -143,45 +323,53 @@ class MiningGame(commands.Cog):
             random_num = random.random()
             current_probability = 0
             for reward, probability in reward_probabilities.items():
-                
                 current_probability += probability
                 if random_num < current_probability:
-                    #抽出礦物
                     message = Embed(title="Natalie 挖礦",description=f"你挖到了**{reward}**!",color=common.bot_color)
                     if reward != "石頭":
                         if reward not in mining_data[userid]:
                             mining_data[userid][reward] = 0
                         mining_data[userid][reward] += 1
 
-                        # bonus minerals
-                        if mining_data[userid]['pickaxe'] == "鑽石鎬":
-                            bonus_probability = 0.1
-                            bonus_mineral = 1
-                        elif mining_data[userid]['pickaxe'] == "不要鎬":
-                            bonus_probability = 0.15
-                            bonus_mineral = 1
-                        else:
-                            bonus_probability = 0
-                            bonus_mineral = 0
-
-                        if random.random() < bonus_probability:
-                            mining_data[userid][reward] += bonus_mineral
-                            message.description += f"\n你額外獲得了**{bonus_mineral}**個**{reward}**!"
+                        skills = self.get_active_skills_from_user(mining_data, userid)
+                        pickaxe_name = mining_data[userid]["pickaxe"]
+                        base_prob = 0.0
+                        if pickaxe_name == "鑽石鎬":
+                            base_prob = 0.1
+                        elif pickaxe_name == "不要鎬":
+                            base_prob = 0.15
+                        base_prob += float(skills.get("bonus_chance_add") or 0)
+                        base_prob = min(1.0, base_prob)
+                        bonus_extra = int(skills.get("bonus_extra_on_proc") or 0)
+                        bonus_qty = 1 + bonus_extra
+                        force_highest = bool(skills.get("bonus_force_highest_value"))
+                        extra_mineral_type = reward
+                        if force_highest:
+                            hi = self.highest_priced_mineral_in_mine(mining_data[userid]["mine"])
+                            if hi:
+                                extra_mineral_type = hi
+                        if random.random() < base_prob:
+                            if extra_mineral_type not in mining_data[userid]:
+                                mining_data[userid][extra_mineral_type] = 0
+                            mining_data[userid][extra_mineral_type] += bonus_qty
+                            message.description += f"\n你額外獲得了**{bonus_qty}**個**{extra_mineral_type}**!"
                     break
 
-            #開始抽收藏品(1%機會)
+            skills_post = self.get_active_skills_from_user(mining_data, userid)
+            collection_base = 0.01 + float(skills_post.get("collection_chance_add") or 0)
+            collection_base = min(1.0, collection_base)
             random_num = random.random()
-            if random_num < 0.01:
+            if random_num < collection_base:
                 collection = random.choice(self.collection_list[mining_data[userid]["mine"]])
                 if collection not in mining_data[userid]["collections"]:
                     mining_data[userid]["collections"][collection] = 0
                 mining_data[userid]["collections"][collection] += 1
                 message.add_field(name="找到收藏品!",value=f"獲得**{collection}**!",inline= False)
 
-            #高風險礦場機率爆裝
             random_num = random.random()
             if random_num < 0.05 and (mining_data[userid]["mine"] == "熾熱火炎山" or mining_data[userid]["mine"] == "虛空洞穴" or mining_data[userid]["mine"] == "天境之地"):
                 mining_data[userid]["pickaxe_health"] = 0
+                self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
                 message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
             await interaction.edit_original_response(embed=message)
@@ -207,6 +395,7 @@ class MiningGame(commands.Cog):
             #修理要10蛋糕
             user_data[userid]["cake"] -= 10
             mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
+            self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="修理完成",color=common.bot_color))
             common.datawrite(user_data)
             common.datawrite(mining_data,"data/mining.json")
@@ -261,8 +450,12 @@ class MiningGame(commands.Cog):
         async with common.jsonio_lock:
             mining_data = self.miningdata_read(userid)
 
-        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 收藏品交易\n/collection_sell 販賣收藏品給Natalie\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
-        message.add_field(name="我的礦鎬",value=f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}",inline=False)
+        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 收藏品交易\n/collection_sell 販賣收藏品給Natalie\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_use 裝備背包內礦鎬\n/mining_bag_drop 丟棄背包內礦鎬\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
+        equip_slot = mining_data[userid].get("equipped_bag_slot")
+        pickaxe_line = f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}"
+        if equip_slot is not None:
+            pickaxe_line += f"\n（裝備中：背包第 **{equip_slot + 1}** 格）"
+        message.add_field(name="我的礦鎬",value=pickaxe_line,inline=False)
         message.add_field(name="礦場位置",value=f"{mining_data[userid]['mine']}",inline=False)
 
         mine_limit_info = ""
@@ -380,35 +573,147 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="石鎬  耐久:200 需要6等 $500", value="石鎬"),
         app_commands.Choice(name="鐵鎬  耐久:400 需要12等 $2000", value="鐵鎬"),
         app_commands.Choice(name="鑽石鎬  耐久:650 需要18等 $3000", value="鑽石鎬"),
-        app_commands.Choice(name="不要鎬  耐久:1000 需要25等 $5000", value="不要鎬")
+        app_commands.Choice(name="不要鎬  耐久:1000 需要25等 $5000", value="不要鎬"),
+        app_commands.Choice(name="災禍鎬(隨機技能) 耐久10~1000 50等 $20000", value="災禍鎬"),
+        app_commands.Choice(name="附魔迷你船錨(隨機技能) 耐久10~1000 64等 $40000", value="附魔迷你船錨"),
         ])
     async def pickaxe_buy(self,interaction,choices: app_commands.Choice[str]):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
             user_data = common.dataload()
             mining_data = self.miningdata_read(userid)
-        
-            if mining_data[userid]["pickaxe"] == choices.value:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經擁有此礦鎬了!",color=common.bot_error_color))
-                return
-            if self.pickaxe_list[choices.value]['需求等級'] > user_data[userid]['level']:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的等級不足以購買此礦鎬!",color=common.bot_error_color))
-                return
-            if self.pickaxe_list[choices.value]['需求等級'] < self.pickaxe_list[mining_data[userid]['pickaxe']]['需求等級']:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你不能購買更劣質的礦鎬!",color=common.bot_error_color))
-                return
-            if user_data[userid]['cake'] < self.pickaxe_list[choices.value]['價格']:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{self.pickaxe_list[choices.value]['價格']}**，你只有**{user_data[userid]['cake']}**)。",color=common.bot_error_color))
+            value = choices.value
+
+            if value in self.skill_pickaxe_shop:
+                meta = self.skill_pickaxe_shop[value]
+                if meta["需求等級"] > user_data[userid]["level"]:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的等級不足以購買此礦鎬!",color=common.bot_error_color))
+                    return
+                if user_data[userid]["cake"] < meta["價格"]:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{meta['價格']}**，你只有**{user_data[userid]['cake']}**)。",color=common.bot_error_color))
+                    return
+                free_index = self.first_empty_pickaxe_bag_index(mining_data, userid)
+                if free_index is None:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="裝備背包已滿(7格)，請先使用 `/mining_bag_drop` 丟棄礦鎬後再購買。",color=common.bot_error_color))
+                    return
+                user_data[userid]["cake"] -= meta["價格"]
+                instance = self.roll_skill_pickaxe_instance(value)
+                mining_data[userid]["pickaxe_bag"][free_index] = instance
+                skill_text = self.skill_pickaxe_lines_for_embed(instance["skills"])
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功！**{value}**已放入裝備背包第 **{free_index + 1}** 格。\n耐久 **{instance['current_health']}/{instance['max_health']}**\n\n{skill_text}",color=common.bot_color))
+                common.datawrite(user_data)
+                common.datawrite(mining_data,"data/mining.json")
                 return
 
-            # 允許購買
-            user_data[userid]['cake'] -= self.pickaxe_list[choices.value]['價格']
-            mining_data[userid]["pickaxe"] = choices.value
-            mining_data[userid]['pickaxe_maxhealth'] = self.pickaxe_list[choices.value]['耐久度']
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功! 你現在擁有了**{choices.value}**。",color=common.bot_color))
+            if mining_data[userid]["pickaxe"] == value:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你已經擁有此礦鎬了!",color=common.bot_error_color))
+                return
+            if self.pickaxe_list[value]['需求等級'] > user_data[userid]['level']:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的等級不足以購買此礦鎬!",color=common.bot_error_color))
+                return
+            current_tier = self.effective_pickaxe_required_level(mining_data, userid)
+            if self.pickaxe_list[value]['需求等級'] < current_tier:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你不能購買更劣質的礦鎬!",color=common.bot_error_color))
+                return
+            if user_data[userid]['cake'] < self.pickaxe_list[value]['價格']:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{self.pickaxe_list[value]['價格']}**，你只有**{user_data[userid]['cake']}**)。",color=common.bot_error_color))
+                return
+
+            user_data[userid]['cake'] -= self.pickaxe_list[value]['價格']
+            mining_data[userid]["equipped_bag_slot"] = None
+            mining_data[userid]["legacy_pickaxe_state"] = None
+            mining_data[userid]["pickaxe"] = value
+            mining_data[userid]['pickaxe_maxhealth'] = self.pickaxe_list[value]['耐久度']
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功! 你現在擁有了**{value}**。",color=common.bot_color))
             common.datawrite(user_data)
             common.datawrite(mining_data,"data/mining.json")
-        
+
+    @app_commands.command(name = "mining_bag", description = "查看裝備背包（技能礦鎬）")
+    async def mining_bag(self, interaction):
+        userid = str(interaction.user.id)
+        async with common.jsonio_lock:
+            mining_data = self.miningdata_read(userid)
+        message = Embed(title="Natalie 挖礦｜裝備背包", description="共 7 格。使用 `/mining_bag_use` 裝備、`/mining_bag_drop` 丟棄、`/mining_bag_unequip` 卸下技能鎬。", color=common.bot_color)
+        equipped = mining_data[userid].get("equipped_bag_slot")
+        for index in range(self.pickaxe_bag_size):
+            entry = mining_data[userid]["pickaxe_bag"][index]
+            slot_label = index + 1
+            if entry is None:
+                field_name = f"[{slot_label}] （空）"
+                field_value = "—"
+            else:
+                name = entry.get("template", "未知")
+                cur = entry.get("current_health", 0)
+                mx = entry.get("max_health", 0)
+                equip_tag = " 裝備中" if equipped == index else ""
+                field_name = f"[{slot_label}] {name}  {cur}/{mx}{equip_tag}"
+                field_value = self.skill_pickaxe_lines_for_embed(entry.get("skills") or {})
+            message.add_field(name=field_name, value=field_value, inline=False)
+        await interaction.response.send_message(embed=message)
+
+    @app_commands.command(name = "mining_bag_drop", description = "丟棄裝備背包第 N 格的礦鎬")
+    @app_commands.describe(slot="格子編號 1~7")
+    @app_commands.rename(slot="格子編號")
+    async def mining_bag_drop(self, interaction, slot: int):
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            mining_data = self.miningdata_read(userid)
+            if slot < 1 or slot > self.pickaxe_bag_size:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"格子編號須為 **1**～**{self.pickaxe_bag_size}**。", color=common.bot_error_color))
+                return
+            idx = slot - 1
+            if mining_data[userid]["pickaxe_bag"][idx] is None:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="該格沒有物品。", color=common.bot_error_color))
+                return
+            if mining_data[userid].get("equipped_bag_slot") == idx:
+                self.restore_legacy_pickaxe_to_top(mining_data, userid)
+            mining_data[userid]["pickaxe_bag"][idx] = None
+            common.datawrite(mining_data, "data/mining.json")
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"已丟棄背包第 **{slot}** 格的礦鎬。", color=common.bot_color))
+
+    @app_commands.command(name = "mining_bag_use", description = "裝備裝備背包第 N 格的礦鎬")
+    @app_commands.describe(slot="格子編號 1~7")
+    @app_commands.rename(slot="格子編號")
+    async def mining_bag_use(self, interaction, slot: int):
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            mining_data = self.miningdata_read(userid)
+            if slot < 1 or slot > self.pickaxe_bag_size:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"格子編號須為 **1**～**{self.pickaxe_bag_size}**。", color=common.bot_error_color))
+                return
+            idx = slot - 1
+            entry = mining_data[userid]["pickaxe_bag"][idx]
+            if entry is None:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="該格沒有物品。", color=common.bot_error_color))
+                return
+            if mining_data[userid].get("equipped_bag_slot") is not None:
+                self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
+            prev_slot = mining_data[userid].get("equipped_bag_slot")
+            if prev_slot is None and mining_data[userid].get("legacy_pickaxe_state") is None:
+                mining_data[userid]["legacy_pickaxe_state"] = {
+                    "name": mining_data[userid]["pickaxe"],
+                    "pickaxe_health": mining_data[userid]["pickaxe_health"],
+                    "pickaxe_maxhealth": mining_data[userid]["pickaxe_maxhealth"],
+                }
+            mining_data[userid]["equipped_bag_slot"] = idx
+            mining_data[userid]["pickaxe"] = entry["template"]
+            mining_data[userid]["pickaxe_maxhealth"] = entry["max_health"]
+            mining_data[userid]["pickaxe_health"] = entry["current_health"]
+            common.datawrite(mining_data, "data/mining.json")
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"已裝備背包第 **{slot}** 格的 **{entry['template']}**。", color=common.bot_color))
+
+    @app_commands.command(name = "mining_bag_unequip", description = "卸下技能礦鎬，還原為先前使用的傳統礦鎬")
+    async def mining_bag_unequip(self, interaction):
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            mining_data = self.miningdata_read(userid)
+            if mining_data[userid].get("equipped_bag_slot") is None:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="你目前沒有裝備背包內的技能礦鎬。", color=common.bot_error_color))
+                return
+            self.restore_legacy_pickaxe_to_top(mining_data, userid)
+            common.datawrite(mining_data, "data/mining.json")
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="已卸下技能礦鎬。", color=common.bot_color))
+
     @app_commands.command(name = "redeem_collection_role",description="兌換收藏品稱號(需要每種收藏品各一個，兌換後會消耗掉)")
     async def redeem_collection_role(self,interaction):
         async with common.jsonio_lock:
