@@ -455,6 +455,9 @@ class MiningGame(commands.Cog):
         pickaxe_line = f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}"
         if equip_slot is not None:
             pickaxe_line += f"\n（裝備中：背包第 **{equip_slot + 1}** 格）"
+            bag_entry = mining_data[userid]["pickaxe_bag"][equip_slot] if equip_slot < len(mining_data[userid]["pickaxe_bag"]) else None
+            if bag_entry:
+                pickaxe_line += f"\n\n**技能**\n{self.skill_pickaxe_lines_for_embed(bag_entry.get('skills') or {})}"
         message.add_field(name="我的礦鎬",value=pickaxe_line,inline=False)
         message.add_field(name="礦場位置",value=f"{mining_data[userid]['mine']}",inline=False)
 
