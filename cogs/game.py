@@ -56,8 +56,8 @@ class MiningGame(commands.Cog):
         }
         self.pickaxe_bag_size = 7
         self.skill_pickaxe_shop = {
-            "災禍鎬": {"需求等級": 50, "價格": 20000},
-            "附魔迷你船錨": {"需求等級": 64, "價格": 40000},
+            "災禍鎬": {"需求等級": 50, "價格": 10000},
+            "附魔迷你船錨": {"需求等級": 64, "價格": 20000},
         }
 
 
@@ -123,14 +123,19 @@ class MiningGame(commands.Cog):
     def roll_disaster_pickaxe_skills(self) -> dict:
         """災禍鎬：各技能獨立骰是否取得，並骰出數值／旗標寫入 dict。"""
         skills = {}
+        # 增加 1%～40% 獲得額外礦物機率（30% 獨立骰是否取得）
         if random.random() < 0.30:
             skills["bonus_chance_add"] = random.randint(1, 40) / 100.0
-        if random.random() < 0.20:
+        # 觸發額外礦 bonus 時，額外數量再 +1～3（30%）
+        if random.random() < 0.30:
             skills["bonus_extra_on_proc"] = random.randint(1, 3)
-        if random.random() < 0.15:
+        # 減少 1～3 秒挖掘等待（20%）
+        if random.random() < 0.2:
             skills["dig_time_reduce_sec"] = random.randint(1, 3)
+        # 額外礦 bonus 必為該礦場最高價值礦物（20%）
         if random.random() < 0.20:
             skills["bonus_force_highest_value"] = True
+        # 每次挖礦有 50% 機率不扣耐久（40% 獨立骰是否擁有此效果）
         if random.random() < 0.40:
             skills["durability_half_skip"] = True
         return skills
@@ -139,17 +144,23 @@ class MiningGame(commands.Cog):
     def roll_anchor_pickaxe_skills(self) -> dict:
         """附魔迷你船錨：各技能獨立骰是否取得，並骰出數值／旗標寫入 dict。"""
         skills = {}
+        # 增加 20%～100% 獲得額外礦物機率（40%）
         if random.random() < 0.40:
             skills["bonus_chance_add"] = random.randint(20, 100) / 100.0
-        if random.random() < 0.25:
+        # 觸發額外礦 bonus 時，額外數量再 +1～8（40%）
+        if random.random() < 0.4:
             skills["bonus_extra_on_proc"] = random.randint(1, 8)
-        if random.random() < 0.15:
+        # 減少 1～7 秒挖掘等待（30%）
+        if random.random() < 0.3:
             skills["dig_time_reduce_sec"] = random.randint(1, 7)
-        if random.random() < 0.20:
+        # 額外礦 bonus 必為該礦場最高價值礦物（30%）
+        if random.random() < 0.30:
             skills["bonus_force_highest_value"] = True
-        if random.random() < 0.05:
+        # 增加 1%～15% 獲得收藏品機率（10%）
+        if random.random() < 0.1:
             skills["collection_chance_add"] = random.randint(1, 15) / 100.0
-        if random.random() < 0.40:
+        # 每次挖礦有 50% 機率不扣耐久（60%）
+        if random.random() < 0.60:
             skills["durability_half_skip"] = True
         return skills
 
@@ -577,8 +588,8 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="鐵鎬  耐久:400 需要12等 $2000", value="鐵鎬"),
         app_commands.Choice(name="鑽石鎬  耐久:650 需要18等 $3000", value="鑽石鎬"),
         app_commands.Choice(name="不要鎬  耐久:1000 需要25等 $5000", value="不要鎬"),
-        app_commands.Choice(name="災禍鎬(隨機技能) 耐久10~1000 50等 $20000", value="災禍鎬"),
-        app_commands.Choice(name="附魔迷你船錨(隨機技能) 耐久10~1000 64等 $40000", value="附魔迷你船錨"),
+        app_commands.Choice(name="災禍鎬(隨機技能) 耐久10~1000 50等 $10000", value="災禍鎬"),
+        app_commands.Choice(name="附魔迷你船錨(隨機技能) 耐久10~1000 64等 $20000", value="附魔迷你船錨"),
         ])
     async def pickaxe_buy(self,interaction,choices: app_commands.Choice[str]):
         async with common.jsonio_lock:
