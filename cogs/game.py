@@ -410,6 +410,10 @@ class MiningGame(commands.Cog):
                 self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
                 message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
+            mine_here = mining_data[userid]["mine"]
+            remaining_here = mining_data["mine_mininglimit"][mine_here]
+            message.set_footer(text=f"位置:{mine_here} 剩餘:{remaining_here}")
+
             await interaction.edit_original_response(embed=message)
             common.datawrite(mining_data,"data/mining.json")
 
@@ -488,7 +492,7 @@ class MiningGame(commands.Cog):
         async with common.jsonio_lock:
             mining_data = self.miningdata_read(userid)
 
-        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_trade 收藏品交易\n/collection_sell 販賣收藏品給Natalie\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_use 裝備背包內礦鎬\n/mining_bag_drop 丟棄背包內礦鎬(單格/1-3/all)\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
+        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_list 各礦場收藏品清單\n/collection_trade 收藏品交易\n/collection_sell 販賣收藏品給Natalie\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_use 裝備背包內礦鎬\n/mining_bag_drop 丟棄背包內礦鎬(單格/1-3/all)\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
         equip_slot = mining_data[userid].get("equipped_bag_slot")
         pickaxe_line = f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}"
         if equip_slot is not None:
@@ -516,6 +520,24 @@ class MiningGame(commands.Cog):
         message.add_field(name=f"擁有收藏品 {collection_confirm_count}/{len(collection_confirm_list)}",value=f"{collection_confirm_message}",inline=False)
         await interaction.response.send_message(embed=message)
         
+    @app_commands.command(name = "collection_list", description = "列出收藏品清單")
+    async def collection_list(self, interaction):
+        userid = str(interaction.user.id)
+        async with common.jsonio_lock:
+            mining_data = self.miningdata_read(userid)
+        owned = mining_data[userid].get("collections") or {}
+        message = Embed(title="Natalie 挖礦｜收藏品清單", description="以下為挖礦系統目前所有的收藏品", color=common.bot_color)
+        for mine_name, item_list in self.collection_list.items():
+            lines = []
+            for item_name in item_list:
+                if owned.get(item_name, 0) >= 1:
+                    lines.append(f"{item_name}(已擁有)")
+                else:
+                    lines.append(item_name)
+            field_value = "\n".join(lines) if lines else "—"
+            message.add_field(name=mine_name, value=field_value, inline=False)
+        await interaction.response.send_message(embed=message)
+
     @app_commands.command(name = "collection_trade",description="與其他玩家交易收藏品")
     @app_commands.describe(collection_name="要販賣的收藏品名稱",price="要販賣的價格(蛋糕)")
     @app_commands.rename(collection_name="名稱",price="價格")
