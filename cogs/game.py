@@ -40,13 +40,13 @@ class MiningGame(commands.Cog):
             "天境之地": 70
         }
         self.collection_list = {
-        "森林礦坑": ["昆蟲化石", "遠古的妖精翅膀", "萬年神木之根", "古代陶器碎片"],
-        "荒野高原": ["風的根源石", "儀式石碑", "被詛咒的匕首", "神祕骷髏項鍊"],
+        "森林礦坑": ["昆蟲化石", "遠古的妖精翅膀", "萬年神木之根", "古代陶器碎片", "腐化的鹿角", "地脈結晶碎塊"],
+        "荒野高原": ["風的根源石", "儀式石碑", "被詛咒的匕首", "神祕骷髏項鍊", "乾枯的圖騰羽毛"],
         "蛋糕仙境": ["不滅的蠟燭", "蛋糕製造機", "異界之門鑰匙"],
-        "永世凍土": ["雪怪排泄物", "冰鎮草莓甜酒", "冰凍章魚觸手"],
+        "永世凍土": ["雪怪排泄物", "冰鎮草莓甜酒", "冰凍章魚觸手", "凍結的極光碎片"],
         "熾熱火炎山": ["上古琥珀", "火龍遺骨", "地獄辣炒年糕"],
         "虛空洞穴": ["反物質研究手稿", "異星生物黏液", "深淵的彼岸花"],
-        "天境之地": ["沉沒的三叉戟"]
+        "天境之地": ["沉沒的三叉戟", "碎裂的傳送石", "雲海凝結之露"]
         }
         self.mineral_pricelist = {
             "鐵礦": 5,
@@ -148,18 +148,30 @@ class MiningGame(commands.Cog):
         # 增加 20%～100% 獲得額外礦物機率（40%）
         if random.random() < 0.40:
             skills["bonus_chance_add"] = random.randint(20, 100) / 100.0
-        # 觸發額外礦 bonus 時，額外數量再 +1～8（40%）
+        # 觸發額外礦 bonus 時額外數量（40% 取得）；內層 70% 為 +1～3、30% 為 +4～8
         if random.random() < 0.4:
-            skills["bonus_extra_on_proc"] = random.randint(1, 8)
-        # 減少 1～7 秒挖掘等待（30%）
+            if random.random() < 0.70:
+                skills["bonus_extra_on_proc"] = random.randint(1, 3)
+            else:
+                skills["bonus_extra_on_proc"] = random.randint(4, 8)
+        # 減少挖掘等待（30% 取得）；內層 70% 為 1～3 秒、30% 為 4～7 秒
         if random.random() < 0.3:
-            skills["dig_time_reduce_sec"] = random.randint(1, 7)
+            if random.random() < 0.70:
+                skills["dig_time_reduce_sec"] = random.randint(1, 3)
+            else:
+                skills["dig_time_reduce_sec"] = random.randint(4, 7)
         # 額外礦 bonus 必為該礦場最高價值礦物（30%）
         if random.random() < 0.30:
             skills["bonus_force_highest_value"] = True
-        # 增加 1%～15% 獲得收藏品機率（10%）
+        # 增加收藏品機率（10% 取得）；內層 70% 為 1%～5%、20% 為 6%～10%、10% 為 11%～15%
         if random.random() < 0.1:
-            skills["collection_chance_add"] = random.randint(1, 15) / 100.0
+            tier = random.random()
+            if tier < 0.70:
+                skills["collection_chance_add"] = random.randint(1, 5) / 100.0
+            elif tier < 0.90:
+                skills["collection_chance_add"] = random.randint(6, 10) / 100.0
+            else:
+                skills["collection_chance_add"] = random.randint(11, 15) / 100.0
         # 每次挖礦有 50% 機率不扣耐久（60%）
         if random.random() < 0.60:
             skills["durability_half_skip"] = True
