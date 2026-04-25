@@ -13,10 +13,11 @@ import asyncio
 
 
 class RedPacketSession:
-    def __init__(self, creator_id: int, total_budget: int, people: int, amounts: list[int], ends_at: datetime):
+    def __init__(self, creator_id: int, total_budget: int, people: int, amounts: list[int], ends_at: datetime, short_message: str | None = None):
         self.creator_id = creator_id
         self.total_budget = total_budget
         self.people = people
+        self.short_message = short_message
         self.remaining_amounts: deque[int] = deque(amounts)
         self.claimed_order: list[tuple[int, str, int]] = []
         self.claimed_user_ids: set[int] = set()
@@ -570,6 +571,8 @@ class General(commands.Cog):
         embed.add_field(name="結束時間", value=f"{end_line} (UTC+8)", inline=False)
         embed.add_field(name="人數", value=f"**{session.people}** 人", inline=True)
         embed.add_field(name="總金額", value=f"**{session.total_budget}** 塊{cake_e}", inline=True)
+        if session.short_message:
+            embed.add_field(name="短言", value=session.short_message, inline=False)
         embed.add_field(name="已領取紅包的人", value=claim_lines, inline=False)
         embed.set_footer(text=f"剩餘份數：{remaining}／{session.people}" + (" ｜已結束" if session.ended else ""))
         return embed
@@ -678,6 +681,7 @@ class General(commands.Cog):
     class RedPacketModal(discord.ui.Modal, title="搶紅包設定"):
         people_field = discord.ui.TextInput(label="人數 (1～15)", placeholder="要發給幾個人", required=True, max_length=2)
         total_field = discord.ui.TextInput(label="總金額 (蛋糕)", placeholder="整數，未搶完會退回剩餘", required=True, max_length=12)
+        short_message_field = discord.ui.TextInput(label="短言", placeholder="可留空，最多 100 字", required=False, max_length=100)
 
         def __init__(self, parent_cog: "General", channel_id: int):
             super().__init__()
@@ -694,6 +698,8 @@ class General(commands.Cog):
             except ValueError:
                 await interaction.response.send_message(embed=Embed(title="搶紅包", description="人數與總金額請輸入正整數。", color=common.bot_error_color), ephemeral=True)
                 return
+            short_message_raw = self.short_message_field.value or ""
+            short_message = short_message_raw.strip()
             try:
                 amounts = self.parent_cog.compute_red_packet_amounts(total, people)
             except ValueError as error:
@@ -713,7 +719,7 @@ class General(commands.Cog):
                 data[oid]["cake"] -= total
                 common.datawrite(data)
             ends_at = datetime.now(timezone.utc) + timedelta(minutes=5)
-            session = RedPacketSession(creator_id, total, people, amounts, ends_at)
+            session = RedPacketSession(creator_id, total, people, amounts, ends_at, short_message if short_message else None)
             channel = interaction.guild.get_channel(self.channel_id)
             if channel is None or not isinstance(channel, discord.TextChannel):
                 async with common.jsonio_lock:
