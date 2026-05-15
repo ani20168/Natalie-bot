@@ -32,31 +32,36 @@ class SteamFreeGameCrawler(commands.Cog):
 
     @tasks.loop(hours=2)
     async def main(self):
-        game_list = []
-        bahamut_gamelist, steamgroup_gamelist = await asyncio.gather(
-            self.bahamut_source(),
-            self.steam_group_source()
-        )
-        game_list = bahamut_gamelist + steamgroup_gamelist
+        try:
+            game_list = []
+            bahamut_gamelist, steamgroup_gamelist = await asyncio.gather(
+                self.bahamut_source(),
+                self.steam_group_source()
+            )
+            game_list = bahamut_gamelist + steamgroup_gamelist
 
-        unique_game_ids = set()
-        unique_gamelist = []
-        for url in game_list:
-            game_id = self.get_game_id(url)
-            if game_id and game_id not in unique_game_ids:
-                unique_game_ids.add(game_id)
-                unique_gamelist.append(url)
+            unique_game_ids = set()
+            unique_gamelist = []
+            for url in game_list:
+                game_id = self.get_game_id(url)
+                if game_id and game_id not in unique_game_ids:
+                    unique_game_ids.add(game_id)
+                    unique_gamelist.append(url)
 
-        data = common.dataload()
-        for i in range(len(unique_gamelist) - 1, -1, -1):  # 从列表的最后一个元素向前迭代
-            needcheck_game = unique_gamelist[i]
-            game_id = self.get_game_id(needcheck_game)
-            if game_id in data.get("steam_freegame_alreadypost", []):
-                unique_gamelist.pop(i)  # 移除当前元素
-        async with aiohttp.ClientSession() as session:
-            tasks = [self.steam_check_free(session, game) for game in unique_gamelist]
-            await asyncio.gather(*tasks)
-        await self.freegame_notice_channel.edit(topic=f"爬蟲最後檢查時間:{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            data = common.dataload()
+            for i in range(len(unique_gamelist) - 1, -1, -1):  # 从列表的最后一个元素向前迭代
+                needcheck_game = unique_gamelist[i]
+                game_id = self.get_game_id(needcheck_game)
+                if game_id in data.get("steam_freegame_alreadypost", []):
+                    unique_gamelist.pop(i)  # 移除当前元素
+            async with aiohttp.ClientSession() as session:
+                tasks = [self.steam_check_free(session, game) for game in unique_gamelist]
+                await asyncio.gather(*tasks)
+            await self.freegame_notice_channel.edit(topic=f"爬蟲最後檢查時間:{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        except Exception:
+            traceback.print_exc()
+            if self.freegame_notice_channel:
+                await self.freegame_notice_channel.edit(topic=f"爬蟲最後檢查時間:{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} (failed)")
 
     async def web_request(self, session, url):
         try:
