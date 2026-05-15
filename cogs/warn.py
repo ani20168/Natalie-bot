@@ -144,9 +144,15 @@ class Warn(commands.Cog):
             warn_list = user_block["warn_list"]
             total = len(warn_list)
             effective = self.count_effective_warns(warn_list, now_utc)
+        warn_msg_list = [
+            "你已被管理員警告",
+            f"理由：{reason}",
+            "如你對警告有任何疑問，可向ANI(ani20168)表達異議。",
+            "警告紀錄在半年內為有效紀錄，有效警告過多有可能會導致你被永久封鎖。"
+        ]
         dm_embed = Embed(
-            title="你收到一則警告",
-            description=f"理由：{reason}",
+            title="妹妹群警告系統",
+            description="\n".join(warn_msg_list),
             color=common.bot_error_color,
         )
         dm_embed.set_footer(text="可使用 `warnlist` 查看自己的警告紀錄")
@@ -155,10 +161,17 @@ class Warn(commands.Cog):
             await member.send(embed=dm_embed)
         except discord.HTTPException:
             dm_ok = False
-        desc = f"已警告 <@{member.id}>。\n有效警告總數（半年內）：**{effective}**\n總警告數：**{total}**"
+        admin_embed = Embed(
+            title="警告",
+            description=f"已警告 <@{member.id}>。\n有效警告總數（半年內）：**{effective}**\n總警告數：**{total}**",
+            color=common.bot_color,
+        )
+        reason_for_field = reason.strip() or "（無）"
+        reason_field = reason_for_field if len(reason_for_field) <= 1024 else f"{reason_for_field[:1021]}..."
+        admin_embed.add_field(name="理由", value=reason_field, inline=False)
         if not dm_ok:
-            desc += "\n（無法傳送私人訊息給該成員，請對方開啟伺服器成員私訊。）"
-        await interaction.response.send_message(embed=Embed(title="警告", description=desc, color=common.bot_color), ephemeral=True)
+            admin_embed.description = (admin_embed.description or "") + "\n（無法傳送私人訊息給該成員，請對方開啟伺服器成員私訊。）"
+        await interaction.response.send_message(embed=admin_embed, ephemeral=True)
 
     @app_commands.command(name="warnlist", description="查看警告紀錄")
     @app_commands.describe(member="要查詢的成員（僅管理員）")
@@ -206,9 +219,9 @@ class Warn(commands.Cog):
                 except (ValueError, TypeError, OverflowError):
                     time_text = str(ts_raw)
                     expired_note = ""
-                line = f"{serial}. {reason_text}\n　時間：{time_text}{expired_note}"
+                line = f"{serial}. {reason_text} 時間：{time_text}{expired_note}"
             lines.append(line)
-        body = "\n\n".join(lines) if lines else "尚無警告紀錄。"
+        body = "\n".join(lines) if lines else "尚無警告紀錄。"
         embed = Embed(title=f"{target.display_name} 的警告紀錄", description=body, color=common.bot_color)
         embed.set_footer(text=f"有效警告總數：{effective}｜總警告數：{total}")
         await interaction.response.send_message(embed=embed, ephemeral=True)
