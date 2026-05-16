@@ -7,7 +7,7 @@ import time
 import asyncio
 from urllib.parse import urlparse
 from bson import json_util
-from pymongo import AsyncMongoClient, ReturnDocument  # pyright: ignore[reportMissingImports]
+from pymongo import AsyncMongoClient, ReplaceOne, ReturnDocument  # pyright: ignore[reportMissingImports]
 
 #這裡放置常用的資料
 bot_color = 0x00DFEB                     #embed顏色
@@ -441,6 +441,60 @@ class MongoStorage:
             "format": "tar.gz+jsonl",
             "collection_count": len(collection_stats),
             "document_count": total_documents,
+            "collections": collection_stats,
+        }
+
+    async def restore_database_backup(self, backup_path: str, drop_existing: bool = False) -> dict:
+        """
+        從 tar.gz + jsonl 備份還原資料庫。
+
+        Args:
+          backup_path (str): "data/backup/discord_latest.tar.gz"
+          drop_existing (bool): "True"
+
+        Returns:
+          (dict): "{'database': 'discord', 'collection_count': 3, 'document_count': 100}"
+        """
+        self.ensure_client()
+        if self.database is None: raise RuntimeError("Mongo 資料庫尚未初始化。")
+        if not os.path.isfile(backup_path): raise FileNotFoundError(f"找不到備份檔：{backup_path}")
+
+        collection_stats = []
+        total_documents = 0
+        with tarfile.open(backup_path, "r:gz") as archive:
+            members = [member for member in archive.getmembers() if member.isfile() and member.name.endswith(".jsonl")]
+            for member in members:
+                collection_name = os.path.splitext(os.path.basename(member.name))[0]
+                collection = self.database[collection_name]
+                extracted_file = archive.extractfile(member)
+                if extracted_file is None: continue
+                content = extracted_file.read().decode("utf-8")
+                document_lines = [line for line in content.splitlines() if line.strip()]
+                documents = [json_util.loads(line) for line in document_lines]
+
+                if drop_existing: await collection.delete_many({})
+                if not documents:
+                    collection_stats.append({"name": collection_name, "document_count": 0})
+                    continue
+
+                operations = []
+                for document in documents:
+                    if "_id" in document:
+                        operations.append(ReplaceOne({"_id": document["_id"]}, document, upsert=True))
+                        continue
+                    await collection.insert_one(document)
+
+                if operations: await collection.bulk_write(operations, ordered=False)
+                collection_stats.append({"name": collection_name, "document_count": len(documents)})
+                total_documents += len(documents)
+
+        return {
+            "database": self.db_name,
+            "backup_path": backup_path,
+            "format": "tar.gz+jsonl",
+            "collection_count": len(collection_stats),
+            "document_count": total_documents,
+            "drop_existing": drop_existing,
             "collections": collection_stats,
         }
 

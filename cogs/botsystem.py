@@ -83,14 +83,14 @@ class BotSystem(commands.Cog):
         await self.bot.wait_until_ready()
 
     @app_commands.command(name="backup_db", description="在伺服器匯出 MongoDB 備份檔")
-    @app_commands.describe(output_dir="備份輸出目錄，預設為 ./backup/mongo/")
+    @app_commands.describe(output_dir="備份輸出目錄，預設為 data/backup/")
     async def backup_db(self, interaction: discord.Interaction, output_dir: Optional[str] = None):
         if interaction.user.id != common.bot_owner_id:
             await interaction.response.send_message(embed=Embed(title="系統操作", description="權限不足。", color=common.bot_error_color))
             return
 
         await interaction.response.defer(ephemeral=True, thinking=True)
-        backup_dir = output_dir.strip() if output_dir else "./backup/mongo/"
+        backup_dir = output_dir.strip() if output_dir else "data/backup/"
         os.makedirs(backup_dir, exist_ok=True)
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -124,6 +124,39 @@ class BotSystem(commands.Cog):
             f"latest 標記: `{latest_path_file}`"
         )
         await interaction.followup.send(embed=Embed(title="資料庫備份完成", description=success_message, color=common.bot_color), ephemeral=True)
+
+    @app_commands.command(name="restore_db", description="從備份檔還原 MongoDB 資料庫")
+    @app_commands.describe(
+        backup_path="備份檔路徑，預設為 data/backup/discord_latest.tar.gz",
+        drop_existing="是否先清空同名 collection（預設否）",
+    )
+    async def restore_db(self, interaction: discord.Interaction, backup_path: Optional[str] = None, drop_existing: bool = False):
+        if interaction.user.id != common.bot_owner_id:
+            await interaction.response.send_message(embed=Embed(title="系統操作", description="權限不足。", color=common.bot_error_color))
+            return
+
+        await interaction.response.defer(ephemeral=True, thinking=True)
+        target_backup_path = backup_path.strip() if backup_path else "data/backup/discord_latest.tar.gz"
+        if not os.path.isfile(target_backup_path):
+            await interaction.followup.send(embed=Embed(title="還原失敗", description=f"找不到備份檔：`{target_backup_path}`", color=common.bot_error_color), ephemeral=True)
+            return
+
+        try:
+            summary = await common.mongo_storage.restore_database_backup(target_backup_path, drop_existing=drop_existing)
+        except Exception as error:
+            await interaction.followup.send(embed=Embed(title="還原失敗", description=f"{type(error).__name__}: {error}", color=common.bot_error_color), ephemeral=True)
+            return
+
+        collection_lines = "\n".join(f"- `{item['name']}`: {item['document_count']} 筆" for item in summary["collections"])
+        success_message = (
+            f"資料庫: `{summary['database']}`\n"
+            f"格式: `{summary['format']}`\n"
+            f"總文件數: `{summary['document_count']}`\n"
+            f"清空舊資料: `{summary['drop_existing']}`\n"
+            f"{collection_lines}\n"
+            f"來源備份: `{target_backup_path}`"
+        )
+        await interaction.followup.send(embed=Embed(title="資料庫還原完成", description=success_message, color=common.bot_color), ephemeral=True)
 
 
 

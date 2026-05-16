@@ -5,6 +5,7 @@ from . import common
 from . import game
 import time
 import random
+import os
 from datetime import datetime,timezone,timedelta
 
 
@@ -18,6 +19,7 @@ class Startup(commands.Cog):
         self.mine_mininglimit_reflash.start()
         self.voice_active_record.start()
         self.mining_machine_work.start()
+        self.auto_backup_database.start()
 
     #卸載cog時觸發
     async def cog_unload(self):
@@ -26,6 +28,7 @@ class Startup(commands.Cog):
         self.mine_mininglimit_reflash.cancel()
         self.voice_active_record.cancel()
         self.mining_machine_work.cancel()
+        self.auto_backup_database.cancel()
 
 
     #挖礦遊戲-刷新礦場總挖礦次數
@@ -200,11 +203,38 @@ class Startup(commands.Cog):
             await common.mongo_storage.update_global_fields({"yesterday_voice_leaderboard": "\n".join(leaderboard_lines)})
             await userdata_collection.update_many({"_id": {"$ne": "global"}, "voice_active_minutes": {"$exists": True}}, {"$set": {"voice_active_minutes": 0}})
 
+    @tasks.loop(hours=1)
+    async def auto_backup_database(self):
+        """
+        每小時自動備份一次資料庫，並覆蓋同一份檔案。
+
+        Args:
+          無參數 (None): "None"
+
+        Returns:
+          (None): "None"
+        """
+        if not common.mongo_storage.get_mongo_uri(): return
+        backup_dir = "data/backup"
+        backup_path = os.path.join(backup_dir, "discord_latest.tar.gz")
+        latest_path_file = os.path.join(backup_dir, "latest_backup.txt")
+        os.makedirs(backup_dir, exist_ok=True)
+
+        try:
+            await common.mongo_storage.export_database_backup(backup_path)
+            with open(latest_path_file, "w", encoding="utf-8") as file:
+                file.write(f"{backup_path}\n")
+        except Exception as error:
+            admin_channel = self.bot.get_channel(common.admin_log_channel)
+            if admin_channel is None: return
+            await admin_channel.send(embed=Embed(title="自動備份失敗", description=f"{type(error).__name__}: {error}", color=common.bot_error_color))
+
     @userdata_initialization.before_loop    
     @give_cake_in_vc.before_loop
     @mine_mininglimit_reflash.before_loop
     @voice_active_record.before_loop
     @mining_machine_work.before_loop
+    @auto_backup_database.before_loop
     async def event_before_loop(self):
         await self.bot.wait_until_ready()
         
