@@ -3,6 +3,7 @@ FROM python:3.10-slim-buster
 WORKDIR /app
 
 ENV TZ=Asia/Taipei
+ENV BOT_ENV=PRD
 
 COPY . /app
 

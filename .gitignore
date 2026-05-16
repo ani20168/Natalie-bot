@@ -7,3 +7,4 @@ deploy.bat
 deploy_restart.txt
 
 /log
+MONGO_MIGRATION_RUNBOOK.md
