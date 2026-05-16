@@ -446,59 +446,6 @@ class MongoStorage:
         if collection is None: return
         await collection.update_one({"_id": "global"}, {"$set": fields}, upsert=True)
 
-    def count_user_and_global(self, data: dict) -> tuple[int, int]:
-        """
-        統計資料中使用者與全域鍵數量。
-
-        Args:
-          data (dict): "{'123': {...}, 'gaming_time': 1}"
-
-        Returns:
-          (tuple[int, int]): "(1, 1)"
-        """
-        user_count = 0
-        global_count = 0
-        for key in data.keys():
-            if self.is_user_document_key(str(key)):
-                user_count += 1
-            else:
-                global_count += 1
-        return user_count, global_count
-
-    async def migrate_json_to_mongo(self) -> dict:
-        """
-        將既有 JSON 檔遷移至 MongoDB。
-
-        Args:
-          無參數 (None): "None"
-
-        Returns:
-          (dict): "{'userdata_user_count': 100}"
-        """
-        userdata = read_local_json("data/data.json")
-        mining = read_local_json("data/mining.json")
-        odds_data = {}
-        if os.path.isfile("data/odds.json"): odds_data = read_local_json("data/odds.json")
-
-        userdata_user_count, userdata_global_count = self.count_user_and_global(userdata)
-        mining_user_count, mining_global_count = self.count_user_and_global(mining)
-
-        await self.write_data_to_mongo(userdata, "userdata")
-        await self.write_data_to_mongo(mining, "mining")
-        await self.write_data_to_mongo(odds_data, "odds")
-
-        summary = {
-            "database": self.db_name,
-            "userdata_user_count": userdata_user_count,
-            "userdata_global_count": userdata_global_count,
-            "mining_user_count": mining_user_count,
-            "mining_global_count": mining_global_count,
-            "odds_key_count": len(odds_data.keys()),
-            "global_document_id": "global",
-        }
-        return summary
-
-
 mongo_storage = MongoStorage()
 
 

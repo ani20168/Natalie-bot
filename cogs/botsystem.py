@@ -82,28 +82,6 @@ class BotSystem(commands.Cog):
     async def event_before_loop(self):
         await self.bot.wait_until_ready()
 
-    @app_commands.command(name="migrate_json_to_mongo", description="將現有 JSON 資料遷移到 MongoDB")
-    async def migrate_json_to_mongo(self, interaction: discord.Interaction):
-        if interaction.user.id != common.bot_owner_id:
-            await interaction.response.send_message(embed=Embed(title="系統操作", description="權限不足。", color=common.bot_error_color))
-            return
-
-        await interaction.response.defer(ephemeral=True, thinking=True)
-        try:
-            summary = await common.mongo_storage.migrate_json_to_mongo()
-            summary_message = (
-                f"資料庫: **{summary['database']}**\n"
-                f"userdata 使用者文件: **{summary['userdata_user_count']}**\n"
-                f"userdata 全域鍵: **{summary['userdata_global_count']}**\n"
-                f"mining 使用者文件: **{summary['mining_user_count']}**\n"
-                f"mining 全域鍵: **{summary['mining_global_count']}**\n"
-                f"odds 鍵數: **{summary['odds_key_count']}**\n"
-                f"全域文件 id: **{summary['global_document_id']}**"
-            )
-            await interaction.followup.send(embed=Embed(title="遷移完成", description=summary_message, color=common.bot_color), ephemeral=True)
-        except Exception as error:
-            await interaction.followup.send(embed=Embed(title="遷移失敗", description=f"{type(error).__name__}: {error}", color=common.bot_error_color), ephemeral=True)
-
     @app_commands.command(name="backup_db", description="在伺服器匯出 MongoDB 備份檔")
     @app_commands.describe(output_dir="備份輸出目錄，預設為 ./backup/mongo/")
     async def backup_db(self, interaction: discord.Interaction, output_dir: Optional[str] = None):
