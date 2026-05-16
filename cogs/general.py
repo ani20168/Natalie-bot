@@ -131,49 +131,40 @@ class General(commands.Cog):
 
     @app_commands.command(name = "info", description = "關於Natalie...")
     async def info(self,interaction):
-        async with common.jsonio_lock:
-            #讀取檔案
-            data = await common.mongo_storage.load_data_from_mongo()
-            userid = str(interaction.user.id)
+        userid = str(interaction.user.id)
+        user_data = await common.mongo_storage.ensure_user_document(userid)
+        cake = int(user_data.get("cake", 0))
 
-            #蛋糕查詢
-            if "cake" in data[userid]:
-                cake = data[userid]["cake"]
-            else:
-                data[userid]["cake"] = 0
-                cake = data[userid]["cake"]
-                await common.mongo_storage.write_data_to_mongo(data)
-
-            userlevel = await common.LevelSystem().read_info(userid)
-            message = Embed(title="我是Natalie!",description="你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。",color=common.bot_color)
-            message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有**{cake}**塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
-            cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
-            
-            general_commands_list = [
-                "/info 查看指令表及個人資料",
-                f"/eat 餵食Natalie一些{cake_emoji} (1 cake = 1 exp)",
-                f"/cake_give 給予他人{cake_emoji}",
-                "/mining_info 挖礦小遊戲資訊",
-                "/blackjack 21點遊戲",
-                "/poker 撲克牌比大小",
-                "/poker_statistics 撲克牌比大小個人統計",
-                "/squid_rps 魷魚遊戲猜拳",
-                "/check_sevencolor_restday 確認七色有沒有休假",
-                "/set_color 更換ID的顏色(靜態)",
-                "/set_animation_color 更換ID的顏色(動態)",
-                "/red_packet 搶紅包（蛋糕）"
-            ]
-            #如果等級>=5 且沒有在 抽獎仔/VIP 身分內，則顯示指令
-            if userlevel.level >= 5 and all(role.id not in [621764669929160715, 605730134531637249] for role in interaction.user.roles):
-                general_commands_list.append("/giveaway_join 加入抽獎頻道")
-            
-            general_commands_list = "\n".join(general_commands_list)
-            message.add_field(name="指令表",value=general_commands_list,inline=False)
-            message.add_field(
-                name="排行榜",
-                value=f'/level_leaderboard 等級排行榜\n/voice_leaderboard 語音活躍排行榜\n/blackjack_leaderboard 21點勝率排行榜\n/squid_rps_leaderboard 魷魚猜拳勝率排行榜\n/cake_leaderboard 蛋糕排行榜',
-                inline=False)
-            await interaction.response.send_message(embed=message)
+        userlevel = await common.LevelSystem().read_info(userid)
+        message = Embed(title="我是Natalie!",description="你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。",color=common.bot_color)
+        message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有**{cake}**塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
+        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        
+        general_commands_list = [
+            "/info 查看指令表及個人資料",
+            f"/eat 餵食Natalie一些{cake_emoji} (1 cake = 1 exp)",
+            f"/cake_give 給予他人{cake_emoji}",
+            "/mining_info 挖礦小遊戲資訊",
+            "/blackjack 21點遊戲",
+            "/poker 撲克牌比大小",
+            "/poker_statistics 撲克牌比大小個人統計",
+            "/squid_rps 魷魚遊戲猜拳",
+            "/check_sevencolor_restday 確認七色有沒有休假",
+            "/set_color 更換ID的顏色(靜態)",
+            "/set_animation_color 更換ID的顏色(動態)",
+            "/red_packet 搶紅包（蛋糕）"
+        ]
+        #如果等級>=5 且沒有在 抽獎仔/VIP 身分內，則顯示指令
+        if userlevel.level >= 5 and all(role.id not in [621764669929160715, 605730134531637249] for role in interaction.user.roles):
+            general_commands_list.append("/giveaway_join 加入抽獎頻道")
+        
+        general_commands_list = "\n".join(general_commands_list)
+        message.add_field(name="指令表",value=general_commands_list,inline=False)
+        message.add_field(
+            name="排行榜",
+            value=f'/level_leaderboard 等級排行榜\n/voice_leaderboard 語音活躍排行榜\n/blackjack_leaderboard 21點勝率排行榜\n/squid_rps_leaderboard 魷魚猜拳勝率排行榜\n/cake_leaderboard 蛋糕排行榜',
+            inline=False)
+        await interaction.response.send_message(embed=message)
 
     @app_commands.command(name = "eat", description = "餵食Natalie!")
     @app_commands.describe(eat_cake="要餵食的蛋糕數量，1蛋糕=1經驗值")
@@ -217,13 +208,11 @@ class General(commands.Cog):
     @app_commands.command(name = "level_leaderboard", description = "等級排行榜")
     async def level_leaderboard(self,interaction):
         userid = str(interaction.user.id)
-        data = await common.mongo_storage.load_data_from_mongo()
-        async with common.jsonio_lock:
-            userlevel_info = await common.LevelSystem().read_info(userid)
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        sorted_data = []
+        async for document in userdata_collection.find({"_id": {"$ne": "global"}, "level_exp": {"$exists": True}}).sort("level_exp", -1):
+            sorted_data.append((str(document.get("_id")), document))
         # 建立排名榜的列表，以經驗值為排序準則，並倒序排列
-        sorted_data = sorted([(user, user_data) for user, user_data in data.items() if isinstance(user_data, dict) and "level_exp" in user_data], key=lambda x: x[1]["level_exp"], reverse=True)
-
-
         # ===== 1) 前 10 名排行榜（自動補齊） =====
         lines: list[str] = []
         shown = 0
@@ -244,7 +233,7 @@ class General(commands.Cog):
             if shown >= 10:
                 break  # 已補齊 10 筆
 
-        message = "\n".join(lines)
+        message = "\n".join(lines) if lines else "目前還沒有可顯示的等級資料。"
 
         # ===== 2) 呼叫者自己的排名 =====
         for rank, (uid, udata) in enumerate(sorted_data, start=1):
@@ -259,34 +248,36 @@ class General(commands.Cog):
         
     @app_commands.command(name = "voice_leaderboard", description = "語音活躍排行榜")
     async def voice_leaderboard(self,interaction):
-        data = await common.mongo_storage.load_data_from_mongo()
-         #如果用戶資料內有voice_active_minutes且>10分鐘
-        sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
-       
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        sorted_data = []
+        async for document in userdata_collection.find({"_id": {"$ne": "global"}, "voice_active_minutes": {"$gt": 10}}).sort("voice_active_minutes", -1).limit(10):
+            sorted_data.append((str(document.get("_id")), document))
+
         message = Embed(title="語音活躍排行榜",description="",color=common.bot_color)
         leaderboard_message = "注意:需要在語音內至少10分鐘才會記錄至排行榜。\n"
         # 顯示排名榜前10名
-        for i, (userid, user_data) in enumerate(sorted_data[:10]):
+        for i, (userid, user_data) in enumerate(sorted_data):
             user = self.bot.get_user(int(userid))
-            leaderboard_message += f"{i+1}.{user.display_name} 語音分鐘數:**{user_data['voice_active_minutes']}**\n"
+            username = user.display_name if user else f"User({userid})"
+            leaderboard_message += f"{i+1}.{username} 語音分鐘數:**{user_data['voice_active_minutes']}**\n"
         message.description = leaderboard_message
 
         # 昨日排行榜
-        if "yesterday_voice_leaderboard" in data:
-            message.add_field(name="昨日前三名",value=data['yesterday_voice_leaderboard'],inline=False)
+        global_document = await userdata_collection.find_one({"_id": "global"}, {"yesterday_voice_leaderboard": 1})
+        yesterday_voice_leaderboard = ""
+        if isinstance(global_document, dict):
+            yesterday_voice_leaderboard = str(global_document.get("yesterday_voice_leaderboard", ""))
+        if yesterday_voice_leaderboard:
+            message.add_field(name="昨日前三名",value=yesterday_voice_leaderboard,inline=False)
 
         await interaction.response.send_message(embed=message)
 
     @app_commands.command(name="cake_leaderboard", description="蛋糕排行榜")
     async def cake_leaderboard(self, interaction):
-        data = await common.mongo_storage.load_data_from_mongo()
-        # 排除沒有cake資料或蛋糕數為0的用戶
-        sorted_data = sorted(
-            [(userid, userdata) for userid, userdata in data.items() 
-            if isinstance(userdata, dict) and 'cake' in userdata and userdata['cake'] > 0], 
-            key=lambda x: x[1]['cake'], 
-            reverse=True
-        )
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        sorted_data = []
+        async for document in userdata_collection.find({"_id": {"$ne": "global"}, "cake": {"$gt": 0}}).sort("cake", -1):
+            sorted_data.append((str(document.get("_id")), document))
 
         cake_emoji = common.cake_emoji  # 取出表情方便用
 
@@ -302,8 +293,10 @@ class General(commands.Cog):
 
         # 找自己的排名
         user_id = str(interaction.user.id)
+        user_data = await common.mongo_storage.get_user(user_id)
+        user_cake = int(user_data.get("cake", 0)) if isinstance(user_data, dict) else 0
         self_rank = None
-        for idx, (userid, user_data) in enumerate(sorted_data):
+        for idx, (userid, user_data_item) in enumerate(sorted_data):
             if userid == user_id:
                 self_rank = idx + 1
                 break
@@ -311,7 +304,7 @@ class General(commands.Cog):
         if self_rank:
             embed.add_field(
                 name="你的排名",
-                value=f"你目前排名: **{self_rank}**  持有{cake_emoji}: **{data[user_id]['cake']}**",
+                value=f"你目前排名: **{self_rank}**  持有{cake_emoji}: **{user_cake}**",
                 inline=False
             )
         else:
@@ -952,27 +945,23 @@ class General(commands.Cog):
             #新加入的Booster
             if len(added_members) >= 1:
                 #如果未加入VIP身分(605730134531637249)，則加入
-                async with common.jsonio_lock:  
-                    data = await common.mongo_storage.load_data_from_mongo()
-                    for member in added_members:
-                        if vip_role not in member.roles:
-                            await member.add_roles(vip_role,reason="新的Nitro Booster加入，賦予VIP身分組")
-                            data[str(member.id)]["vip_join_time"] = datetime.now()
-                    await common.mongo_storage.write_data_to_mongo(data)
+                for member in added_members:
+                    if vip_role not in member.roles:
+                        await member.add_roles(vip_role,reason="新的Nitro Booster加入，賦予VIP身分組")
+                        await common.mongo_storage.update_user_fields(str(member.id), {"vip_join_time": datetime.now()})
 
             # 離開的booster
             if len(removed_members) >= 1:
-                async with common.jsonio_lock:
-                    data = await common.mongo_storage.load_data_from_mongo()
-                    for member in removed_members:
-                        if vip_role in member.roles:
-                            # 檢查是否已經是VIP身分組30天
-                            vip_join_time = data[str(member.id)].get("vip_join_time", datetime.now() - timedelta(days=30))
-                            if datetime.now() - vip_join_time < timedelta(days=30):
-                                await member.remove_roles(vip_role, reason="Nitro Booster身分組未達30天就離開，移除VIP身分組")
-                                if "vip_join_time" in data[str(member.id)]:
-                                    del data[str(member.id)]["vip_join_time"]
-                    await common.mongo_storage.write_data_to_mongo(data)
+                for member in removed_members:
+                    if vip_role in member.roles:
+                        # 檢查是否已經是VIP身分組30天
+                        member_data = await common.mongo_storage.get_user(str(member.id))
+                        vip_join_time = datetime.now() - timedelta(days=30)
+                        if isinstance(member_data, dict):
+                            vip_join_time = member_data.get("vip_join_time", vip_join_time)
+                        if datetime.now() - vip_join_time < timedelta(days=30):
+                            await member.remove_roles(vip_role, reason="Nitro Booster身分組未達30天就離開，移除VIP身分組")
+                            await common.mongo_storage.unset_user_fields(str(member.id), ["vip_join_time"])
 
 
 

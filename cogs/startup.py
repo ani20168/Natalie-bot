@@ -33,56 +33,69 @@ class Startup(commands.Cog):
     async def mine_mininglimit_reflash(self):
         nowtime = datetime.now(timezone(timedelta(hours=8)))
         if nowtime.hour == 0 and nowtime.minute == 0:
-            async with common.jsonio_lock:
-                data = await common.mongo_storage.load_data_from_mongo("mining")
-                for key, value in data["mine_mininglimit"].items():
-                    if value != 500:
-                        data["mine_mininglimit"][key] = 500
-                await common.mongo_storage.write_data_to_mongo(data,"mining")
+            mining_collection = common.mongo_storage.get_collection("mining")
+            global_document = await mining_collection.find_one({"_id": "global"}, {"mine_mininglimit": 1})
+            if not isinstance(global_document, dict): return
+            mine_mininglimit = global_document.get("mine_mininglimit", {})
+            if not isinstance(mine_mininglimit, dict): return
+            reset_mininglimit = {key: 500 for key in mine_mininglimit.keys()}
+            await mining_collection.update_one({"_id": "global"}, {"$set": {"mine_mininglimit": reset_mininglimit}}, upsert=True)
 
     #挖礦遊戲-自動挖礦機的挖礦流程
     @tasks.loop(hours=3)
     async def mining_machine_work(self):
-        async with common.jsonio_lock:
-            data = await common.mongo_storage.load_data_from_mongo("mining")
-            for userid, user_data in data.items():
-                if isinstance(user_data, dict) and "machine_amount" in user_data and user_data["machine_amount"] >= 1:
-                    #開始抽獎
-                    reward_probabilities = game.MiningGame(self.bot).mineral_chancelist[user_data["machine_mine"]]
-                    #有幾台礦機就挖幾次
-                    for i in range(user_data["machine_amount"]):
-                        #確認礦場是否已挖完?
-                         if data['mine_mininglimit'][user_data['machine_mine']] != 0:
-                            data['mine_mininglimit'][user_data['machine_mine']] -= 1
-                            random_num = random.random()
-                            current_probability = 0
-                            for reward, probability in reward_probabilities.items():
-                                current_probability += probability
-                                if random_num < current_probability:
-                                    #抽出礦物
-                                    if reward != "石頭":
-                                        if reward not in data[userid]:
-                                            data[userid][reward] = 0
-                                        data[userid][reward] += 1
+        # 先讀取 mining 的全域文件，拿到各礦場剩餘可挖次數（mine_mininglimit）。
+        # 這份 dict 會在本次循環中即時扣減，最後統一寫回 DB。
+        mining_collection = common.mongo_storage.get_collection("mining")
+        global_document = await mining_collection.find_one({"_id": "global"}, {"mine_mininglimit": 1})
+        if not isinstance(global_document, dict): return
+        mine_mininglimit = global_document.get("mine_mininglimit", {})
+        if not isinstance(mine_mininglimit, dict): return
 
-                                    break
-            await common.mongo_storage.write_data_to_mongo(data,"mining")
+        # 只掃描有啟用礦機的玩家文件，避免讀取整個資料集。
+        mining_game = game.MiningGame(self.bot)
+        machine_users_cursor = mining_collection.find({"_id": {"$ne": "global"}, "machine_amount": {"$gte": 1}, "machine_mine": {"$exists": True}})
+        async for user_document in machine_users_cursor:
+            userid = str(user_document.get("_id"))
+            machine_amount = int(user_document.get("machine_amount", 0))
+            machine_mine = user_document.get("machine_mine")
+            if machine_amount < 1 or not machine_mine: continue
+            reward_probabilities = mining_game.mineral_chancelist.get(machine_mine)
+            if not isinstance(reward_probabilities, dict): continue
+
+            # 累積本位玩家本輪抽到的礦物，最後一次 $inc 更新，減少 DB 寫入次數。
+            rewards_increment_map = {}
+            for _ in range(machine_amount):
+                # 每次挖礦前都先確認該礦場尚有可挖次數，沒有就提前結束該玩家流程。
+                remaining_mining_times = int(mine_mininglimit.get(machine_mine, 0))
+                if remaining_mining_times <= 0: break
+                mine_mininglimit[machine_mine] = remaining_mining_times - 1
+
+                # 依礦場機率表抽一次獎；抽到「石頭」視為沒有需要入庫的獎勵。
+                random_num = random.random()
+                current_probability = 0
+                for reward, probability in reward_probabilities.items():
+                    current_probability += probability
+                    if random_num < current_probability:
+                        if reward != "石頭":
+                            rewards_increment_map[reward] = rewards_increment_map.get(reward, 0) + 1
+                        break
+
+            if rewards_increment_map:
+                await mining_collection.update_one({"_id": userid}, {"$inc": rewards_increment_map}, upsert=True)
+
+        # 所有玩家結算完後，回寫本輪扣減後的礦場剩餘次數。
+        await mining_collection.update_one({"_id": "global"}, {"$set": {"mine_mininglimit": mine_mininglimit}}, upsert=True)
             
 
     #用戶資料初始化/檢查
     @tasks.loop(seconds=5,count=1)
     async def userdata_initialization(self):
-        async with common.jsonio_lock:
-            data = await common.mongo_storage.load_data_from_mongo()
-
-            for member in self.bot.get_all_members():
-                if str(member.id) not in data:
-                    data[str(member.id)] = {"cake": 0}
-                data[str(member.id)]["blackjack_playing"] = False
-                if 'afk_start' in data[str(member.id)]:
-                    del data[str(member.id)]['afk_start']
-            
-            await common.mongo_storage.write_data_to_mongo(data)
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        for member in self.bot.get_all_members():
+            userid = str(member.id)
+            await userdata_collection.update_one({"_id": userid}, {"$setOnInsert": defaults, "$set": {"blackjack_playing": False}, "$unset": {"afk_start": ""}}, upsert=True)
 
     #每5分鐘，有在指定的語音頻道內則給予蛋糕
     @tasks.loop(minutes=5)
@@ -158,8 +171,10 @@ class Startup(commands.Cog):
         #每日結算
         nowtime = datetime.now(timezone(timedelta(hours=8)))
         if nowtime.hour == 0 and nowtime.minute == 0:
-            data = await common.mongo_storage.load_data_from_mongo()
-            sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
+            userdata_collection = common.mongo_storage.get_collection("userdata")
+            sorted_data = []
+            async for document in userdata_collection.find({"_id": {"$ne": "global"}, "voice_active_minutes": {"$gt": 10}}).sort("voice_active_minutes", -1).limit(3):
+                sorted_data.append((str(document.get("_id")), document))
             base_rewards = (600, 400, 200)
             leaderboard_lines = []
             for i, (userid, userdata) in enumerate(sorted_data[:3]):
@@ -167,7 +182,6 @@ class Startup(commands.Cog):
                 minutes = userdata['voice_active_minutes']
                 multiplier = 3 if minutes >= 300 else (2 if minutes >= 180 else 1)
                 reward = base_rewards[i] * multiplier
-                userdata_collection = common.mongo_storage.get_collection("userdata")
                 defaults = common.mongo_storage.get_user_defaults()
                 await userdata_collection.update_one({"_id": userid}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": reward}}, upsert=True)
                 bonus_note = f"，{multiplier}倍" if multiplier > 1 else ""
@@ -175,9 +189,7 @@ class Startup(commands.Cog):
                 leaderboard_lines.append(f"{i + 1}.{username} 語音分鐘數:**{minutes}** (獲得{reward}塊蛋糕{bonus_note})")
 
             await common.mongo_storage.update_global_fields({"yesterday_voice_leaderboard": "\n".join(leaderboard_lines)})
-            for userid, userdata in data.items():
-                if isinstance(userdata, dict) and 'voice_active_minutes' in userdata:
-                    await common.mongo_storage.update_user_fields(userid, {"voice_active_minutes": 0})
+            await userdata_collection.update_many({"_id": {"$ne": "global"}, "voice_active_minutes": {"$exists": True}}, {"$set": {"voice_active_minutes": 0}})
 
     @userdata_initialization.before_loop    
     @give_cake_in_vc.before_loop
@@ -220,14 +232,16 @@ class AfkDisconnect(commands.Cog):
         guild = self.bot.get_guild(self.server_id)
         if guild is None:
             return
-        data = await common.mongo_storage.load_data_from_mongo()
         for uid in self.whitelist:
             member = guild.get_member(int(uid))
             if member is None:
                 continue
             voice_state = member.voice
             state = self._afk_state.setdefault(uid, {"counter": 0, "last_channel": None})
-            trigger = data.get(uid, {}).get("afkdisconnect_trigger", 15)
+            trigger = 15
+            user_data = await common.mongo_storage.get_user(uid)
+            if isinstance(user_data, dict):
+                trigger = int(user_data.get("afkdisconnect_trigger", 15))
             if voice_state is None:
                 state["counter"] = 0
                 state["last_channel"] = None
