@@ -93,9 +93,18 @@ class Startup(commands.Cog):
     async def userdata_initialization(self):
         userdata_collection = common.mongo_storage.get_collection("userdata")
         defaults = common.mongo_storage.get_user_defaults()
+        defaults_without_blackjack = {key: value for key, value in defaults.items() if key != "blackjack_playing"}
         for member in self.bot.get_all_members():
             userid = str(member.id)
-            await userdata_collection.update_one({"_id": userid}, {"$setOnInsert": defaults, "$set": {"blackjack_playing": False}, "$unset": {"afk_start": ""}}, upsert=True)
+            await userdata_collection.update_one(
+                {"_id": userid},
+                {
+                    "$setOnInsert": defaults_without_blackjack,
+                    "$set": {"blackjack_playing": False},
+                    "$unset": {"afk_start": ""},
+                },
+                upsert=True,
+            )
 
     #每5分鐘，有在指定的語音頻道內則給予蛋糕
     @tasks.loop(minutes=5)
