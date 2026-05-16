@@ -6,15 +6,8 @@ import tarfile
 import time
 import asyncio
 from urllib.parse import urlparse
-
 from bson import json_util
-
-try:
-    from pymongo import AsyncMongoClient, ReplaceOne, ReturnDocument  # pyright: ignore[reportMissingImports]
-except Exception:
-    AsyncMongoClient = None
-    ReplaceOne = None
-    ReturnDocument = None
+from pymongo import AsyncMongoClient, ReturnDocument  # pyright: ignore[reportMissingImports]
 
 #這裡放置常用的資料
 bot_color = 0x00DFEB                     #embed顏色
@@ -79,6 +72,7 @@ class MongoStorage:
         self.collection_name_map = {"userdata": "userdata", "mining": "mining", "odds": "odds"}
         self.user_global_dataset = {"userdata", "mining"}
         self.single_document_dataset = {"odds"}
+        self.replace_user = self.upsert_user
 
     def read_secret_config(self) -> dict:
         """
@@ -298,60 +292,6 @@ class MongoStorage:
             if not document: return {}
             if isinstance(document.get("data"), dict): return document["data"]
             return {key: value for key, value in document.items() if key != "_id"}
-
-        raise RuntimeError(f"未支援的資料集路徑：{dataset}")
-
-    async def write_data_to_mongo(self, data: dict, dataset: str = "userdata"):
-        """
-        將舊版 dict 結構寫入 Mongo。
-
-        Args:
-          data (dict): "{'123': {'cake': 1}, 'gaming_time': 0}"
-          dataset (str): "userdata"
-
-        Returns:
-          (None): "None"
-        """
-        dataset = dataset.strip()
-        collection = self.get_collection(dataset)
-
-        if dataset in self.user_global_dataset:
-            user_operations = []
-            user_id_set = set()
-            global_fields = {}
-            for key, value in data.items():
-                document_id = str(key)
-                if self.is_user_document_key(document_id):
-                    user_id_set.add(document_id)
-                    document_body = value if isinstance(value, dict) else {"value": value}
-                    user_operations.append(
-                        ReplaceOne(
-                            {"_id": document_id},
-                            {"_id": document_id, **document_body},
-                            upsert=True,
-                        )
-                    )
-                else:
-                    global_fields[key] = value
-
-            if user_operations: await collection.bulk_write(user_operations, ordered=False)
-
-            existing_ids = set()
-            async for doc in collection.find({}, {"_id": 1}):
-                if str(doc["_id"]) == "global": continue
-                existing_ids.add(str(doc["_id"]))
-            delete_ids = [item for item in existing_ids if item not in user_id_set]
-            if delete_ids: await collection.delete_many({"_id": {"$in": delete_ids}})
-
-            if global_fields:
-                await collection.replace_one({"_id": "global"}, {"_id": "global", **global_fields}, upsert=True)
-            else:
-                await collection.delete_one({"_id": "global"})
-            return
-
-        if dataset in self.single_document_dataset:
-            await collection.replace_one({"_id": "global"}, {"_id": "global", "data": data}, upsert=True)
-            return
 
         raise RuntimeError(f"未支援的資料集路徑：{dataset}")
 
