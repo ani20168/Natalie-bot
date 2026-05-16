@@ -11,7 +11,7 @@ odds_filelock = asyncio.Lock()
 class OddService(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
-        self.save_path = "data/odds.json"
+        self.save_path = "odds"
 
 
 

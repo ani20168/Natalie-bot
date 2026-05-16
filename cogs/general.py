@@ -133,7 +133,7 @@ class General(commands.Cog):
     async def info(self,interaction):
         async with common.jsonio_lock:
             #讀取檔案
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
 
             #蛋糕查詢
@@ -142,9 +142,9 @@ class General(commands.Cog):
             else:
                 data[userid]["cake"] = 0
                 cake = data[userid]["cake"]
-                common.datawrite(data)
+                await common.mongo_storage.write_data_to_mongo(data)
 
-            userlevel = common.LevelSystem().read_info(userid)
+            userlevel = await common.LevelSystem().read_info(userid)
             message = Embed(title="我是Natalie!",description="你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。",color=common.bot_color)
             message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有**{cake}**塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
             cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
@@ -179,44 +179,47 @@ class General(commands.Cog):
     @app_commands.describe(eat_cake="要餵食的蛋糕數量，1蛋糕=1經驗值")
     @app_commands.rename(eat_cake="數量")
     async def eat(self,interaction,eat_cake: int):       
-        if eat_cake <=0:
+        if eat_cake <= 0:
             await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:請輸入有效的數量",color=common.bot_error_color))
             return
 
-        async with common.jsonio_lock:
-            data = common.dataload()
-            userid = str(interaction.user.id)
-            userlevel = common.LevelSystem().read_info(userid)
-            
-            cake = data[userid]["cake"]
+        userid = str(interaction.user.id)
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        consume_result = await userdata_collection.find_one_and_update(
+            {"_id": userid, "cake": {"$gte": eat_cake}},
+            {"$setOnInsert": {key: value for key, value in defaults.items() if key not in {"cake", "level_exp"}}, "$inc": {"cake": -eat_cake, "level_exp": eat_cake}},
+            upsert=False,
+            return_document=common.ReturnDocument.AFTER,
+        )
+        if consume_result is None:
+            await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:蛋糕不足",color=common.bot_error_color))
+            return
 
-            if cake >= eat_cake:
-                cake -= eat_cake
-                userlevel.level_exp += eat_cake
-                message = Embed(title='餵食Natalie',description=f"我吃飽啦!(獲得**{eat_cake}**點經驗值)",color=common.bot_color)
-                #升級
-                if userlevel.level_exp >= userlevel.level_next_exp:
-                    while userlevel.level_exp >= userlevel.level_next_exp:
-                        userlevel.level += 1
-                        userlevel.level_next_exp = userlevel.level * (userlevel.level+1)*30
-                    message.add_field(name="升級!",value=f"你現在{userlevel.level}等了。",inline=False)
+        userlevel = common.LevelSystem()
+        userlevel.level = consume_result.get("level", 1)
+        userlevel.level_exp = consume_result.get("level_exp", 0)
+        userlevel.level_next_exp = consume_result.get("level_next_exp", userlevel.level * (userlevel.level + 1) * 30)
 
-                data[userid]["level"] = userlevel.level
-                data[userid]["level_exp"] = userlevel.level_exp
-                data[userid]["level_next_exp"] = userlevel.level_next_exp
-                data[userid]["cake"] = cake
-                common.datawrite(data)
-                await interaction.response.send_message(embed=message)
-            else:
-                await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:蛋糕不足",color=common.bot_error_color))
-                return
+        message = Embed(title='餵食Natalie',description=f"我吃飽啦!(獲得**{eat_cake}**點經驗值)",color=common.bot_color)
+        if userlevel.level_exp >= userlevel.level_next_exp:
+            while userlevel.level_exp >= userlevel.level_next_exp:
+                userlevel.level += 1
+                userlevel.level_next_exp = userlevel.level * (userlevel.level+1)*30
+            message.add_field(name="升級!",value=f"你現在{userlevel.level}等了。",inline=False)
+            await userdata_collection.update_one(
+                {"_id": userid},
+                {"$set": {"level": userlevel.level, "level_next_exp": userlevel.level_next_exp}},
+            )
+
+        await interaction.response.send_message(embed=message)
 
     @app_commands.command(name = "level_leaderboard", description = "等級排行榜")
     async def level_leaderboard(self,interaction):
         userid = str(interaction.user.id)
-        data = common.dataload()
+        data = await common.mongo_storage.load_data_from_mongo()
         async with common.jsonio_lock:
-            userlevel_info = common.LevelSystem().read_info(userid)
+            userlevel_info = await common.LevelSystem().read_info(userid)
         # 建立排名榜的列表，以經驗值為排序準則，並倒序排列
         sorted_data = sorted([(user, user_data) for user, user_data in data.items() if isinstance(user_data, dict) and "level_exp" in user_data], key=lambda x: x[1]["level_exp"], reverse=True)
 
@@ -256,7 +259,7 @@ class General(commands.Cog):
         
     @app_commands.command(name = "voice_leaderboard", description = "語音活躍排行榜")
     async def voice_leaderboard(self,interaction):
-        data = common.dataload()
+        data = await common.mongo_storage.load_data_from_mongo()
          #如果用戶資料內有voice_active_minutes且>10分鐘
         sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
        
@@ -276,7 +279,7 @@ class General(commands.Cog):
 
     @app_commands.command(name="cake_leaderboard", description="蛋糕排行榜")
     async def cake_leaderboard(self, interaction):
-        data = common.dataload()
+        data = await common.mongo_storage.load_data_from_mongo()
         # 排除沒有cake資料或蛋糕數為0的用戶
         sorted_data = sorted(
             [(userid, userdata) for userid, userdata in data.items() 
@@ -326,20 +329,27 @@ class General(commands.Cog):
         if interaction.user.id != common.bot_owner_id:
             await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description="權限不足。",color=common.bot_error_color))
             return
-        async with common.jsonio_lock:
-            data = common.dataload()
-            cake_before = data[str(member.id)]['cake']
-            data[str(member.id)]['cake'] += amount
-            common.datawrite(data)
-            cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
-            await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description=f"<@{member.id}>資料變更...\n原始{cake_emoji}:**{cake_before}**\n增加了**{amount}**塊{cake_emoji}\n現在有**{data[str(member.id)]['cake']}**塊{cake_emoji}",color=common.bot_color))
+        memberid = str(member.id)
+        current_data = await common.mongo_storage.ensure_user_document(memberid)
+        cake_before = int(current_data.get("cake", 0))
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        new_data = await userdata_collection.find_one_and_update(
+            {"_id": memberid},
+            {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": amount}},
+            upsert=True,
+            return_document=common.ReturnDocument.AFTER,
+        )
+        cake_after = int(new_data.get("cake", cake_before))
+        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description=f"<@{member.id}>資料變更...\n原始{cake_emoji}:**{cake_before}**\n增加了**{amount}**塊{cake_emoji}\n現在有**{cake_after}**塊{cake_emoji}",color=common.bot_color))
 
 
     @app_commands.command(name = "giveaway_join", description = "加入抽獎頻道")
     async def giveaway_join(self,interaction):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
-            userlevel = common.LevelSystem().read_info(userid)
+            userlevel = await common.LevelSystem().read_info(userid)
         if userlevel.level >= 5 and all(role.id not in [621764669929160715, 605730134531637249] for role in interaction.user.roles):
             await interaction.user.add_roles(interaction.guild.get_role(621764669929160715))
             await interaction.response.send_message(embed=Embed(title="加入抽獎頻道",description="歡迎進入giveaway頻道!",color=common.bot_color))
@@ -363,10 +373,7 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="設置失敗",description="時間範圍僅能選擇15~60分鐘!",color=common.bot_error_color), ephemeral=True)
             return
 
-        async with common.jsonio_lock:
-            data = common.dataload()
-            data[userid]["afkdisconnect_trigger"] = timeset
-            common.datawrite(data)
+        await common.mongo_storage.update_user_fields(userid, {"afkdisconnect_trigger": timeset})
 
         admin_channel = self.bot.get_channel(common.admin_log_channel)
         await admin_channel.send(f"掛機斷連設置已經被變更! 對象:<@{userid}> 觸發時間: {timeset}分鐘")
@@ -476,7 +483,7 @@ class General(commands.Cog):
     async def set_color(self, interaction, colorchoice:app_commands.Choice[str]):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
-            userlevel = common.LevelSystem().read_info(userid)
+            userlevel = await common.LevelSystem().read_info(userid)
 
         user_roles = interaction.user.roles
 
@@ -608,12 +615,10 @@ class General(commands.Cog):
             session.claimed_user_ids.add(uid)
             session.claimed_order.append((uid, display_name, amount))
             done_all = len(session.remaining_amounts) == 0
-        async with common.jsonio_lock:
-            data = common.dataload()
-            rid = str(uid)
-            data.setdefault(rid, {"cake": 0})
-            data[rid]["cake"] += amount
-            common.datawrite(data)
+        rid = str(uid)
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        await userdata_collection.update_one({"_id": rid}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": amount}}, upsert=True)
         embed = self.build_red_packet_embed(session)
         if done_all:
             await self.finalize_red_packet(session, interaction.message, view, timed_out=False, interaction=interaction)
@@ -637,12 +642,11 @@ class General(commands.Cog):
                     ephemeral=True,
                 )
             return
-        async with common.jsonio_lock:
-            data = common.dataload()
-            oid = str(session.creator_id)
-            data.setdefault(oid, {"cake": 0})
-            data[oid]["cake"] += refund
-            common.datawrite(data)
+        oid = str(session.creator_id)
+        if refund > 0:
+            userdata_collection = common.mongo_storage.get_collection("userdata")
+            defaults = common.mongo_storage.get_user_defaults()
+            await userdata_collection.update_one({"_id": oid}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": refund}}, upsert=True)
         finish_label = "紅包已過期" if timed_out else "紅包已被搶完"
         view.finish_grab_button(finish_label)
         embed = self.build_red_packet_embed(session)
@@ -706,26 +710,27 @@ class General(commands.Cog):
                 await interaction.response.send_message(embed=Embed(title="搶紅包", description=str(error), color=common.bot_error_color), ephemeral=True)
                 return
             creator_id = interaction.user.id
-            async with common.jsonio_lock:
-                data = common.dataload()
-                oid = str(creator_id)
-                data.setdefault(oid, {"cake": 0})
-                if data[oid]["cake"] < total:
-                    await interaction.response.send_message(
-                        embed=Embed(title="搶紅包", description=f"蛋糕不足，你目前有 **{data[oid]['cake']}** 塊{common.cake_emoji}。", color=common.bot_error_color),
-                        ephemeral=True,
-                    )
-                    return
-                data[oid]["cake"] -= total
-                common.datawrite(data)
+            oid = str(creator_id)
+            userdata_collection = common.mongo_storage.get_collection("userdata")
+            defaults = common.mongo_storage.get_user_defaults()
+            spend_result = await userdata_collection.find_one_and_update(
+                {"_id": oid, "cake": {"$gte": total}},
+                {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -total}},
+                upsert=False,
+                return_document=common.ReturnDocument.AFTER,
+            )
+            if spend_result is None:
+                user_data = await common.mongo_storage.ensure_user_document(oid)
+                await interaction.response.send_message(
+                    embed=Embed(title="搶紅包", description=f"蛋糕不足，你目前有 **{user_data.get('cake', 0)}** 塊{common.cake_emoji}。", color=common.bot_error_color),
+                    ephemeral=True,
+                )
+                return
             ends_at = datetime.now(timezone.utc) + timedelta(minutes=5)
             session = RedPacketSession(creator_id, total, people, amounts, ends_at, short_message if short_message else None)
             channel = interaction.guild.get_channel(self.channel_id)
             if channel is None or not isinstance(channel, discord.TextChannel):
-                async with common.jsonio_lock:
-                    data = common.dataload()
-                    data[str(creator_id)]["cake"] += total
-                    common.datawrite(data)
+                await userdata_collection.update_one({"_id": oid}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": total}}, upsert=True)
                 await interaction.response.send_message(embed=Embed(title="搶紅包", description="找不到指定的文字頻道，已退回蛋糕。", color=common.bot_error_color), ephemeral=True)
                 return
             view = RedPacketGrabView(self.parent_cog, session)
@@ -734,10 +739,7 @@ class General(commands.Cog):
             try:
                 msg = await channel.send(embed=embed, view=view)
             except discord.HTTPException:
-                async with common.jsonio_lock:
-                    data = common.dataload()
-                    data[str(creator_id)]["cake"] += total
-                    common.datawrite(data)
+                await userdata_collection.update_one({"_id": oid}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": total}}, upsert=True)
                 await interaction.followup.send(
                     embed=Embed(title="搶紅包", description="無法在該頻道發送紅包訊息，已退回蛋糕。", color=common.bot_error_color),
                     ephemeral=True,
@@ -780,12 +782,9 @@ class General(commands.Cog):
             embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
             await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
 
-            async with common.jsonio_lock:
-                data = common.dataload()
-                #清除AFK狀態
-                if 'afk_start' in data[str(member.id)]:
-                    del data[str(member.id)]['afk_start']
-                    common.datawrite(data)
+            member_data = await common.mongo_storage.get_user(str(member.id))
+            if isinstance(member_data, dict) and "afk_start" in member_data:
+                await common.mongo_storage.unset_user_fields(str(member.id), ["afk_start"])
 
         #切換語音頻道
         if before.channel != after.channel:
@@ -803,13 +802,7 @@ class General(commands.Cog):
 
     @commands.Cog.listener()
     async def on_member_join(self,member):  
-        async with common.jsonio_lock:
-            data = common.dataload()
-
-            if str(member.id) not in data:
-                data[str(member.id)] = {"cake": 0}
-
-            common.datawrite(data)
+        await common.mongo_storage.ensure_user_document(str(member.id))
 
     @commands.Cog.listener()
     async def on_message(self,message):
@@ -820,10 +813,9 @@ class General(commands.Cog):
         now = datetime.now()
         # 如果成員還沒有獲得過蛋糕，或者已經過了冷卻時間
         if memberid not in self.last_cake_time or now - self.last_cake_time[memberid] > self.cake_cooldown:
-            async with common.jsonio_lock:
-                data = common.dataload()
-                data[memberid]["cake"] += 1
-                common.datawrite(data)
+            userdata_collection = common.mongo_storage.get_collection("userdata")
+            defaults = common.mongo_storage.get_user_defaults()
+            await userdata_collection.update_one({"_id": memberid}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": 1}}, upsert=True)
             # 更新最後一次獲得蛋糕的時間
             self.last_cake_time[memberid] = datetime.now()
 
@@ -961,17 +953,17 @@ class General(commands.Cog):
             if len(added_members) >= 1:
                 #如果未加入VIP身分(605730134531637249)，則加入
                 async with common.jsonio_lock:  
-                    data = common.dataload()
+                    data = await common.mongo_storage.load_data_from_mongo()
                     for member in added_members:
                         if vip_role not in member.roles:
                             await member.add_roles(vip_role,reason="新的Nitro Booster加入，賦予VIP身分組")
                             data[str(member.id)]["vip_join_time"] = datetime.now()
-                    common.datawrite(data)
+                    await common.mongo_storage.write_data_to_mongo(data)
 
             # 離開的booster
             if len(removed_members) >= 1:
                 async with common.jsonio_lock:
-                    data = common.dataload()
+                    data = await common.mongo_storage.load_data_from_mongo()
                     for member in removed_members:
                         if vip_role in member.roles:
                             # 檢查是否已經是VIP身分組30天
@@ -980,7 +972,7 @@ class General(commands.Cog):
                                 await member.remove_roles(vip_role, reason="Nitro Booster身分組未達30天就離開，移除VIP身分組")
                                 if "vip_join_time" in data[str(member.id)]:
                                     del data[str(member.id)]["vip_join_time"]
-                    common.datawrite(data)
+                    await common.mongo_storage.write_data_to_mongo(data)
 
 
 

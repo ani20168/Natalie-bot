@@ -62,8 +62,8 @@ class MiningGame(commands.Cog):
         }
 
 
-    def miningdata_read(self,userid: str):
-        data = common.dataload("data/mining.json")
+    async def miningdata_read(self,userid: str):
+        data = await common.mongo_storage.load_data_from_mongo("mining")
 
         if userid not in data:
             data[userid] = {
@@ -74,13 +74,13 @@ class MiningGame(commands.Cog):
                 "autofix": False,
                 "collections": {}
                 }
-            common.datawrite(data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(data,"mining")
 
         #新增自動挖礦機的資料
         if "machine_amount" not in data[userid]:
             data[userid]["machine_amount"] = 0
             data[userid]["machine_mine"] = "森林礦坑"
-            common.datawrite(data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(data,"mining")
 
         # 技能礦鎬裝備背包（7 格）與卸下還原用快照
         bag_migrated = False
@@ -100,7 +100,7 @@ class MiningGame(commands.Cog):
             data[userid]["legacy_pickaxe_state"] = None
             bag_migrated = True
         if bag_migrated:
-            common.datawrite(data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(data,"mining")
 
         # 新礦場上線時補齊每日挖掘量條目
         if "mine_mininglimit" not in data:
@@ -111,7 +111,7 @@ class MiningGame(commands.Cog):
                 data["mine_mininglimit"][mine_name] = 500
                 mine_limit_updated = True
         if mine_limit_updated:
-            common.datawrite(data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(data,"mining")
 
         return data
 
@@ -297,8 +297,7 @@ class MiningGame(commands.Cog):
         dig_sleep = 8.0
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
-            user_data = common.dataload()
-            mining_data = self.miningdata_read(userid)
+            mining_data = await self.miningdata_read(userid)
             skills_pre = self.get_active_skills_from_user(mining_data, userid)
             dig_reduce = int(skills_pre.get("dig_time_reduce_sec") or 0)
             # 冷卻與挖掘縮秒同源（下限 1 秒），避免固定 8 秒冷卻與技能縮時不一致
@@ -311,33 +310,49 @@ class MiningGame(commands.Cog):
                 return
 
             #確認是否正在重啟保護狀態?
-            if time.time() - user_data['restart_time'] <= 15:
+            global_userdata = await common.mongo_storage.get_global_document()
+            restart_time = float(global_userdata.get("restart_time", 0))
+            if time.time() - restart_time <= 15:
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="機器人正在重啟，請稍後在試一次。",color=common.bot_error_color))
                 return
-            user_data['gaming_time'] = time.time()
+            await common.mongo_storage.update_global_fields({"gaming_time": time.time()})
 
             #確認礦場是否已挖完?
-            if mining_data['mine_mininglimit'][mining_data[userid]['mine']] <= 0:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"**{mining_data[userid]['mine']}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color))
+            current_mine = mining_data[userid]['mine']
+            mining_collection = common.mongo_storage.get_collection("mining")
+            target_key = f"mine_mininglimit.{current_mine}"
+            remain_document = await mining_collection.find_one_and_update(
+                {"_id": "global", target_key: {"$gt": 0}},
+                {"$inc": {target_key: -1}},
+                return_document=common.ReturnDocument.AFTER,
+            )
+            remain_after_decrement = None if remain_document is None else remain_document.get("mine_mininglimit", {}).get(current_mine)
+            if remain_after_decrement is None:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"**{current_mine}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color))
                 return
 
             #確認礦鎬壞了沒
             if mining_data[userid]["pickaxe_health"] == 0:
                 #如果有開啟自動修理
                 if mining_data[userid]["autofix"] == True:
-                    if user_data[userid]['cake'] < 10:
+                    userdata_collection = common.mongo_storage.get_collection("userdata")
+                    defaults = common.mongo_storage.get_user_defaults()
+                    spend_fix = await userdata_collection.find_one_and_update(
+                        {"_id": userid, "cake": {"$gte": 10}},
+                        {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -10}},
+                        upsert=False,
+                        return_document=common.ReturnDocument.AFTER,
+                    )
+                    if spend_fix is None:
                         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!而且你的蛋糕也不足以修理礦鎬。",color=common.bot_error_color))
                         return
                     mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
-                    user_data[userid]["cake"] -= 10
                     self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
                 else:
                     await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
                     return
 
             dig_sleep = max(0.5, 8.0 - dig_reduce)
-
-            mining_data['mine_mininglimit'][mining_data[userid]['mine']] -= 1
             consume_dura = True
             if skills_pre.get("durability_half_skip") and random.random() < 0.5:
                 consume_dura = False
@@ -346,15 +361,14 @@ class MiningGame(commands.Cog):
             self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
             mining_data[userid]["mining_cooldown_last"] = time.time()
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
-            #寫入檔案防止回溯
-            common.datawrite(user_data)
-            common.datawrite(mining_data,"data/mining.json")
+            # 寫入當前使用者挖礦狀態，避免整份資料覆蓋
+            await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
 
         await asyncio.sleep(dig_sleep)
 
         async with common.jsonio_lock:
             #等待時間結束後再次讀取，防止回溯問題
-            mining_data = self.miningdata_read(userid)
+            mining_data = await self.miningdata_read(userid)
 
             #開始抽獎
             reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
@@ -411,11 +425,11 @@ class MiningGame(commands.Cog):
                 message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
 
             mine_here = mining_data[userid]["mine"]
-            remaining_here = mining_data["mine_mininglimit"][mine_here]
+            remaining_here = remain_after_decrement
             message.set_footer(text=f"位置:{mine_here} 剩餘:{remaining_here}")
 
             await interaction.edit_original_response(embed=message)
-            common.datawrite(mining_data,"data/mining.json")
+            await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
 
 
     @app_commands.command(name = "pickaxe_fix", description = "修理礦鎬(需要10塊蛋糕)")
@@ -423,35 +437,39 @@ class MiningGame(commands.Cog):
         async with common.jsonio_lock:
             #讀資料
             userid = str(interaction.user.id)
-            mining_data = self.miningdata_read(userid)
-            user_data = common.dataload()
+            mining_data = await self.miningdata_read(userid)
             #如果沒壞
             if mining_data[userid]["pickaxe_health"] != 0:
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬還沒壞!",color=common.bot_error_color))
                 return
-            #如果沒蛋糕
-            if user_data[userid]["cake"] < 10:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你的蛋糕不足!(需要**10**塊，你目前只有**{user_data[userid]['cake']}**塊)",color=common.bot_error_color))
+            userdata_collection = common.mongo_storage.get_collection("userdata")
+            defaults = common.mongo_storage.get_user_defaults()
+            spend_fix = await userdata_collection.find_one_and_update(
+                {"_id": userid, "cake": {"$gte": 10}},
+                {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -10}},
+                upsert=False,
+                return_document=common.ReturnDocument.AFTER,
+            )
+            if spend_fix is None:
+                user_doc = await common.mongo_storage.ensure_user_document(userid)
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你的蛋糕不足!(需要**10**塊，你目前只有**{user_doc.get('cake', 0)}**塊)",color=common.bot_error_color))
                 return
             
-            #修理要10蛋糕
-            user_data[userid]["cake"] -= 10
             mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
             self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="修理完成",color=common.bot_color))
-            common.datawrite(user_data)
-            common.datawrite(mining_data,"data/mining.json")
+            await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
         
     @app_commands.command(name = "pickaxe_autofix", description = "自動修理礦鎬設置(預設關閉)")
     async def pickaxe_autofix(self,interaction):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
-            data = self.miningdata_read(userid)
+            data = await self.miningdata_read(userid)
 
             if not "autofix" in data[userid] or data[userid]["autofix"] == False:
                 data[userid]["autofix"] = True
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="自動修理已開啟。\n在耐久不足時會自動消耗蛋糕進行修理。",color=common.bot_color))
-                common.datawrite(data,"data/mining.json")
+                await common.mongo_storage.write_data_to_mongo(data,"mining")
                 return
 
             if data[userid]["autofix"] == True:
@@ -461,7 +479,7 @@ class MiningGame(commands.Cog):
     async def mineral_sell(self,interaction):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
-            mining_data = self.miningdata_read(userid)
+            mining_data = await self.miningdata_read(userid)
             message = Embed(title="Natalie 挖礦",color=common.bot_color)
             #計算賣出價
             total_price = 0
@@ -477,12 +495,12 @@ class MiningGame(commands.Cog):
             for mineral in self.mineral_pricelist.keys():
                 if mineral in mining_data[userid]:
                     mining_data[userid][mineral] = 0
-            common.datawrite(mining_data,"data/mining.json")
+            await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
 
             #顯示
-            userdata = common.dataload()
-            userdata[userid]["cake"] += total_price
-            common.datawrite(userdata)
+            userdata_collection = common.mongo_storage.get_collection("userdata")
+            defaults = common.mongo_storage.get_user_defaults()
+            await userdata_collection.update_one({"_id": userid}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": total_price}}, upsert=True)
             message.add_field(name=f"你獲得了{total_price}塊{self.bot.get_emoji(common.cake_emoji_id)}",value="",inline=False)
             await interaction.response.send_message(embed=message)
 
@@ -490,7 +508,7 @@ class MiningGame(commands.Cog):
     async def mining_info(self,interaction):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
-            mining_data = self.miningdata_read(userid)
+            mining_data = await self.miningdata_read(userid)
 
         message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_list 各礦場收藏品清單\n/collection_trade 收藏品交易\n/collection_sell 販賣收藏品給Natalie\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_use 裝備背包內礦鎬\n/mining_bag_drop 丟棄背包內礦鎬(單格/1-3/all)\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
         equip_slot = mining_data[userid].get("equipped_bag_slot")
@@ -524,7 +542,7 @@ class MiningGame(commands.Cog):
     async def collection_list(self, interaction):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
-            mining_data = self.miningdata_read(userid)
+            mining_data = await self.miningdata_read(userid)
         owned = mining_data[userid].get("collections") or {}
         message = Embed(title="Natalie 挖礦｜收藏品清單", description="以下為挖礦系統目前所有的收藏品", color=common.bot_color)
         for mine_name, item_list in self.collection_list.items():
@@ -544,7 +562,7 @@ class MiningGame(commands.Cog):
     @app_commands.checks.cooldown(1, 60)
     async def collection_trade(self,interaction,collection_name: str,price: int):
         userid = str(interaction.user.id)
-        mining_data = self.miningdata_read(userid)
+        mining_data = await self.miningdata_read(userid)
 
         if price <= 0:
             await interaction.response.send_message(embed=Embed(title='Natalie 挖礦',description="錯誤:請輸入有效的價格",color=common.bot_error_color))
@@ -574,8 +592,8 @@ class MiningGame(commands.Cog):
     async def collection_sell(self,interaction,collection_name: str):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
-            mining_data = self.miningdata_read(userid)
-            user_data = common.dataload()
+            mining_data = await self.miningdata_read(userid)
+            user_data = await common.mongo_storage.load_data_from_mongo()
 
             #全部的收藏品列表
             collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
@@ -591,8 +609,8 @@ class MiningGame(commands.Cog):
             
             mining_data[userid]["collections"][collection_name] -= 1
             user_data[userid]['cake'] += 1000
-            common.datawrite(mining_data,'data/mining.json')
-            common.datawrite(user_data)
+            await common.mongo_storage.write_data_to_mongo(mining_data,"mining")
+            await common.mongo_storage.write_data_to_mongo(user_data)
 
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你賣出了**1**個**{collection_name}**。\n獲得**1000**塊{self.bot.get_emoji(common.cake_emoji_id)}",color=common.bot_color))
 
@@ -612,8 +630,8 @@ class MiningGame(commands.Cog):
     async def mine(self,interaction,choices: app_commands.Choice[str]):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
-            mining_data = self.miningdata_read(userid)
-            userlevel = common.LevelSystem().read_info(userid)
+            mining_data = await self.miningdata_read(userid)
+            userlevel = await common.LevelSystem().read_info(userid)
 
             #確認是否選擇了目前待的礦場
             if choices.value == mining_data[userid]['mine']:
@@ -626,7 +644,7 @@ class MiningGame(commands.Cog):
                 return
 
             mining_data[userid]['mine'] = choices.value
-            common.datawrite(mining_data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(mining_data,"mining")
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"已移動到**{choices.value}**礦場，當前礦場剩餘挖礦次數:**{mining_data['mine_mininglimit'][choices.value]}**",color=common.bot_color))
 
     @app_commands.command(name = "pickaxe_buy",description="購買礦鎬")
@@ -643,8 +661,8 @@ class MiningGame(commands.Cog):
     async def pickaxe_buy(self,interaction,choices: app_commands.Choice[str]):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
-            user_data = common.dataload()
-            mining_data = self.miningdata_read(userid)
+            user_data = await common.mongo_storage.load_data_from_mongo()
+            mining_data = await self.miningdata_read(userid)
             value = choices.value
 
             if value in self.skill_pickaxe_shop:
@@ -664,8 +682,8 @@ class MiningGame(commands.Cog):
                 mining_data[userid]["pickaxe_bag"][free_index] = instance
                 skill_text = self.skill_pickaxe_lines_for_embed(instance["skills"])
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功！**{value}**已放入裝備背包第 **{free_index + 1}** 格。\n耐久 **{instance['current_health']}/{instance['max_health']}**\n\n{skill_text}",color=common.bot_color))
-                common.datawrite(user_data)
-                common.datawrite(mining_data,"data/mining.json")
+                await common.mongo_storage.write_data_to_mongo(user_data)
+                await common.mongo_storage.write_data_to_mongo(mining_data,"mining")
                 return
 
             if mining_data[userid]["pickaxe"] == value:
@@ -688,14 +706,14 @@ class MiningGame(commands.Cog):
             mining_data[userid]["pickaxe"] = value
             mining_data[userid]['pickaxe_maxhealth'] = self.pickaxe_list[value]['耐久度']
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功! 你現在擁有了**{value}**。",color=common.bot_color))
-            common.datawrite(user_data)
-            common.datawrite(mining_data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(user_data)
+            await common.mongo_storage.write_data_to_mongo(mining_data,"mining")
 
     @app_commands.command(name = "mining_bag", description = "查看裝備背包（技能礦鎬）")
     async def mining_bag(self, interaction):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
-            mining_data = self.miningdata_read(userid)
+            mining_data = await self.miningdata_read(userid)
         message = Embed(title="Natalie 挖礦｜裝備背包", description="共 7 格。使用 `/mining_bag_use` 裝備、`/mining_bag_drop` 丟棄（單格／`1-3`／`all`）、`/mining_bag_unequip` 卸下技能鎬。", color=common.bot_color)
         equipped = mining_data[userid].get("equipped_bag_slot")
         for index in range(self.pickaxe_bag_size):
@@ -720,7 +738,7 @@ class MiningGame(commands.Cog):
     async def mining_bag_drop(self, interaction, slot: str):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
-            mining_data = self.miningdata_read(userid)
+            mining_data = await self.miningdata_read(userid)
             try:
                 mode, payload = self.parse_mining_bag_drop_arg(slot)
             except (ValueError, TypeError):
@@ -738,7 +756,7 @@ class MiningGame(commands.Cog):
                     if bag[index] is not None:
                         bag[index] = None
                         dropped_slots.append(str(index + 1))
-                common.datawrite(mining_data, "data/mining.json")
+                await common.mongo_storage.write_data_to_mongo(mining_data, "mining")
                 if not dropped_slots:
                     await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="沒有可丟棄的礦鎬（其餘空格或僅剩裝備中）。", color=common.bot_error_color))
                     return
@@ -760,7 +778,7 @@ class MiningGame(commands.Cog):
                     await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="該格沒有物品。", color=common.bot_error_color))
                     return
                 bag[idx] = None
-                common.datawrite(mining_data, "data/mining.json")
+                await common.mongo_storage.write_data_to_mongo(mining_data, "mining")
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"已丟棄背包第 **{slot_num}** 格的礦鎬。", color=common.bot_color))
                 return
 
@@ -780,7 +798,7 @@ class MiningGame(commands.Cog):
                 if bag[idx] is not None:
                     bag[idx] = None
                     dropped_slots.append(str(slot_num))
-            common.datawrite(mining_data, "data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(mining_data, "mining")
             if not dropped_slots:
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="該區間內沒有礦鎬可丟棄。", color=common.bot_error_color))
                 return
@@ -793,7 +811,7 @@ class MiningGame(commands.Cog):
     async def mining_bag_use(self, interaction, slot: int):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
-            mining_data = self.miningdata_read(userid)
+            mining_data = await self.miningdata_read(userid)
             if slot < 1 or slot > self.pickaxe_bag_size:
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"格子編號須為 **1**～**{self.pickaxe_bag_size}**。", color=common.bot_error_color))
                 return
@@ -815,26 +833,26 @@ class MiningGame(commands.Cog):
             mining_data[userid]["pickaxe"] = entry["template"]
             mining_data[userid]["pickaxe_maxhealth"] = entry["max_health"]
             mining_data[userid]["pickaxe_health"] = entry["current_health"]
-            common.datawrite(mining_data, "data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(mining_data, "mining")
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"已裝備背包第 **{slot}** 格的 **{entry['template']}**。", color=common.bot_color))
 
     @app_commands.command(name = "mining_bag_unequip", description = "卸下技能礦鎬，還原為先前使用的傳統礦鎬")
     async def mining_bag_unequip(self, interaction):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
-            mining_data = self.miningdata_read(userid)
+            mining_data = await self.miningdata_read(userid)
             if mining_data[userid].get("equipped_bag_slot") is None:
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="你目前沒有裝備背包內的技能礦鎬。", color=common.bot_error_color))
                 return
             self.restore_legacy_pickaxe_to_top(mining_data, userid)
-            common.datawrite(mining_data, "data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(mining_data, "mining")
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="已卸下技能礦鎬。", color=common.bot_color))
 
     @app_commands.command(name = "redeem_collection_role",description="兌換收藏品稱號(需要每種收藏品各一個，兌換後會消耗掉)")
     async def redeem_collection_role(self,interaction):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
-            mining_data = self.miningdata_read(userid)
+            mining_data = await self.miningdata_read(userid)
             #全部的收藏品列表
             collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
             #用戶收藏品
@@ -849,7 +867,7 @@ class MiningGame(commands.Cog):
 
             #允許獲得稱號
             mining_data[userid]["collections"] = user_collections
-            common.datawrite(mining_data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(mining_data,"mining")
             #獲取稱號
             await interaction.user.add_roles(interaction.guild.get_role(1070206894288928798))
             await interaction.response.send_message(embed=Embed(title="兌換收藏品稱號",description="成功兌換稱號!",color=common.bot_color))
@@ -858,7 +876,7 @@ class MiningGame(commands.Cog):
     async def mining_machine_info(self,interaction):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
-            mining_data = self.miningdata_read(userid)
+            mining_data = await self.miningdata_read(userid)
         message = Embed(title="自動挖礦機",description="你可以透過購買自動挖礦機來挖掘礦物，每3小時會挖掘一次，挖到的礦物會直接列入玩家礦物清單。\n注意!!由於挖礦機火力太強，會破壞掉珍貴的收藏品，因此自動挖掘時'不會'獲得任何收藏品",color=common.bot_color)
         message.add_field(name="目前持有的挖礦機數量",value=f"**{mining_data[userid]['machine_amount']}**",inline=False)
         if (mining_data[userid]['machine_amount'])*1000 == 0:
@@ -883,8 +901,8 @@ class MiningGame(commands.Cog):
     async def mining_machine_mine(self,interaction,choices: app_commands.Choice[str]):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
-            mining_data = self.miningdata_read(userid)
-            userlevel = common.LevelSystem().read_info(userid)
+            mining_data = await self.miningdata_read(userid)
+            userlevel = await common.LevelSystem().read_info(userid)
 
             #確認是否選擇了目前待的礦場
             if choices.value == mining_data[userid]['machine_mine']:
@@ -897,15 +915,15 @@ class MiningGame(commands.Cog):
                 return
             
             mining_data[userid]['machine_mine'] = choices.value
-            common.datawrite(mining_data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(mining_data,"mining")
             await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"礦機已移動到**{choices.value}**礦場。",color=common.bot_color))
 
     @app_commands.command(name = "mining_machine_buy",description="購買挖礦機")
     async def mining_machine_buy(self,interaction):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
-            data = common.dataload()
-            mining_data = self.miningdata_read(userid)
+            data = await common.mongo_storage.load_data_from_mongo()
+            mining_data = await self.miningdata_read(userid)
             cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
             price = mining_data[userid]['machine_amount'] *1000
 
@@ -920,8 +938,8 @@ class MiningGame(commands.Cog):
             
             data[userid]['cake'] -= price
             mining_data[userid]['machine_amount'] += 1
-            common.datawrite(data)
-            common.datawrite(mining_data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(data)
+            await common.mongo_storage.write_data_to_mongo(mining_data,"mining")
             await interaction.response.send_message(embed=Embed(title="自動挖礦機",description=f"購買完成，你現在擁有**{mining_data[userid]['machine_amount']}**台挖礦機。",color=common.bot_color))
 
 
@@ -1026,9 +1044,9 @@ class BlackJack(commands.Cog):
         return f"\n你失去了**{side_bet_amount}**塊{cake_emoji}(邊注)"
 
     #顯示勝率跟場數(給embed footer以及leaderboard用的)
-    def win_rate_show(self, userid: str, data: dict | None = None) -> str:
+    async def win_rate_show(self, userid: str, data: dict | None = None) -> str:
         if data is None:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
         if data[userid]["blackjack_round"] == 0:
             return f"你的勝率:未知 總場數:{data[userid]['blackjack_round']}"
         else:
@@ -1047,7 +1065,7 @@ class BlackJack(commands.Cog):
         #增加回應推遲，避免來不及發送embed造成遊戲狀態鎖死的問題
         await interaction.response.defer()
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
             cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
             
@@ -1143,7 +1161,7 @@ class BlackJack(commands.Cog):
                     data[userid]["cake"] += bet * 2 + side_return
                     data[userid]["blackjack_win_rate"] += 1
                     data[userid]["blackjack_round"] += 1
-                    common.datawrite(data)
+                    await common.mongo_storage.write_data_to_mongo(data)
                     message.add_field(
                         name="結果",
                         value=(
@@ -1155,7 +1173,7 @@ class BlackJack(commands.Cog):
                         ),
                         inline=False,
                     )
-                    message.set_footer(text=self.win_rate_show(userid))
+                    message.set_footer(text=await self.win_rate_show(userid))
                     await interaction.followup.send(embed=message)
                     return
             #玩家如果是blackjack(持有兩張牌且點數剛好為21)
@@ -1164,17 +1182,17 @@ class BlackJack(commands.Cog):
                 message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{int(bet*1.5)}**塊{cake_emoji}(blackjack! x 1.5){BlackJack.side_bet_loss_line(side_bet_amount, cake_emoji)}\n你現在有**{data[userid]['cake']}**塊{cake_emoji}",inline=False)
                 data[userid]["blackjack_win_rate"] += 1
                 data[userid]["blackjack_round"] += 1
-                common.datawrite(data)
-                message.set_footer(text=self.win_rate_show(userid))
+                await common.mongo_storage.write_data_to_mongo(data)
+                message.set_footer(text=await self.win_rate_show(userid))
                 await interaction.followup.send(embed=message)
                 return
             
             data[userid]["blackjack_playing"] = True
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
         #選項給予
         if side_bet_amount > 0:
             message.description = f"本局邊注:**{side_bet_amount}**塊{cake_emoji}"
-        message.set_footer(text=self.win_rate_show(userid))
+        message.set_footer(text=await self.win_rate_show(userid))
         cake_after_bet = data[userid]['cake']
         await interaction.followup.send(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards,cake_after_bet=cake_after_bet,side_bet_amount=side_bet_amount,cake_emoji=cake_emoji))
 
@@ -1182,7 +1200,7 @@ class BlackJack(commands.Cog):
     @app_commands.command(name = "blackjack_leaderboard", description = "21點勝率排行榜")
     async def blackjack_leaderboard(self,interaction):
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
             #檢查玩家是否有勝場資料
             # win rate = 勝場數
@@ -1192,7 +1210,7 @@ class BlackJack(commands.Cog):
                 data[userid]["blackjack_win_rate"] = 0
                 data[userid]["blackjack_round"] = 0
                 data[userid]["blackjack_tie"] = 0
-                common.datawrite(data)
+                await common.mongo_storage.write_data_to_mongo(data)
         # 過濾有"blackjack_round" >=50 的玩家，並計算勝率
         players = []
         for user_id, user_data in data.items():
@@ -1285,7 +1303,7 @@ class BlackJackButton(discord.ui.View):
         error_embed = None
         cake_after = None
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             ib = self.insurance_bet_amount
             dealer_ace_up = list(self.bot_cards[0].keys())[0] == "A"
             if self.insurance_purchased or self.player_moved_for_insurance or not dealer_ace_up or self.bet < 2 or ib < 1:
@@ -1295,7 +1313,7 @@ class BlackJackButton(discord.ui.View):
             else:
                 data[userid]["cake"] -= ib
                 self.insurance_purchased = True
-                common.datawrite(data)
+                await common.mongo_storage.write_data_to_mongo(data)
                 cake_after = data[userid]["cake"]
         if error_embed is not None:
             await interaction.response.send_message(embed=error_embed, ephemeral=True)
@@ -1307,13 +1325,13 @@ class BlackJackButton(discord.ui.View):
             message.description = sb_desc
         message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
         message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
-        message.set_footer(text=BlackJack(self.bot).win_rate_show(userid, data))
+        message.set_footer(text=await BlackJack(self.bot).win_rate_show(userid, data))
         await interaction.response.edit_message(embed=message,view=self)
 
     @discord.ui.button(label="拿牌!",style=discord.ButtonStyle.green,row=0)
     async def hit_button(self,interaction,button: discord.ui.Button):
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
             #關閉雙倍下注
             self.double_button.disabled = True
@@ -1361,14 +1379,14 @@ class BlackJackButton(discord.ui.View):
                 self.stop()
 
 
-            common.datawrite(data)
-        message.set_footer(text=BlackJack(self.bot).win_rate_show(userid, data))
+            await common.mongo_storage.write_data_to_mongo(data)
+        message.set_footer(text=await BlackJack(self.bot).win_rate_show(userid, data))
         await interaction.response.edit_message(embed=message,view=self)
 
     @discord.ui.button(label="停牌!",style=discord.ButtonStyle.red,row=0)
     async def stand_button(self,interaction,button: discord.ui.Button):
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
             #關閉所有按鈕
             self.double_button.disabled = True
@@ -1415,8 +1433,8 @@ class BlackJackButton(discord.ui.View):
             if insurance_text is not None:
                 message.add_field(name="保險", value=insurance_text, inline=False)
             data[userid]["blackjack_playing"] = False
-            common.datawrite(data)
-        message.set_footer(text=BlackJack(self.bot).win_rate_show(userid, data))
+            await common.mongo_storage.write_data_to_mongo(data)
+        message.set_footer(text=await BlackJack(self.bot).win_rate_show(userid, data))
         await interaction.response.edit_message(embed=message,view=self)
         self.stop()
 
@@ -1425,7 +1443,7 @@ class BlackJackButton(discord.ui.View):
         userid = str(interaction.user.id)
         cake_insufficient = False
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             #如果賭注不足以使用雙倍下注
             if data[userid]['cake'] < self.bet:
                 self.double_button.disabled = True
@@ -1464,7 +1482,7 @@ class BlackJackButton(discord.ui.View):
                         message.add_field(name="保險", value=insurance_text, inline=False)
                     self.insurance_button.disabled = True
                     data[userid]["blackjack_playing"] = False
-                    common.datawrite(data)
+                    await common.mongo_storage.write_data_to_mongo(data)
                 else:
                     #莊家點數未達17點的話，則加牌直到點數>=17點
                     while BlackJack(self.bot).calculate_point(self.bot_cards) < 17:
@@ -1500,11 +1518,11 @@ class BlackJackButton(discord.ui.View):
                         message.add_field(name="保險", value=insurance_text, inline=False)
                     self.insurance_button.disabled = True
                     data[userid]["blackjack_playing"] = False
-                    common.datawrite(data)
+                    await common.mongo_storage.write_data_to_mongo(data)
         if cake_insufficient:
             await interaction.response.edit_message(view=self)
             return
-        message.set_footer(text=BlackJack(self.bot).win_rate_show(userid, data))
+        message.set_footer(text=await BlackJack(self.bot).win_rate_show(userid, data))
         await interaction.response.edit_message(embed=message,view=self)
         self.stop()
 
@@ -1518,11 +1536,11 @@ class BlackJackButton(discord.ui.View):
 
     async def on_timeout(self) -> None:
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
 
             if data[str(self.command_interaction.user.id)]["blackjack_playing"] == True:
                 data[str(self.command_interaction.user.id)]["blackjack_playing"] = False
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
 
 
 class PokerGame(commands.Cog):
@@ -1774,8 +1792,8 @@ class PokerGame(commands.Cog):
             return sorted(cards, key=lambda card: self.rank_value[card[0]], reverse=True)
 
     #顯示勝率跟場數(給embed footer以及leaderboard用的)
-    def win_rate_show(self, userid: str) -> str:
-        data = common.dataload()
+    async def win_rate_show(self, userid: str) -> str:
+        data = await common.mongo_storage.load_data_from_mongo()
         if "poker_round" not in data[userid]:
             return "你的勝率:未知 總場數:0"
         if data[userid]["poker_round"] == 0:
@@ -1791,7 +1809,7 @@ class PokerGame(commands.Cog):
     async def poker(self, interaction, bet: str):
         await interaction.response.defer()
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
             cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
 
@@ -1838,7 +1856,7 @@ class PokerGame(commands.Cog):
             if "poker_fold" not in data[userid]:
                 data[userid]["poker_fold"] = 0
             data[userid]["poker_playing"] = True
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
 
         deck = self.create_deck()
         player_cards = deck[:7]
@@ -1850,20 +1868,20 @@ class PokerGame(commands.Cog):
         message = Embed(title="撲克牌比大小", color=common.bot_color)
         message.add_field(name="你的手牌", value=player_display, inline=False)
         message.add_field(name="Natalie的手牌", value=bot_display, inline=False)
-        message.set_footer(text=self.win_rate_show(userid))
+        message.set_footer(text=await self.win_rate_show(userid))
 
         await interaction.followup.send(embed=message, view=PokerButton(user=interaction, bet=bet, player_cards=player_cards, bot_cards=bot_cards, client=self.bot))
 
     @app_commands.command(name="poker_leaderboard", description="撲克牌勝率排行榜")
     async def poker_leaderboard(self, interaction):
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
             if "poker_tie" not in data.get(userid, {}):
                 data[userid]["poker_win_rate"] = 0
                 data[userid]["poker_round"] = 0
                 data[userid]["poker_tie"] = 0
-                common.datawrite(data)
+                await common.mongo_storage.write_data_to_mongo(data)
 
         players = []
         for user_id, user_data in data.items():
@@ -1896,7 +1914,7 @@ class PokerGame(commands.Cog):
     @app_commands.command(name="poker_statistics", description="撲克牌個人統計")
     async def poker_statistics(self, interaction):
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
             if "poker_hand_count" not in data.get(userid, {}):
                 data.setdefault(userid, {})
@@ -1911,7 +1929,7 @@ class PokerGame(commands.Cog):
                 data[userid]["poker_win_rate"] = 0
                 data[userid]["poker_round"] = 0
                 data[userid]["poker_tie"] = 0
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
 
         order = [
             "皇家同花順",
@@ -1936,7 +1954,7 @@ class PokerGame(commands.Cog):
         message.add_field(name="行為次數", value=action_lines, inline=False)
         message.add_field(
             name="勝率&總場數",
-            value=self.win_rate_show(userid),
+            value=await self.win_rate_show(userid),
             inline=False,
         )
         await interaction.response.send_message(embed=message)
@@ -1952,9 +1970,9 @@ class PokerButton(discord.ui.View):
         self.bot = client
         self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
 
-    def result_message(self, double: bool = False):
+    async def result_message(self, double: bool = False):
         userid = str(self.command_interaction.user.id)
-        data = common.dataload()
+        data = await common.mongo_storage.load_data_from_mongo()
         (
             player_rank,
             player_order,
@@ -2046,14 +2064,14 @@ class PokerButton(discord.ui.View):
             )
 
         data[userid]["poker_playing"] = False
-        common.datawrite(data)
-        message.set_footer(text=PokerGame(self.bot).win_rate_show(userid))
+        await common.mongo_storage.write_data_to_mongo(data)
+        message.set_footer(text=await PokerGame(self.bot).win_rate_show(userid))
         return message
 
     @discord.ui.button(label="加注!", style=discord.ButtonStyle.gray)
     async def double_button(self, interaction, button: discord.ui.Button):
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
             if data[userid]["cake"] < self.bet:
                 self.double_button.disabled = True
@@ -2064,19 +2082,19 @@ class PokerButton(discord.ui.View):
             if "poker_raise" not in data[userid]:
                 data[userid]["poker_raise"] = 0
             data[userid]["poker_raise"] += 1
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
 
         self.double_button.disabled = True
         self.reveal_button.disabled = True
         self.fold_button.disabled = True
-        message = self.result_message(double=True)
+        message = await self.result_message(double=True)
         await interaction.response.edit_message(embed=message, view=self)
         self.stop()
 
     @discord.ui.button(label="攤牌!", style=discord.ButtonStyle.green)
     async def reveal_button(self, interaction, button: discord.ui.Button):
         async with common.jsonio_lock:
-            message = self.result_message()
+            message = await self.result_message()
             self.double_button.disabled = True
             self.reveal_button.disabled = True
             self.fold_button.disabled = True
@@ -2086,7 +2104,7 @@ class PokerButton(discord.ui.View):
     @discord.ui.button(label="放棄...", style=discord.ButtonStyle.red)
     async def fold_button(self, interaction, button: discord.ui.Button):
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
             refund = int(self.bet * PokerGame(self.bot).refund_rate)
             data[userid]["cake"] += refund
@@ -2097,12 +2115,12 @@ class PokerButton(discord.ui.View):
                 data[userid]["poker_fold"] = 0
             data[userid]["poker_fold"] += 1
             data[userid]["poker_playing"] = False
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
         self.double_button.disabled = True
         self.reveal_button.disabled = True
         self.fold_button.disabled = True
         message = Embed(title="撲克牌比大小", description=f"你選擇放棄，退回**{refund}**塊{self.cake_emoji}", color=common.bot_color)
-        message.set_footer(text=PokerGame(self.bot).win_rate_show(userid))
+        message.set_footer(text=await PokerGame(self.bot).win_rate_show(userid))
         await interaction.response.edit_message(embed=message, view=self)
         self.stop()
 
@@ -2114,11 +2132,11 @@ class PokerButton(discord.ui.View):
 
     async def on_timeout(self) -> None:
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(self.command_interaction.user.id)
             if data.get(userid, {}).get("poker_playing"):
                 data[userid]["poker_playing"] = False
-                common.datawrite(data)
+                await common.mongo_storage.write_data_to_mongo(data)
 
 
 class SquidRPS(commands.Cog):
@@ -2141,7 +2159,7 @@ class SquidRPS(commands.Cog):
             ("✌️", "✋"),
         ]
 
-    def _ensure_stats(self, data, userid: str):
+    async def _ensure_stats(self, data, userid: str):
         """Ensure squid_rps_stats exists and migrate old keys if needed."""
         user_data = data.setdefault(userid, {"cake": 0})
         if "squid_rps_stats" not in user_data:
@@ -2153,12 +2171,12 @@ class SquidRPS(commands.Cog):
                 "hard": {"win": 0, "round": 0},
             }
             user_data["squid_rps_stats"] = stats
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
         return user_data["squid_rps_stats"]
 
-    def win_rate_show(self, userid: str, difficulty: str | None = None) -> str:
-        data = common.dataload()
-        stats = self._ensure_stats(data, userid)
+    async def win_rate_show(self, userid: str, difficulty: str | None = None) -> str:
+        data = await common.mongo_storage.load_data_from_mongo()
+        stats = await self._ensure_stats(data, userid)
         if difficulty is None:
             difficulty = data.get(userid, {}).get("squid_rps_difficulty", "normal")
         win = stats[difficulty]["win"]
@@ -2182,7 +2200,7 @@ class SquidRPS(commands.Cog):
     async def squid_rps(self, interaction, bet: str):
         await interaction.response.defer()
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
             cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
 
@@ -2243,12 +2261,12 @@ class SquidRPS(commands.Cog):
                 return
 
             data[userid]["cake"] -= bet
-            stats = self._ensure_stats(data, userid)
+            stats = await self._ensure_stats(data, userid)
             if "squid_rps_difficulty" not in data[userid]:
                 data[userid]["squid_rps_difficulty"] = "normal"
             difficulty = data[userid]["squid_rps_difficulty"]
             data[userid]["squid_playing"] = True
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
 
         view = SquidRPSView(user=interaction, bet=bet, client=self.bot, difficulty=difficulty)
         message = Embed(
@@ -2260,7 +2278,7 @@ class SquidRPS(commands.Cog):
         if difficulty == "hard":
             message.add_field(name="Natalie血量", value=view.hp_display(), inline=False)
         message.add_field(name="手槍彈夾", value=view.clip_display(), inline=False)
-        message.set_footer(text=self.win_rate_show(userid))
+        message.set_footer(text=await self.win_rate_show(userid))
         msg = await interaction.followup.send(embed=message, view=view)
         view.message = msg
 
@@ -2273,27 +2291,27 @@ class SquidRPS(commands.Cog):
     ])
     async def squid_rps_setdifficulty(self, interaction, level: app_commands.Choice[str]):
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
             if userid not in data:
                 data[userid] = {"cake": 0}
-            self._ensure_stats(data, userid)
+            await self._ensure_stats(data, userid)
             data[userid]["squid_rps_difficulty"] = level.value
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
         await interaction.response.send_message(embed=Embed(title="魷魚猜拳難度設置", description=f"已設定為{level.value}", color=common.bot_color))
 
     @app_commands.command(name="squid_rps_leaderboard", description="魷魚猜拳勝率排行榜")
     async def squid_rps_leaderboard(self, interaction):
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(interaction.user.id)
-            stats = self._ensure_stats(data, userid)
+            stats = await self._ensure_stats(data, userid)
 
         leaderboards = {"normal": [], "hard": []}
         for user_id, user_data in data.items():
             if not isinstance(user_data, dict):
                 continue
-            user_stats = self._ensure_stats(data, user_id)
+            user_stats = await self._ensure_stats(data, user_id)
             for diff in ("normal", "hard"):
                 if user_stats[diff]["round"] >= 50:
                     win_rate = user_stats[diff]["win"] / user_stats[diff]["round"]
@@ -2463,7 +2481,7 @@ class SquidRPSView(discord.ui.View):
             embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
         embed.set_footer(
-            text=SquidRPS(self.bot).win_rate_show(
+            text=await SquidRPS(self.bot).win_rate_show(
                 str(self.command_interaction.user.id), self.difficulty
             )
         )
@@ -2574,7 +2592,7 @@ class SquidRPSView(discord.ui.View):
                 embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
             embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
             embed.set_footer(
-                text=SquidRPS(self.bot).win_rate_show(
+                text=await SquidRPS(self.bot).win_rate_show(
                     str(self.command_interaction.user.id), self.difficulty
                 )
             )
@@ -2591,7 +2609,7 @@ class SquidRPSView(discord.ui.View):
         if shot:
             self.bullet_positions.discard(shot_index)
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(self.command_interaction.user.id)
             if result == 1:
                 desc += "，你贏了!"
@@ -2603,7 +2621,7 @@ class SquidRPSView(discord.ui.View):
                         gain = reward - self.bet
                         data[userid]["cake"] += reward
                         data[userid]["squid_playing"] = False
-                        stats = SquidRPS(self.bot)._ensure_stats(data, userid)
+                        stats = await SquidRPS(self.bot)._ensure_stats(data, userid)
                         stats[self.difficulty]["win"] += 1
                         stats[self.difficulty]["round"] += 1
                         embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
@@ -2621,10 +2639,10 @@ class SquidRPSView(discord.ui.View):
                             value=result_message,
                             inline=False,
                         )
-                        common.datawrite(data)
+                        await common.mongo_storage.write_data_to_mongo(data)
 
                         embed.set_footer(
-                            text=SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
+                            text=await SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
                         )
                         await self._edit_message(interaction, embed=embed, view=None)
 
@@ -2636,10 +2654,10 @@ class SquidRPSView(discord.ui.View):
                         embed.add_field(name="難度", value=self.difficulty, inline=False)
                         embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
                         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
-                        common.datawrite(data)
+                        await common.mongo_storage.write_data_to_mongo(data)
 
                         embed.set_footer(
-                            text=SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
+                            text=await SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
                         )
                         await self._edit_message(interaction, embed=embed, view=self)
 
@@ -2653,10 +2671,10 @@ class SquidRPSView(discord.ui.View):
                     if self.difficulty == "hard":
                         embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
-                    common.datawrite(data)
+                    await common.mongo_storage.write_data_to_mongo(data)
 
                     embed.set_footer(
-                        text=SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
+                        text=await SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
                     )
                     await self._edit_message(interaction, embed=embed, view=self)
 
@@ -2668,7 +2686,7 @@ class SquidRPSView(discord.ui.View):
                 if shot:
                     desc += "\n砰! 你被實彈擊中了..."
                     data[userid]["squid_playing"] = False
-                    stats = SquidRPS(self.bot)._ensure_stats(data, userid)
+                    stats = await SquidRPS(self.bot)._ensure_stats(data, userid)
                     stats[self.difficulty]["round"] += 1
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                     embed.add_field(name="難度", value=self.difficulty, inline=False)
@@ -2680,10 +2698,10 @@ class SquidRPSView(discord.ui.View):
                         value=f"你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
                         inline=False,
                     )
-                    common.datawrite(data)
+                    await common.mongo_storage.write_data_to_mongo(data)
 
                     embed.set_footer(
-                        text=SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
+                        text=await SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
                     )
                     await self._edit_message(interaction, embed=embed, view=None)
                     self.stop()
@@ -2695,10 +2713,10 @@ class SquidRPSView(discord.ui.View):
                     if self.difficulty == "hard":
                         embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
-                    common.datawrite(data)
+                    await common.mongo_storage.write_data_to_mongo(data)
 
                     embed.set_footer(
-                        text=SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
+                        text=await SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
                     )
                     await self._edit_message(interaction, embed=embed, view=self)
 
@@ -2717,11 +2735,11 @@ class SquidRPSView(discord.ui.View):
 
     async def on_timeout(self) -> None:
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             userid = str(self.command_interaction.user.id)
             if data.get(userid, {}).get("squid_playing"):
                 data[userid]["squid_playing"] = False
-                common.datawrite(data)
+                await common.mongo_storage.write_data_to_mongo(data)
 
 
 
@@ -2739,10 +2757,10 @@ class CollectionTradeButton(discord.ui.View):
     @discord.ui.button(label="購買!",style=discord.ButtonStyle.green)
     async def collection_trade_button(self,interaction,button: discord.ui.Button):
         async with common.jsonio_lock:
-            user_data = common.dataload()
+            user_data = await common.mongo_storage.load_data_from_mongo()
             selluserid = str(self.selluser.user.id)
             buyuserid = str(interaction.user.id)
-            mining_data = MiningGame(self.bot).miningdata_read(buyuserid)
+            mining_data = await MiningGame(self.bot).miningdata_read(buyuserid)
 
             #買家有沒有錢?
             if user_data[buyuserid]["cake"] < self.price:
@@ -2757,8 +2775,8 @@ class CollectionTradeButton(discord.ui.View):
                 mining_data[buyuserid]["collections"][self.collection_name] = 0
             mining_data[buyuserid]["collections"][self.collection_name] += 1
 
-            common.datawrite(user_data)
-            common.datawrite(mining_data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(user_data)
+            await common.mongo_storage.write_data_to_mongo(mining_data,"mining")
 
             await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"此筆交易提案已完成。\n賣家:<@{selluserid}>\n買家:<@{buyuserid}>\n購買項目:**{self.collection_name}**",color=common.bot_color),view=self)
     
@@ -2776,9 +2794,9 @@ class AutofixButton(discord.ui.View):
     async def autofix_button(self,interaction,button: discord.ui.Button):
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
-            data = common.dataload("data/mining.json")
+            data = await common.mongo_storage.load_data_from_mongo("mining")
             data[userid]["autofix"] = False
-            common.datawrite(data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(data,"mining")
             button.disabled = True
             await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description="自動修理已關閉。",color=common.bot_color),view=self)
 

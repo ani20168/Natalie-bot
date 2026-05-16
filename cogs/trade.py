@@ -69,20 +69,22 @@ class Auction:
 
     async def reserve(self, user_id: int, amount: int):
         """預扣指定用戶的蛋糕。"""
-        data = common.dataload()
-        if str(user_id) not in data or data[str(user_id)]["cake"] < amount:
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        spend_result = await userdata_collection.find_one_and_update(
+            {"_id": str(user_id), "cake": {"$gte": amount}},
+            {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -amount}},
+            upsert=False,
+            return_document=common.ReturnDocument.AFTER,
+        )
+        if spend_result is None:
             raise ValueError(f"{common.cake_emoji}不足")
-        data[str(user_id)]["cake"] -= amount
-        common.datawrite(data)
 
     async def refund(self, user_id: int, amount: int):
         """退款給指定用戶。"""
-        async with common.jsonio_lock:
-            data = common.dataload()
-            if str(user_id) not in data:
-                data[str(user_id)] = {"cake": 0}
-            data[str(user_id)]["cake"] += amount
-            common.datawrite(data)
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        await userdata_collection.update_one({"_id": str(user_id)}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": amount}}, upsert=True)
 
     async def place_bid(self, interaction: discord.Interaction):
         """處理按鈕互動產生的出價。必須於 self.lock 內呼叫。"""
@@ -98,13 +100,16 @@ class Auction:
         additional_needed = next_price - previously_reserved
         if additional_needed <= 0:
             raise ValueError("你的出價已經是目前最高價")
-        # 預扣差額蛋糕
-        async with common.jsonio_lock:
-            data = common.dataload()
-            if str(bidder_id) not in data or data[str(bidder_id)]["cake"] < additional_needed:
-                raise ValueError(f"{common.cake_emoji}不足，無法出價")
-            data[str(bidder_id)]["cake"] -= additional_needed
-            common.datawrite(data)
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        spend_result = await userdata_collection.find_one_and_update(
+            {"_id": str(bidder_id), "cake": {"$gte": additional_needed}},
+            {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -additional_needed}},
+            upsert=False,
+            return_document=common.ReturnDocument.AFTER,
+        )
+        if spend_result is None:
+            raise ValueError(f"{common.cake_emoji}不足，無法出價")
 
         # 更新競標狀態
         self.bid_history[bidder_id] = previously_reserved + additional_needed
@@ -340,11 +345,13 @@ class AuctionLoop:
 
         # 3. 撥款給賣家
         if auction.highest_bidder is not None:
-            async with common.jsonio_lock:
-                data = common.dataload()
-                data.setdefault(str(auction.author_id), {"cake": 0})
-                data[str(auction.author_id)]["cake"] += auction.highest_bid
-                common.datawrite(data)
+            userdata_collection = common.mongo_storage.get_collection("userdata")
+            defaults = common.mongo_storage.get_user_defaults()
+            await userdata_collection.update_one(
+                {"_id": str(auction.author_id)},
+                {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": auction.highest_bid}},
+                upsert=True,
+            )
 
         # 4. 公告結果
         if auction.highest_bidder is None:
@@ -527,7 +534,7 @@ class Trade(commands.Cog):
                 
             async with common.jsonio_lock:
                 now = datetime.now()
-                data = common.dataload()
+                data = await common.mongo_storage.load_data_from_mongo()
                 memberid = str(interaction.user.id)
                 if "redeem member role interval" in data[memberid]:
                     last_redeem = datetime.strptime(data[memberid]['redeem member role interval'], '%Y-%m-%d %H:%M')
@@ -552,31 +559,44 @@ class Trade(commands.Cog):
                 await interaction.guild.create_role(name=rolename,color=colorhex,reason="Nitro Booster兌換每月自訂稱號")
                 await interaction.user.add_roles(discord.utils.get(interaction.guild.roles,name=rolename))
                 await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description=f"兌換成功!你現在擁有《 **{rolename}** 》稱號。",color=common.bot_color))
-                common.datawrite(data)
+                await common.mongo_storage.write_data_to_mongo(data)
             
     @app_commands.command(name = "cake_give", description = "贈送蛋糕")
     @app_commands.describe(member_give="你想要給予的人(使用提及)",amount="給予的蛋糕數量")
     @app_commands.rename(member_give="提及用戶",amount="數量")
     async def cake_give(self,interaction,member_give: discord.Member,amount: int):
         userid = str(interaction.user.id)
-        async with common.jsonio_lock:
-            user_data = common.dataload()
-            if interaction.user == member_give:
-                await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你無法贈送給自己。",color=common.bot_error_color))
-                return
-            if member_give.bot:
-                await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你無法贈送給bot。",color=common.bot_error_color))
-                return
-            if amount <= 0:
-                await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:請輸入有效的數字。",color=common.bot_error_color))
-                return
-            if user_data[userid]["cake"] < amount:
-                await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"錯誤:{common.cake_emoji}不足，你只有**{user_data[userid]['cake']}**塊{common.cake_emoji}。",color=common.bot_error_color))
-                return
+        if interaction.user == member_give:
+            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你無法贈送給自己。",color=common.bot_error_color))
+            return
+        if member_give.bot:
+            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:你無法贈送給bot。",color=common.bot_error_color))
+            return
+        if amount <= 0:
+            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description="錯誤:請輸入有效的數字。",color=common.bot_error_color))
+            return
 
-            user_data[userid]["cake"] -= amount
-            user_data[str(member_give.id)]["cake"] += amount
-            common.datawrite(user_data)
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        spend_result = await userdata_collection.find_one_and_update(
+            {"_id": userid, "cake": {"$gte": amount}},
+            {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -amount}},
+            upsert=False,
+            return_document=common.ReturnDocument.AFTER,
+        )
+        if spend_result is None:
+            user_data = await common.mongo_storage.ensure_user_document(userid)
+            await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"錯誤:{common.cake_emoji}不足，你只有**{user_data.get('cake', 0)}**塊{common.cake_emoji}。",color=common.bot_error_color))
+            return
+        try:
+            await userdata_collection.update_one(
+                {"_id": str(member_give.id)},
+                {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": amount}},
+                upsert=True,
+            )
+        except Exception:
+            await userdata_collection.update_one({"_id": userid}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": amount}}, upsert=True)
+            raise
 
         await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"你給予了**{amount}**塊{common.cake_emoji}給<@{str(member_give.id)}>",color=common.bot_color))
 

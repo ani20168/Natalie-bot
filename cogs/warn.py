@@ -47,7 +47,7 @@ class WarnDeleteConfirmButton(discord.ui.Button):
         idx = view.index_one_based - 1
         error_key: str | None = None
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             user_block = data.get(target_key)
             if not isinstance(user_block, dict):
                 error_key = "no_user"
@@ -57,7 +57,7 @@ class WarnDeleteConfirmButton(discord.ui.Button):
                     error_key = "bad_idx"
                 else:
                     del warn_list[idx]
-                    common.datawrite(data)
+                    await common.mongo_storage.write_data_to_mongo(data)
         if error_key == "no_user":
             await interaction.response.send_message(
                 embed=Embed(title="刪除警告", description="找不到該使用者的資料。", color=common.bot_error_color),
@@ -131,7 +131,7 @@ class Warn(commands.Cog):
         now_utc = datetime.now(timezone.utc)
         ts_str = now_utc.isoformat()
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             if target_key not in data:
                 data[target_key] = {"cake": 0, "warn_list": []}
             elif not isinstance(data[target_key], dict):
@@ -140,7 +140,7 @@ class Warn(commands.Cog):
             if "warn_list" not in user_block or not isinstance(user_block["warn_list"], list):
                 user_block["warn_list"] = []
             user_block["warn_list"].insert(0, {"reason": reason, "timestamp": ts_str})
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
             warn_list = user_block["warn_list"]
             total = len(warn_list)
             effective = self.count_effective_warns(warn_list, now_utc)
@@ -195,7 +195,7 @@ class Warn(commands.Cog):
                 ephemeral=True,
             )
             return
-        data = common.dataload()
+        data = await common.mongo_storage.load_data_from_mongo()
         target_key = str(target.id)
         user_block = data.get(target_key)
         warn_list: list = []
@@ -236,7 +236,7 @@ class Warn(commands.Cog):
             )
             return
         target_key = str(member.id)
-        data = common.dataload()
+        data = await common.mongo_storage.load_data_from_mongo()
         user_block = data.get(target_key)
         warn_list: list = []
         if isinstance(user_block, dict) and isinstance(user_block.get("warn_list"), list):

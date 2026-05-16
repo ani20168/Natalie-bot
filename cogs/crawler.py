@@ -48,7 +48,7 @@ class SteamFreeGameCrawler(commands.Cog):
                     unique_game_ids.add(game_id)
                     unique_gamelist.append(url)
 
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             for i in range(len(unique_gamelist) - 1, -1, -1):  # 从列表的最后一个元素向前迭代
                 needcheck_game = unique_gamelist[i]
                 game_id = self.get_game_id(needcheck_game)
@@ -196,11 +196,11 @@ class SteamFreeGameCrawler(commands.Cog):
         await self.freegame_notice_channel.send(content=post_text)
         game_id = self.get_game_id(game_url)
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
             if "steam_freegame_alreadypost" not in data:
                 data["steam_freegame_alreadypost"] = []
             data["steam_freegame_alreadypost"].append(game_id)
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
 
     def get_game_id(self, url):
         match = re.search(r"https://store.steampowered.com/app/(\d+)", url)

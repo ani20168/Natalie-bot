@@ -34,17 +34,17 @@ class Startup(commands.Cog):
         nowtime = datetime.now(timezone(timedelta(hours=8)))
         if nowtime.hour == 0 and nowtime.minute == 0:
             async with common.jsonio_lock:
-                data = common.dataload("data/mining.json")
+                data = await common.mongo_storage.load_data_from_mongo("mining")
                 for key, value in data["mine_mininglimit"].items():
                     if value != 500:
                         data["mine_mininglimit"][key] = 500
-                common.datawrite(data,"data/mining.json")
+                await common.mongo_storage.write_data_to_mongo(data,"mining")
 
     #挖礦遊戲-自動挖礦機的挖礦流程
     @tasks.loop(hours=3)
     async def mining_machine_work(self):
         async with common.jsonio_lock:
-            data = common.dataload("data/mining.json")
+            data = await common.mongo_storage.load_data_from_mongo("mining")
             for userid, user_data in data.items():
                 if isinstance(user_data, dict) and "machine_amount" in user_data and user_data["machine_amount"] >= 1:
                     #開始抽獎
@@ -66,14 +66,14 @@ class Startup(commands.Cog):
                                         data[userid][reward] += 1
 
                                     break
-            common.datawrite(data,"data/mining.json")
+            await common.mongo_storage.write_data_to_mongo(data,"mining")
             
 
     #用戶資料初始化/檢查
     @tasks.loop(seconds=5,count=1)
     async def userdata_initialization(self):
         async with common.jsonio_lock:
-            data = common.dataload()
+            data = await common.mongo_storage.load_data_from_mongo()
 
             for member in self.bot.get_all_members():
                 if str(member.id) not in data:
@@ -82,7 +82,7 @@ class Startup(commands.Cog):
                 if 'afk_start' in data[str(member.id)]:
                     del data[str(member.id)]['afk_start']
             
-            common.datawrite(data)
+            await common.mongo_storage.write_data_to_mongo(data)
 
     #每5分鐘，有在指定的語音頻道內則給予蛋糕
     @tasks.loop(minutes=5)
@@ -97,23 +97,25 @@ class Startup(commands.Cog):
             540484453445664768
         ]
         
-        async with common.jsonio_lock:
-            data = common.dataload()
+        reward_map = {}
+        for channelid in vclist:
+            channel = self.bot.get_channel(channelid)
+            if channel is None: continue
+            for member in channel.members:
+                if member.bot: continue
+                reward = 3
+                if any(role.id in [419185180134080513,605730134531637249,419185995078959104] for role in member.roles):
+                    reward += 3
+                if member.voice and member.voice.self_stream:
+                    reward += 10
+                if reward <= 0: continue
+                member_id = str(member.id)
+                reward_map[member_id] = reward_map.get(member_id, 0) + reward
 
-            for channelid in vclist:
-                channel = self.bot.get_channel(channelid)
-                for member in channel.members:
-                    #如果資料內有用戶ID(正常都會有)，並且非機器人
-                    if str(member.id) in data and member.bot == False:
-                        data[str(member.id)]["cake"] += 3
-                    #VIP、MOD、ADMIN獎勵
-                    if str(member.id) in data and any(role.id in [419185180134080513,605730134531637249,419185995078959104] for role in member.roles):
-                        data[str(member.id)]["cake"] += 3
-                    #直播獎勵
-                    if str(member.id) in data and member.voice.self_stream == True:
-                        data[str(member.id)]["cake"] += 10
-                            
-            common.datawrite(data)
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        for member_id, reward in reward_map.items():
+            await userdata_collection.update_one({"_id": member_id}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": reward}}, upsert=True)
 
     #紀錄會員在語音內的分鐘數，並給予前三名獎勵
     @tasks.loop(minutes=1)
@@ -128,59 +130,54 @@ class Startup(commands.Cog):
             540484453445664768
         ]
         
-        async with common.jsonio_lock:
-            data = common.dataload()
-            for channelid in vclist:
-                channel = self.bot.get_channel(channelid)
-                for member in channel.members:
-                    userid = str(member.id)
-                    if userid in data:
-                        #語音活躍分鐘數+1
-                        if "voice_active_minutes" not in data[userid]:
-                            data[userid]['voice_active_minutes'] = 0
-                        data[userid]['voice_active_minutes'] += 1
+        for channelid in vclist:
+            channel = self.bot.get_channel(channelid)
+            if channel is None: continue
+            for member in channel.members:
+                userid = str(member.id)
+                userdata_collection = common.mongo_storage.get_collection("userdata")
+                defaults = common.mongo_storage.get_user_defaults()
+                await userdata_collection.update_one({"_id": userid}, {"$setOnInsert": defaults, "$inc": {"voice_active_minutes": 1}}, upsert=True)
 
-                        # 是否再掛機?(語音房內只有1人、靜音狀態)
-                        if len(channel.members) == 1 and member.voice.self_mute == True:
-                            # 如果資料中不存在該成員的AFK時間，則添加
-                            if 'afk_start' not in data[userid]:
-                                data[userid]['afk_start'] = int(time.time())
-                            else:
-                                # 檢查是否超過20分鐘
-                                elapsed_time = int(time.time()) - data[userid]['afk_start']
-                                if elapsed_time >= 20 * 60:
-                                    # 如果超過20分鐘，給予AFK角色
-                                    afk_role = member.guild.get_role(577690189942751252)
-                                    if afk_role not in member.roles:
-                                        await member.add_roles(afk_role,reason="掛機持續20分鐘，添加身分組。")
-                        else:
-                            # 如果用戶不再AFK狀態，清除計時
-                            if 'afk_start' in data[userid]:
-                                del data[userid]['afk_start']
+                # 是否再掛機?(語音房內只有1人、靜音狀態)
+                member_data = await common.mongo_storage.get_user(userid)
+                if len(channel.members) == 1 and member.voice and member.voice.self_mute == True:
+                    afk_start = int(member_data.get("afk_start", 0)) if isinstance(member_data, dict) else 0
+                    if afk_start == 0:
+                        await common.mongo_storage.update_user_fields(userid, {"afk_start": int(time.time())})
+                    else:
+                        elapsed_time = int(time.time()) - afk_start
+                        if elapsed_time >= 20 * 60:
+                            afk_role = member.guild.get_role(577690189942751252)
+                            if afk_role not in member.roles:
+                                await member.add_roles(afk_role,reason="掛機持續20分鐘，添加身分組。")
+                else:
+                    if isinstance(member_data, dict) and "afk_start" in member_data:
+                        await common.mongo_storage.unset_user_fields(userid, ["afk_start"])
 
-            
-            #每日結算
-            nowtime = datetime.now(timezone(timedelta(hours=8)))
-            if nowtime.hour == 0 and nowtime.minute == 0:
-                #如果用戶資料內有voice_active_minutes且>10分鐘
-                sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
-                #列出前三名，並給予獎勵（基礎 600/400/200；分鐘>=180 二倍、>=300 三倍）
-                data['yesterday_voice_leaderboard'] = ""
-                base_rewards = (600, 400, 200)
-                for i, (userid, userdata) in enumerate(sorted_data[:3]):
-                    user = self.bot.get_user(int(userid))
-                    minutes = userdata['voice_active_minutes']
-                    multiplier = 3 if minutes >= 300 else (2 if minutes >= 180 else 1)
-                    reward = base_rewards[i] * multiplier
-                    data[userid]['cake'] += reward
-                    bonus_note = f"，{multiplier}倍" if multiplier > 1 else ""
-                    line = f"{i + 1}.{user.display_name} 語音分鐘數:**{minutes}** (獲得{reward}塊蛋糕{bonus_note})"
-                    data['yesterday_voice_leaderboard'] += line + ("\n" if i < 2 else "")
-                #隔日重置        
-                for userid, userdata in data.items():
-                    if isinstance(userdata, dict) and 'voice_active_minutes' in userdata:
-                        data[userid]['voice_active_minutes'] = 0
-            common.datawrite(data)
+        #每日結算
+        nowtime = datetime.now(timezone(timedelta(hours=8)))
+        if nowtime.hour == 0 and nowtime.minute == 0:
+            data = await common.mongo_storage.load_data_from_mongo()
+            sorted_data = sorted([(userid, userdata) for userid, userdata in data.items() if isinstance(userdata, dict) and 'voice_active_minutes' in userdata and userdata['voice_active_minutes'] > 10], key=lambda x: x[1]['voice_active_minutes'], reverse=True)
+            base_rewards = (600, 400, 200)
+            leaderboard_lines = []
+            for i, (userid, userdata) in enumerate(sorted_data[:3]):
+                user = self.bot.get_user(int(userid))
+                minutes = userdata['voice_active_minutes']
+                multiplier = 3 if minutes >= 300 else (2 if minutes >= 180 else 1)
+                reward = base_rewards[i] * multiplier
+                userdata_collection = common.mongo_storage.get_collection("userdata")
+                defaults = common.mongo_storage.get_user_defaults()
+                await userdata_collection.update_one({"_id": userid}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": reward}}, upsert=True)
+                bonus_note = f"，{multiplier}倍" if multiplier > 1 else ""
+                username = user.display_name if user else userid
+                leaderboard_lines.append(f"{i + 1}.{username} 語音分鐘數:**{minutes}** (獲得{reward}塊蛋糕{bonus_note})")
+
+            await common.mongo_storage.update_global_fields({"yesterday_voice_leaderboard": "\n".join(leaderboard_lines)})
+            for userid, userdata in data.items():
+                if isinstance(userdata, dict) and 'voice_active_minutes' in userdata:
+                    await common.mongo_storage.update_user_fields(userid, {"voice_active_minutes": 0})
 
     @userdata_initialization.before_loop    
     @give_cake_in_vc.before_loop
@@ -223,7 +220,7 @@ class AfkDisconnect(commands.Cog):
         guild = self.bot.get_guild(self.server_id)
         if guild is None:
             return
-        data = common.dataload()
+        data = await common.mongo_storage.load_data_from_mongo()
         for uid in self.whitelist:
             member = guild.get_member(int(uid))
             if member is None:
