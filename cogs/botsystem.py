@@ -94,39 +94,30 @@ class BotSystem(commands.Cog):
         os.makedirs(backup_dir, exist_ok=True)
 
         timestamp = time.strftime("%Y%m%d_%H%M%S")
-        backup_filename = f"discord_{timestamp}.archive.gz"
+        backup_filename = f"discord_{timestamp}.tar.gz"
         backup_path = os.path.join(backup_dir, backup_filename)
         latest_path_file = os.path.join(backup_dir, "latest_backup.txt")
 
-        mongo_uri = common.mongo_storage.get_mongo_uri()
-        if not mongo_uri:
+        if not common.mongo_storage.get_mongo_uri():
             await interaction.followup.send(embed=Embed(title="備份失敗", description="找不到 Mongo 連線設定（請檢查 secret.json 的 DB_URL 與 PRD_DB_URL）。", color=common.bot_error_color), ephemeral=True)
             return
 
-        database_name = common.mongo_storage.get_database_name(mongo_uri)
-        mongodump_binary = os.getenv("MONGODUMP_BIN", "mongodump")
-        process = await asyncio.create_subprocess_exec(
-            mongodump_binary,
-            f"--uri={mongo_uri}",
-            f"--db={database_name}",
-            f"--archive={backup_path}",
-            "--gzip",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await process.communicate()
-        if process.returncode != 0:
-            error_message = stderr.decode("utf-8", errors="ignore").strip()
-            if not error_message: error_message = stdout.decode("utf-8", errors="ignore").strip()
-            if not error_message: error_message = "未知錯誤"
-            await interaction.followup.send(embed=Embed(title="備份失敗", description=f"錯誤碼: {process.returncode}\n{error_message[:1800]}", color=common.bot_error_color), ephemeral=True)
+        try:
+            summary = await common.mongo_storage.export_database_backup(backup_path)
+        except Exception as error:
+            await interaction.followup.send(embed=Embed(title="備份失敗", description=f"{type(error).__name__}: {error}", color=common.bot_error_color), ephemeral=True)
             return
 
         with open(latest_path_file, "w", encoding="utf-8") as file:
             file.write(f"{backup_path}\n")
 
         backup_size = os.path.getsize(backup_path) if os.path.isfile(backup_path) else 0
+        collection_lines = "\n".join(f"- `{item['name']}`: {item['document_count']} 筆" for item in summary["collections"])
         success_message = (
+            f"資料庫: `{summary['database']}`\n"
+            f"格式: `{summary['format']}`\n"
+            f"總文件數: `{summary['document_count']}`\n"
+            f"{collection_lines}\n"
             f"備份檔案: `{backup_filename}`\n"
             f"完整路徑: `{backup_path}`\n"
             f"檔案大小: `{backup_size}` bytes\n"

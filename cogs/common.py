@@ -1,8 +1,13 @@
+import io
 import json
 import os
 import re
+import tarfile
+import time
 import asyncio
 from urllib.parse import urlparse
+
+from bson import json_util
 
 try:
     from pymongo import AsyncMongoClient, ReplaceOne, ReturnDocument  # pyright: ignore[reportMissingImports]
@@ -445,6 +450,59 @@ class MongoStorage:
         collection = self.get_collection(dataset)
         if collection is None: return
         await collection.update_one({"_id": "global"}, {"$set": fields}, upsert=True)
+
+    async def export_database_backup(self, backup_path: str) -> dict:
+        """
+        使用 pymongo 匯出資料庫至 tar.gz（不依賴 mongodump）。
+
+        Args:
+          backup_path (str): "./backup/mongo/discord_20260516.tar.gz"
+
+        Returns:
+          (dict): "{'database': 'discord', 'document_count': 100, 'collections': [...]}"
+        """
+        self.ensure_client()
+        if self.database is None: raise RuntimeError("Mongo 資料庫尚未初始化。")
+
+        backup_parent = os.path.dirname(backup_path)
+        if backup_parent: os.makedirs(backup_parent, exist_ok=True)
+
+        collection_stats = []
+        total_documents = 0
+        with tarfile.open(backup_path, "w:gz") as archive:
+            for collection_name in sorted(await self.database.list_collection_names()):
+                buffer = io.BytesIO()
+                document_count = 0
+                async for document in self.database[collection_name].find({}):
+                    buffer.write((json_util.dumps(document, ensure_ascii=False) + "\n").encode("utf-8"))
+                    document_count += 1
+                buffer.seek(0)
+                tar_info = tarfile.TarInfo(name=f"{collection_name}.jsonl")
+                tar_info.size = buffer.getbuffer().nbytes
+                archive.addfile(tar_info, buffer)
+                collection_stats.append({"name": collection_name, "document_count": document_count})
+                total_documents += document_count
+
+            manifest = {
+                "format_version": 1,
+                "database": self.db_name,
+                "exported_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                "collections": collection_stats,
+            }
+            manifest_bytes = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
+            manifest_buffer = io.BytesIO(manifest_bytes)
+            manifest_info = tarfile.TarInfo(name="manifest.json")
+            manifest_info.size = len(manifest_bytes)
+            archive.addfile(manifest_info, manifest_buffer)
+
+        return {
+            "database": self.db_name,
+            "backup_path": backup_path,
+            "format": "tar.gz+jsonl",
+            "collection_count": len(collection_stats),
+            "document_count": total_documents,
+            "collections": collection_stats,
+        }
 
 mongo_storage = MongoStorage()
 
