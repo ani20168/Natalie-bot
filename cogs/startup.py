@@ -3,9 +3,12 @@ from discord import app_commands,Embed
 from discord.ext import commands,tasks
 from . import common
 from . import game
+import json
 import time
 import random
 import os
+import aiohttp
+import asyncio
 from datetime import datetime,timezone,timedelta
 
 
@@ -20,6 +23,7 @@ class Startup(commands.Cog):
         self.voice_active_record.start()
         self.mining_machine_work.start()
         self.auto_backup_database.start()
+        self.check_asf.start()
 
     #卸載cog時觸發
     async def cog_unload(self):
@@ -29,6 +33,7 @@ class Startup(commands.Cog):
         self.voice_active_record.cancel()
         self.mining_machine_work.cancel()
         self.auto_backup_database.cancel()
+        self.check_asf.cancel()
 
 
     #挖礦遊戲-刷新礦場總挖礦次數
@@ -90,6 +95,59 @@ class Startup(commands.Cog):
         # 所有玩家結算完後，回寫本輪扣減後的礦場剩餘次數。
         await mining_collection.update_one({"_id": "global"}, {"$set": {"mine_mininglimit": mine_mininglimit}}, upsert=True)
             
+
+    @tasks.loop(seconds=5, count=1)
+    async def check_asf(self):
+        """
+        開機後測試 ASF API 連線（僅 PRD 環境執行一次）。
+
+        Args:
+          無參數 (None): "None"
+
+        Returns:
+          (None): "None"
+        """
+        if common.mongo_storage.get_runtime_env() != "PRD": return
+        admin_channel = self.bot.get_channel(common.admin_log_channel)
+        if admin_channel is None: return
+        api_headers = {
+            "accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.4044.138 Safari/537.36",
+        }
+        error_message = None
+        version_text = ""
+        try:
+            async with self.bot.session.post(
+                common.asf_api_url,
+                json={"Command": "version"},
+                headers=api_headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                response_text = await response.text()
+                if response.status != 200:
+                    error_message = f"HTTP {response.status}: {response_text[:200]}"
+                else:
+                    try:
+                        data = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        error_message = f"回應格式錯誤: {response_text[:200]}"
+                    else:
+                        if not data.get("Success", False):
+                            error_message = str(data.get("Result", response_text) or "ASF 回傳失敗")
+                        else:
+                            version_text = str(data.get("Result", ""))
+        except asyncio.TimeoutError:
+            error_message = "連線逾時"
+        except aiohttp.ClientError as error:
+            error_message = str(error)
+        except Exception as error:
+            error_message = f"{type(error).__name__}: {error}"
+        if error_message is None:
+            embed = Embed(title="ASF 連線測試", description=f"已連線。 (版本:{version_text})", color=common.bot_color)
+        else:
+            embed = Embed(title="ASF 連線測試", description=error_message, color=common.bot_error_color)
+        await admin_channel.send(embed=embed)
 
     #用戶資料初始化/檢查
     @tasks.loop(seconds=5,count=1)
@@ -229,6 +287,7 @@ class Startup(commands.Cog):
             if admin_channel is None: return
             await admin_channel.send(embed=Embed(title="自動備份失敗", description=f"{type(error).__name__}: {error}", color=common.bot_error_color))
 
+    @check_asf.before_loop
     @userdata_initialization.before_loop    
     @give_cake_in_vc.before_loop
     @mine_mininglimit_reflash.before_loop

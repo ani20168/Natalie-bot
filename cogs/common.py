@@ -19,6 +19,8 @@ cake_emoji_id = 896670335326371840       #蛋糕ID
 cake_emoji = f"<:cake:{cake_emoji_id}>"  #直接顯示蛋糕emoji
 fake_sister_server_id = 419108485435883531
 
+asf_api_url = "http://asf:1242/Api/Command"
+
 # 搶紅包允許發佈的文字頻道 ID：大廳、機器人指令區、日誌
 red_packet_allowed_channel_ids = [
     419108485435883533,  # 大廳

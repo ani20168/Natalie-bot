@@ -1,6 +1,7 @@
 from discord import app_commands,Embed
 from discord.ext import commands,tasks
 from . import common
+import json
 import time
 import asyncio
 import aiohttp
@@ -9,7 +10,6 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 import re
 import traceback
-
 
 
 class SteamFreeGameCrawler(commands.Cog):
@@ -202,6 +202,53 @@ class SteamFreeGameCrawler(commands.Cog):
                 {"$addToSet": {"steam_freegame_alreadypost": game_id}},
                 upsert=True,
             )
+        await self.send_asf(game_id)
+
+    async def send_asf(self, game_id: str):
+        """
+        透過 ASF API 自動為使用者領取限免遊戲。
+
+        Args:
+          game_id (str): "570"
+
+        Returns:
+          (None): "None"
+        """
+        if not game_id: return
+        api_headers = {
+            "accept": "application/json",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.4044.138 Safari/537.36",
+        }
+        error_message = None
+        try:
+            async with self.bot.session.post(
+                common.asf_api_url,
+                json={"Command": f"addlicense ASF {game_id}"},
+                headers=api_headers,
+                timeout=aiohttp.ClientTimeout(total=10),
+            ) as response:
+                response_text = await response.text()
+                if response.status != 200:
+                    error_message = f"HTTP {response.status}: {response_text[:200]}"
+                else:
+                    try:
+                        data = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        error_message = f"回應格式錯誤: {response_text[:200]}"
+                    else:
+                        if not data.get("Success", False):
+                            error_message = str(data.get("Result", response_text) or "ASF 回傳失敗")
+        except asyncio.TimeoutError:
+            error_message = "連線逾時"
+        except aiohttp.ClientError as error:
+            error_message = str(error)
+        except Exception as error:
+            error_message = f"{type(error).__name__}: {error}"
+        if error_message is None: return
+        admin_channel = self.bot.get_channel(common.admin_log_channel)
+        if admin_channel is None: return
+        await admin_channel.send(embed=Embed(title="ASF 自動入庫失敗", description=f"遊戲 ID: {game_id}\n{error_message}", color=common.bot_error_color))
 
     def get_game_id(self, url):
         match = re.search(r"https://store.steampowered.com/app/(\d+)", url)
