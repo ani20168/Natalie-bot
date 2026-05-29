@@ -188,9 +188,13 @@ class SteamFreeGameCrawler(commands.Cog):
         # 最終價格
         final_price = game_buy_block.find('div', class_="discount_final_price")
         final_price_text = final_price.text.strip() if final_price else None
-        await self.post_freegame(game_url, date_tw_str, discount_pct_text, final_price_text)
+        sub_id = self.get_sub_id(str(game_buy_block))
+        if not sub_id:
+            print(f"sub_id not found! game url: {game_url}")
+            return
+        await self.post_freegame(game_url, date_tw_str, discount_pct_text, final_price_text, sub_id)
 
-    async def post_freegame(self, game_url, free_info, discount_pct, final_price):
+    async def post_freegame(self, game_url, free_info, discount_pct, final_price, sub_id):
         #free_info:幾月幾號前可免費取得(日期)
         post_text = f"{game_url}\n{free_info} 前可以免費取得! ({discount_pct} {final_price})"
         await self.freegame_notice_channel.send(content=post_text)
@@ -202,19 +206,19 @@ class SteamFreeGameCrawler(commands.Cog):
                 {"$addToSet": {"steam_freegame_alreadypost": game_id}},
                 upsert=True,
             )
-        await self.send_asf(game_id)
+        await self.send_asf(sub_id)
 
-    async def send_asf(self, game_id: str):
+    async def send_asf(self, sub_id: str):
         """
         透過 ASF API 自動為使用者領取限免遊戲。
 
         Args:
-          game_id (str): "570"
+          sub_id (str): "1642812"
 
         Returns:
           (None): "None"
         """
-        if not game_id: return
+        if not sub_id: return
         api_headers = {
             "accept": "application/json",
             "Content-Type": "application/json",
@@ -224,7 +228,7 @@ class SteamFreeGameCrawler(commands.Cog):
         try:
             async with self.bot.session.post(
                 common.asf_api_url,
-                json={"Command": f"addlicense ASF {game_id}"},
+                json={"Command": f"addlicense ASF {sub_id}"},
                 headers=api_headers,
                 timeout=aiohttp.ClientTimeout(total=10),
             ) as response:
@@ -248,7 +252,23 @@ class SteamFreeGameCrawler(commands.Cog):
         if error_message is None: return
         admin_channel = self.bot.get_channel(common.admin_log_channel)
         if admin_channel is None: return
-        await admin_channel.send(embed=Embed(title="ASF 自動入庫失敗", description=f"遊戲 ID: {game_id}\n{error_message}", color=common.bot_error_color))
+        await admin_channel.send(embed=Embed(title="ASF 自動入庫失敗", description=f"Sub ID: {sub_id}\n{error_message}", color=common.bot_error_color))
+
+    def get_sub_id(self, html: str) -> str:
+        """
+        從商店頁面 HTML 取得第一個 subid。
+
+        Args:
+          html (str): "<input type=\"hidden\" name=\"subid\" value=\"1642812\">"
+
+        Returns:
+          (str): "1642812"
+        """
+        match = re.search(r'<input[^>]*\bname=["\']subid["\'][^>]*\bvalue=["\'](\d+)["\']', html, re.IGNORECASE)
+        if match: return match.group(1)
+        match = re.search(r'<input[^>]*\bvalue=["\'](\d+)["\'][^>]*\bname=["\']subid["\']', html, re.IGNORECASE)
+        if match: return match.group(1)
+        return ""
 
     def get_game_id(self, url):
         match = re.search(r"https://store.steampowered.com/app/(\d+)", url)
