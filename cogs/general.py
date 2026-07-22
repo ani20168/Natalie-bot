@@ -356,7 +356,8 @@ class General(commands.Cog):
         userid = str(interaction.user.id)
         whitelist = [
             # "410847926236086272", #ANI
-            "587934995063111681" #xu6
+            "587934995063111681", #xu6
+            "823967449149603861" #小八
         ]
         if userid not in whitelist:
             await interaction.response.send_message(embed=Embed(title="權限不足",description="你無法使用這個指令!\n此指令僅供白名單使用。",color=common.bot_error_color), ephemeral=True)
