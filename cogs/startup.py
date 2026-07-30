@@ -308,7 +308,8 @@ class AfkDisconnect(commands.Cog):
         self.bot = bot
         self.whitelist = [
             # "410847926236086272", #ANI
-            "587934995063111681" #xu6
+            "587934995063111681", #xu6
+            "823967449149603861" #小八
         ]
         self.server_id = common.fake_sister_server_id
         self.lobby_textchannel_id = 419108485435883533
