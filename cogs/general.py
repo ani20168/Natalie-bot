@@ -104,6 +104,9 @@ class General(commands.Cog):
             "亮粉紅":{"role_id":1395359026879004744},
             "動態淺紫紅":{"role_id":1422416437036711976},
         }
+        self.nitro_booster_role_id = 623486844394536961
+        self.vip_role_id = 605730134531637249
+        self.vip_retain_days = 30
 
     @staticmethod
     def compute_red_packet_amounts(total: int, people: int) -> list[int]:
@@ -996,38 +999,35 @@ class General(commands.Cog):
 
 
     @commands.Cog.listener()
-    async def on_guild_role_update(self,before,after):
-        #如果Nitro booster更動
-        if after.id == 623486844394536961:
-            #檢查是否有新加入的booster但未進入VIP身分
-            before_set = set(before.members)
-            after_set = set(after.members)
-            added_members = after_set - before_set
-            removed_members = before_set - after_set
-            vip_role = after.guild.get_role(605730134531637249)
+    async def on_member_update(self, before: discord.Member, after: discord.Member):
+        """
+        Nitro Booster 進出時同步 VIP：新 Boost 賦予 VIP；未滿保留天數取消 Boost 則移除 VIP。
+        """
+        before_has_booster = any(role.id == self.nitro_booster_role_id for role in before.roles)
+        after_has_booster = any(role.id == self.nitro_booster_role_id for role in after.roles)
+        if before_has_booster == after_has_booster: return
 
-            #新加入的Booster
-            if len(added_members) >= 1:
-                #如果未加入VIP身分(605730134531637249)，則加入
-                for member in added_members:
-                    if vip_role not in member.roles:
-                        await member.add_roles(vip_role,reason="新的Nitro Booster加入，賦予VIP身分組")
-                        await common.mongo_storage.update_user_fields(str(member.id), {"vip_join_time": datetime.now()})
+        vip_role = after.guild.get_role(self.vip_role_id)
+        if vip_role is None: return
+        retain_delta = timedelta(days=self.vip_retain_days)
 
-            # 離開的booster
-            if len(removed_members) >= 1:
-                for member in removed_members:
-                    if vip_role in member.roles:
-                        # 檢查是否已經是VIP身分組30天
-                        member_data = await common.mongo_storage.get_user(str(member.id))
-                        vip_join_time = datetime.now() - timedelta(days=30)
-                        if isinstance(member_data, dict):
-                            vip_join_time = member_data.get("vip_join_time", vip_join_time)
-                        if datetime.now() - vip_join_time < timedelta(days=30):
-                            await member.remove_roles(vip_role, reason="Nitro Booster身分組未達30天就離開，移除VIP身分組")
-                            await common.mongo_storage.unset_user_fields(str(member.id), ["vip_join_time"])
+        # 新加入的 Booster：尚未有 VIP 則賦予並記錄時間
+        if after_has_booster:
+            if vip_role in after.roles: return
+            await after.add_roles(vip_role, reason="新的Nitro Booster加入，賦予VIP身分組")
+            await common.mongo_storage.update_user_fields(str(after.id), {"vip_join_time": datetime.now()})
+            return
 
-
+        # 離開 Booster：未滿保留天數則移除 VIP
+        if vip_role not in after.roles: return
+        member_data = await common.mongo_storage.get_user(str(after.id))
+        # 無紀錄時視為已滿期，不移除 VIP
+        vip_join_time = datetime.now() - retain_delta
+        if isinstance(member_data, dict):
+            vip_join_time = member_data.get("vip_join_time", vip_join_time)
+        if datetime.now() - vip_join_time >= retain_delta: return
+        await after.remove_roles(vip_role, reason="Nitro Booster身分組未達30天就離開，移除VIP身分組")
+        await common.mongo_storage.unset_user_fields(str(after.id), ["vip_join_time"])
 
 async def setup(client:commands.Bot):
     await client.add_cog(General(client))
