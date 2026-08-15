@@ -169,11 +169,13 @@ class General(commands.Cog):
     @app_commands.command(name = "eat", description = "餵食Natalie!")
     @app_commands.describe(eat_cake="要餵食的蛋糕數量，1蛋糕=1經驗值")
     @app_commands.rename(eat_cake="數量")
-    async def eat(self,interaction,eat_cake: int):       
+    async def eat(self,interaction,eat_cake: int):
+        # 檢查餵食數量是否有效
         if eat_cake <= 0:
             await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:請輸入有效的數量",color=common.bot_error_color))
             return
 
+        # 原子扣除蛋糕並暫加經驗（之後再依等級上限校正）
         userid = str(interaction.user.id)
         userdata_collection = common.mongo_storage.get_collection("userdata")
         defaults = common.mongo_storage.get_user_defaults()
@@ -187,21 +189,82 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:蛋糕不足",color=common.bot_error_color))
             return
 
+        # 計算距離等級上限還能吸收多少經驗，超過的部分改為退還蛋糕
         userlevel = common.LevelSystem()
-        userlevel.level = consume_result.get("level", 1)
-        userlevel.level_exp = consume_result.get("level_exp", 0)
-        userlevel.level_next_exp = consume_result.get("level_next_exp", userlevel.level * (userlevel.level + 1) * 30)
+        max_level = userlevel.max_level
+        max_level_exp = userlevel.max_level_exp()
+        previous_exp = consume_result.get("level_exp", 0) - eat_cake
+        if previous_exp < 0:
+            previous_exp = 0
+        exp_room = max(0, max_level_exp - previous_exp)
+        actual_gained = min(eat_cake, exp_room)
+        refund_cake = eat_cake - actual_gained
 
-        message = Embed(title='餵食Natalie',description=f"我吃飽啦!(獲得**{eat_cake}**點經驗值)",color=common.bot_color)
-        if userlevel.level_exp >= userlevel.level_next_exp:
-            while userlevel.level_exp >= userlevel.level_next_exp:
-                userlevel.level += 1
-                userlevel.level_next_exp = userlevel.level * (userlevel.level+1)*30
-            message.add_field(name="升級!",value=f"你現在{userlevel.level}等了。",inline=False)
-            await userdata_collection.update_one(
-                {"_id": userid},
-                {"$set": {"level": userlevel.level, "level_next_exp": userlevel.level_next_exp}},
+        # 套用實際獲得的經驗，準備等級結算
+        userlevel.level = consume_result.get("level", 1)
+        userlevel.level_exp = previous_exp + actual_gained
+        userlevel.level_next_exp = consume_result.get(
+            "level_next_exp",
+            userlevel.next_exp_for_level(userlevel.level),
+        )
+
+        # 依經驗值升級，最高到等級上限為止
+        leveled_up = False
+        while (
+            userlevel.level < max_level
+            and userlevel.level_exp >= userlevel.level_next_exp
+        ):
+            userlevel.level += 1
+            userlevel.level_next_exp = userlevel.next_exp_for_level(userlevel.level)
+            leveled_up = True
+
+        # 到達上限時鎖定等級與經驗，避免再往上衝
+        if userlevel.level >= max_level:
+            userlevel.level = max_level
+            userlevel.level_exp = min(userlevel.level_exp, max_level_exp)
+            userlevel.level_next_exp = max_level_exp
+
+        # 寫回等級／經驗；若有超額蛋糕則一併退還
+        update_ops = {}
+        set_fields = {
+            "level": userlevel.level,
+            "level_exp": userlevel.level_exp,
+            "level_next_exp": userlevel.level_next_exp,
+        }
+        if (
+            leveled_up
+            or refund_cake > 0
+            or consume_result.get("level_exp") != userlevel.level_exp
+            or consume_result.get("level") != userlevel.level
+            or consume_result.get("level_next_exp") != userlevel.level_next_exp
+        ):
+            update_ops["$set"] = set_fields
+        if refund_cake > 0:
+            update_ops["$inc"] = {"cake": refund_cake}
+        if update_ops:
+            await userdata_collection.update_one({"_id": userid}, update_ops)
+
+        # 回覆餵食結果（已滿等／升級／部分退還）
+        if actual_gained == 0:
+            message = Embed(
+                title='餵食Natalie',
+                description="我已經滿足了!剩下的蛋糕你拿去自己吃掉吧<:frog_cute:1408403070441754765>",
+                color=common.bot_color,
             )
+        else:
+            message = Embed(
+                title='餵食Natalie',
+                description=f"我吃飽啦!(獲得**{actual_gained}**點經驗值)",
+                color=common.bot_color,
+            )
+            if leveled_up:
+                message.add_field(name="升級!", value=f"你現在{userlevel.level}等了。", inline=False)
+            if refund_cake > 0:
+                message.add_field(
+                    name="退還蛋糕",
+                    value=f"已達等級上限（**{max_level}**等），多餘的**{refund_cake}**塊{common.cake_emoji}已退還。",
+                    inline=False,
+                )
 
         await interaction.response.send_message(embed=message)
 

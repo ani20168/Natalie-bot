@@ -505,9 +505,32 @@ mongo_storage = MongoStorage()
 
 class LevelSystem:
     def __init__(self) -> None:
+        self.max_level = 300
+        self.exp_factor = 30
         self.level = 1
         self.level_exp = 0
         self.level_next_exp = 60
+
+    def next_exp_for_level(self, level: int) -> int:
+        """
+        計算指定等級升到下一等所需的累積經驗門檻
+
+        Args:
+            level (int): "1"
+
+        Returns:
+            next_exp (int): "60"
+        """
+        return level * (level + 1) * self.exp_factor
+
+    def max_level_exp(self) -> int:
+        """
+        到達等級上限所需的累積經驗值
+
+        Returns:
+            max_exp (int): "2691000"
+        """
+        return self.next_exp_for_level(self.max_level - 1)
 
     async def read_info(self,memberid: str):
         member_key = str(memberid)
