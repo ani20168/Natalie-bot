@@ -108,6 +108,7 @@ class General(commands.Cog):
         self.vip_role_id = 605730134531637249
         self.vip_retain_days = 30
         self.message_audit_content_limit = 1000
+        self.message_audit_max_attachments = 10
 
     @staticmethod
     def compute_red_packet_amounts(total: int, people: int) -> list[int]:
@@ -877,6 +878,33 @@ class General(commands.Cog):
             return content
         return f"{content[:self.message_audit_content_limit - 3]}..."
 
+    async def collect_message_audit_files(self, message: discord.Message) -> tuple[list[discord.File], list[str]]:
+        """
+        下載原訊息附件，供刪除日誌重傳到日誌頻道。
+
+        Args:
+            message (discord.Message): "被刪除的原訊息"
+
+        Returns:
+            result (tuple[list[discord.File], list[str]]): "成功的附件清單, 無法重傳的檔名說明"
+        """
+        files: list[discord.File] = []
+        failed_notes: list[str] = []
+        max_size = message.guild.filesize_limit if message.guild else 25 * 1024 * 1024
+        attachments = message.attachments[:self.message_audit_max_attachments]
+        for skipped in message.attachments[self.message_audit_max_attachments:]:
+            failed_notes.append(f"{skipped.filename}（超過單則訊息附件上限）")
+
+        for attachment in attachments:
+            if attachment.size > max_size:
+                failed_notes.append(f"{attachment.filename}（超過大小限制）")
+                continue
+            try:
+                files.append(await attachment.to_file(spoiler=attachment.is_spoiler()))
+            except (discord.HTTPException, discord.NotFound, OSError, asyncio.TimeoutError):
+                failed_notes.append(f"{attachment.filename}（下載失敗）")
+        return files, failed_notes
+
     @commands.Cog.listener()
     async def on_message_edit(self, before: discord.Message, after: discord.Message):
         """
@@ -899,7 +927,7 @@ class General(commands.Cog):
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
         """
-        監控訊息刪除，將頻道、作者、原訊息內容送到管理員日誌。
+        監控訊息刪除，將頻道、作者、原訊息內容與附件送到管理員日誌。
         """
         if message.guild is None or message.guild.id != common.fake_sister_server_id: return
         if message.author.bot: return
@@ -909,11 +937,17 @@ class General(commands.Cog):
         embed.add_field(name="頻道", value=message.channel.mention, inline=False)
         embed.add_field(name="作者", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
         embed.add_field(name="內容", value=self.format_message_audit_content(message.content), inline=False)
+
+        files: list[discord.File] = []
         if message.attachments:
-            attachment_urls = "\n".join(attachment.url for attachment in message.attachments)
-            embed.add_field(name="附件", value=self.format_message_audit_content(attachment_urls), inline=False)
+            files, failed_notes = await self.collect_message_audit_files(message)
+            if files:
+                embed.add_field(name="附件", value=f"已重傳 {len(files)} 個檔案（見下方預覽／下載）", inline=False)
+            if failed_notes:
+                embed.add_field(name="未重傳的附件", value=self.format_message_audit_content("\n".join(failed_notes)), inline=False)
+
         embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
-        await self.bot.get_channel(common.admin_log_channel).send(embed=embed)
+        await self.bot.get_channel(common.admin_log_channel).send(embed=embed, files=files)
 
     @commands.Cog.listener()
     async def on_member_join(self,member):  
