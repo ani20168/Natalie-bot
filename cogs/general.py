@@ -104,11 +104,9 @@ class General(commands.Cog):
             "亮粉紅":{"role_id":1395359026879004744},
             "動態淺紫紅":{"role_id":1422416437036711976},
         }
-        self.nitro_booster_role_id = 623486844394536961
-        self.vip_role_id = 605730134531637249
-        self.vip_retain_days = 30
-        self.message_audit_content_limit = 1000
-        self.message_audit_max_attachments = 10
+        self.vip_retain_days = 30  # 取消 Boost 後仍保留 VIP 的天數
+        self.message_audit_content_limit = 1000  # 訊息審核 embed 內容字數上限
+        self.message_audit_max_attachments = 10  # 訊息審核最多附檔數量
 
     @staticmethod
     def compute_red_packet_amounts(total: int, people: int) -> list[int]:
@@ -142,33 +140,48 @@ class General(commands.Cog):
 
         userlevel = await common.LevelSystem().read_info(userid)
         message = Embed(title="我是Natalie!",description="你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。",color=common.bot_color)
-        message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有**{cake}**塊{self.bot.get_emoji(common.cake_emoji_id)}",inline=False)
-        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
-        
-        general_commands_list = [
-            "/info 查看指令表及個人資料",
+        cake_emoji = common.cake_emoji
+        cake_commands_list = [
             f"/eat 餵食Natalie一些{cake_emoji} (1 cake = 1 exp)",
             f"/cake_give 給予他人{cake_emoji}",
+            "/red_packet 發紅包(蛋糕)"
+        ]
+        game_commands_list = [
             "/mining_info 挖礦小遊戲資訊",
             "/blackjack 21點遊戲",
             "/poker 撲克牌比大小",
             "/poker_statistics 撲克牌比大小個人統計",
             "/squid_rps 魷魚遊戲猜拳",
-            "/check_sevencolor_restday 確認七色有沒有休假",
+            "/squid_rps_setdifficulty 設定魷魚猜拳難度"
+        ]
+        appearance_commands_list = [
             "/set_color 更換ID的顏色(靜態)",
             "/set_animation_color 更換ID的顏色(動態)",
-            "/red_packet 搶紅包（蛋糕）"
+            "/redeem_member_role 兌換自訂稱號(每月一次)"
+        ]
+        other_commands_list = [
+            "/check_sevencolor_restday 確認七色有沒有休假",
+            "/create_bid 建立競標交易",
+            "/warnlist 查看警告紀錄"
         ]
         #如果等級>=5 且沒有在 抽獎仔/VIP 身分內，則顯示指令
-        if userlevel.level >= 5 and all(role.id not in [621764669929160715, 605730134531637249] for role in interaction.user.roles):
-            general_commands_list.append("/giveaway_join 加入抽獎頻道")
-        
-        general_commands_list = "\n".join(general_commands_list)
-        message.add_field(name="指令表",value=general_commands_list,inline=False)
-        message.add_field(
-            name="排行榜",
-            value=f'/level_leaderboard 等級排行榜\n/voice_leaderboard 語音活躍排行榜\n/blackjack_leaderboard 21點勝率排行榜\n/squid_rps_leaderboard 魷魚猜拳勝率排行榜\n/cake_leaderboard 蛋糕排行榜',
-            inline=False)
+        if userlevel.level >= 5 and all(role.id not in [621764669929160715, common.vip_role_id] for role in interaction.user.roles):
+            other_commands_list.append("/giveaway_join 加入抽獎頻道")
+        leaderboard_commands_list = [
+            "/level_leaderboard 等級排行榜",
+            "/voice_leaderboard 語音活躍排行榜",
+            "/blackjack_leaderboard 21點勝率排行榜",
+            "/poker_leaderboard 撲克牌勝率排行榜",
+            "/squid_rps_leaderboard 魷魚猜拳勝率排行榜",
+            "/cake_leaderboard 蛋糕排行榜"
+        ]
+
+        message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有**{cake}**塊{cake_emoji}",inline=False)
+        message.add_field(name="蛋糕", value="\n".join(cake_commands_list), inline=False)
+        message.add_field(name="遊戲", value="\n".join(game_commands_list), inline=False)
+        message.add_field(name="外觀", value="\n".join(appearance_commands_list), inline=False)
+        message.add_field(name="其他", value="\n".join(other_commands_list), inline=False)
+        message.add_field(name="排行榜", value="\n".join(leaderboard_commands_list), inline=False)
         await interaction.response.send_message(embed=message)
 
     @app_commands.command(name = "eat", description = "餵食Natalie!")
@@ -402,7 +415,7 @@ class General(commands.Cog):
             return_document=common.ReturnDocument.AFTER,
         )
         cake_after = int(new_data.get("cake", cake_before))
-        cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        cake_emoji = common.cake_emoji
         await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description=f"<@{member.id}>資料變更...\n原始{cake_emoji}:**{cake_before}**\n增加了**{amount}**塊{cake_emoji}\n現在有**{cake_after}**塊{cake_emoji}",color=common.bot_color))
 
 
@@ -411,7 +424,7 @@ class General(commands.Cog):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
             userlevel = await common.LevelSystem().read_info(userid)
-        if userlevel.level >= 5 and all(role.id not in [621764669929160715, 605730134531637249] for role in interaction.user.roles):
+        if userlevel.level >= 5 and all(role.id not in [621764669929160715, common.vip_role_id] for role in interaction.user.roles):
             await interaction.user.add_roles(interaction.guild.get_role(621764669929160715))
             await interaction.response.send_message(embed=Embed(title="加入抽獎頻道",description="歡迎進入giveaway頻道!",color=common.bot_color))
         else:
@@ -1105,11 +1118,11 @@ class General(commands.Cog):
         """
         Nitro Booster 進出時同步 VIP：新 Boost 賦予 VIP；未滿保留天數取消 Boost 則移除 VIP。
         """
-        before_has_booster = any(role.id == self.nitro_booster_role_id for role in before.roles)
-        after_has_booster = any(role.id == self.nitro_booster_role_id for role in after.roles)
+        before_has_booster = any(role.id == common.nitro_booster_role_id for role in before.roles)
+        after_has_booster = any(role.id == common.nitro_booster_role_id for role in after.roles)
         if before_has_booster == after_has_booster: return
 
-        vip_role = after.guild.get_role(self.vip_role_id)
+        vip_role = after.guild.get_role(common.vip_role_id)
         if vip_role is None: return
         retain_delta = timedelta(days=self.vip_retain_days)
 

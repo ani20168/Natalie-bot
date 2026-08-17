@@ -1,4 +1,4 @@
-import discord
+﻿import discord
 from discord import app_commands,Embed
 from discord.ext import commands
 from . import common
@@ -515,7 +515,7 @@ class MiningGame(commands.Cog):
             userdata_collection = common.mongo_storage.get_collection("userdata")
             defaults = common.mongo_storage.get_user_defaults()
             await userdata_collection.update_one({"_id": userid}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": total_price}}, upsert=True)
-            message.add_field(name=f"你獲得了{total_price}塊{self.bot.get_emoji(common.cake_emoji_id)}",value="",inline=False)
+            message.add_field(name=f"你獲得了{total_price}塊{common.cake_emoji}",value="",inline=False)
             await interaction.response.send_message(embed=message)
 
     @app_commands.command(name = "mining_info",description="挖礦資訊")
@@ -629,7 +629,7 @@ class MiningGame(commands.Cog):
             await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
             await common.mongo_storage.replace_user(userid, user_data)
 
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你賣出了**1**個**{collection_name}**。\n獲得**1000**塊{self.bot.get_emoji(common.cake_emoji_id)}",color=common.bot_color))
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你賣出了**1**個**{collection_name}**。\n獲得**1000**塊{common.cake_emoji}",color=common.bot_color))
 
 
     @app_commands.command(name = "mine",description="更換礦場")
@@ -947,7 +947,7 @@ class MiningGame(commands.Cog):
                 await common.mongo_storage.ensure_user_document(userid)
                 data = await common.mongo_storage.get_user(userid)
             mining_data = await self.miningdata_read(userid)
-            cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+            cake_emoji = common.cake_emoji
             price = mining_data[userid]['machine_amount'] *1000
 
             #蛋糕不足
@@ -1099,7 +1099,7 @@ class BlackJack(commands.Cog):
                 await common.mongo_storage.ensure_user_document(userid)
                 user_data = await common.mongo_storage.get_user(userid)
             data = {userid: user_data}
-            cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+            cake_emoji = common.cake_emoji
             
             #檢查上一局遊戲有沒有玩完
             if "blackjack_playing" in data[userid] and data[userid]["blackjack_playing"] == True:
@@ -1300,7 +1300,7 @@ class BlackJackButton(discord.ui.View):
         self.bot = client
         self.display_bot_points = display_bot_points
         self.display_bot_cards = display_bot_cards
-        self.cake_emoji = cake_emoji if cake_emoji is not None else self.bot.get_emoji(common.cake_emoji_id)
+        self.cake_emoji = cake_emoji if cake_emoji is not None else common.cake_emoji
         self.insurance_bet_amount = bet // 2
         self.insurance_purchased = False
         self.player_moved_for_insurance = False
@@ -1884,7 +1884,7 @@ class PokerGame(commands.Cog):
                 await common.mongo_storage.ensure_user_document(userid)
                 user_data = await common.mongo_storage.get_user(userid)
             data = {userid: user_data}
-            cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+            cake_emoji = common.cake_emoji
 
             if data.get(userid, {}).get("poker_playing"):
                 await interaction.followup.send(embed=Embed(title="撲克牌比大小", description="你現在有進行中的遊戲!", color=common.bot_error_color))
@@ -2062,7 +2062,7 @@ class PokerButton(discord.ui.View):
         self.player_cards = player_cards
         self.bot_cards = bot_cards
         self.bot = client
-        self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        self.cake_emoji = common.cake_emoji
 
     async def result_message(self, double: bool = False):
         userid = str(self.command_interaction.user.id)
@@ -2316,7 +2316,7 @@ class SquidRPS(commands.Cog):
                 await common.mongo_storage.ensure_user_document(userid)
                 user_data = await common.mongo_storage.get_user(userid)
             data = {userid: user_data}
-            cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+            cake_emoji = common.cake_emoji
 
             if data.get(userid, {}).get("squid_playing"):
                 await interaction.followup.send(
@@ -2554,7 +2554,7 @@ class SquidRPSView(discord.ui.View):
         self.bot = client
         # 建立猜拳策略
         self.strategy = SquidRPSStrategy()
-        self.cake_emoji = self.bot.get_emoji(common.cake_emoji_id)
+        self.cake_emoji = common.cake_emoji
         self.difficulty = difficulty
         self.natalie_hp = 2 if difficulty == "hard" else 1
         self.max_hp = self.natalie_hp

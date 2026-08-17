@@ -190,7 +190,7 @@ class Startup(commands.Cog):
             for member in channel.members:
                 if member.bot: continue
                 reward = 3
-                if any(role.id in [419185180134080513,605730134531637249,419185995078959104] for role in member.roles):
+                if any(role.id in [419185180134080513, common.vip_role_id, 419185995078959104] for role in member.roles):
                     reward += 3
                 if member.voice and member.voice.self_stream:
                     reward += 10
