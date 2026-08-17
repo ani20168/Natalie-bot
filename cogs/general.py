@@ -942,7 +942,7 @@ class General(commands.Cog):
         if message.attachments:
             files, failed_notes = await self.collect_message_audit_files(message)
             if files:
-                embed.add_field(name="附件", value=f"已重傳 {len(files)} 個檔案（見下方預覽／下載）", inline=False)
+                embed.add_field(name="附件", value=f"已重傳 {len(files)} 個檔案", inline=False)
             if failed_notes:
                 embed.add_field(name="未重傳的附件", value=self.format_message_audit_content("\n".join(failed_notes)), inline=False)
 
