@@ -50,8 +50,11 @@ class Startup(commands.Cog):
             await mining_collection.update_one({"_id": "global"}, {"$set": {"mine_mininglimit": reset_mininglimit}}, upsert=True)
 
     #挖礦遊戲-自動挖礦機的挖礦流程
-    @tasks.loop(hours=3)
+    @tasks.loop(minutes=1)
     async def mining_machine_work(self):
+        nowtime = datetime.now(timezone(timedelta(hours=8)))
+        if nowtime.hour % 3 != 0 or nowtime.minute != 0: return
+
         # 先讀取 mining 的全域文件，拿到各礦場剩餘可挖次數（mine_mininglimit）。
         # 這份 dict 會在本次循環中即時扣減，最後統一寫回 DB。
         mining_collection = common.mongo_storage.get_collection("mining")
