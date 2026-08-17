@@ -300,7 +300,7 @@ class AuctionLoop:
                     self.last_update[msg_id] = now
 
                 if not auction.started:
-                    interval = 10
+                    interval = 30 #競標開始前每30秒更新一次倒數計時器
                     last = self.last_update.get(msg_id, 0.0)
                     if now - last >= interval:
                         await AuctionView.update_embed(auction)
