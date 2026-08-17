@@ -659,6 +659,7 @@ class Trade(commands.Cog):
                 value=f"總共有 **{commission}({percent_text}%)** 塊{common.cake_emoji}被偷吃了，剩下 **{give_amount}** 塊{common.cake_emoji}",
                 inline=False,
             )
+            message.set_footer(text="提示:贈予者等級越低，Natalie更貪吃!")
         await interaction.response.send_message(embed=message)
 
 
