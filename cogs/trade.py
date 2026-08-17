@@ -417,7 +417,44 @@ def generate_embed(auction: Auction) -> Embed:
 class Trade(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
-        
+        self.cake_give_commission_max_percent = 50
+        self.cake_give_commission_min_percent = 1
+        self.cake_give_commission_min_level = 1
+        self.cake_give_commission_max_level = 300
+
+    def cake_give_commission_percent(self, level: int) -> float:
+        """
+        依贈送者等級計算 cake_give 抽成百分比（等級越低抽成越高）
+
+        Args:
+            level (int): "1"
+
+        Returns:
+            percent (float): "50.0"
+        """
+        if level <= self.cake_give_commission_min_level:
+            return float(self.cake_give_commission_max_percent)
+        if level >= self.cake_give_commission_max_level:
+            return float(self.cake_give_commission_min_percent)
+        level_span = self.cake_give_commission_max_level - self.cake_give_commission_min_level
+        percent_span = self.cake_give_commission_max_percent - self.cake_give_commission_min_percent
+        return self.cake_give_commission_max_percent - percent_span * (level - self.cake_give_commission_min_level) / level_span
+
+    def cake_give_commission_amount(self, amount: int, level: int) -> tuple[int, float]:
+        """
+        計算 cake_give 抽成數量（無條件捨去）與抽成百分比
+
+        Args:
+            amount (int): "100"
+            level (int): "1"
+
+        Returns:
+            result (tuple): "(50, 50.0)"
+        """
+        percent = self.cake_give_commission_percent(level)
+        commission = int(amount * percent / 100)
+        return commission, percent
+
     # =====================================================
     #  建立競標指令
     # =====================================================
@@ -595,17 +632,34 @@ class Trade(commands.Cog):
             user_data = await common.mongo_storage.ensure_user_document(userid)
             await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"錯誤:{common.cake_emoji}不足，你只有**{user_data.get('cake', 0)}**塊{common.cake_emoji}。",color=common.bot_error_color))
             return
+
+        commission, commission_percent = self.cake_give_commission_amount(amount, spend_result.get("level", 1))
+        give_amount = amount - commission
         try:
             await userdata_collection.update_one(
                 {"_id": str(member_give.id)},
-                {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": amount}},
+                {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": give_amount}},
                 upsert=True,
             )
+            if commission > 0:
+                await userdata_collection.update_one(
+                    {"_id": str(common.bot_id)},
+                    {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": commission}},
+                    upsert=True,
+                )
         except Exception:
             await userdata_collection.update_one({"_id": userid}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": amount}}, upsert=True)
             raise
 
-        await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"你給予了**{amount}**塊{common.cake_emoji}給<@{str(member_give.id)}>",color=common.bot_color))
+        message = Embed(title="給予蛋糕",description=f"你給予了**{amount}**塊{common.cake_emoji}給<@{str(member_give.id)}>",color=common.bot_color)
+        if commission > 0:
+            percent_text = f"{commission_percent:.1f}".rstrip("0").rstrip(".")
+            message.add_field(
+                name="Natalie偷吃了一些蛋糕",
+                value=f"總共有 **{commission}({percent_text}%)** 塊{common.cake_emoji}被偷吃了，剩下 **{give_amount}** 塊{common.cake_emoji}",
+                inline=False,
+            )
+        await interaction.response.send_message(embed=message)
 
 
 async def setup(client:commands.Bot):
