@@ -107,6 +107,7 @@ class General(commands.Cog):
         self.nitro_booster_role_id = 623486844394536961
         self.vip_role_id = 605730134531637249
         self.vip_retain_days = 30
+        self.message_audit_content_limit = 1000
 
     @staticmethod
     def compute_red_packet_amounts(total: int, people: int) -> list[int]:
@@ -859,6 +860,60 @@ class General(commands.Cog):
                 embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
                 embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
                 await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
+
+    def format_message_audit_content(self, content: str | None) -> str:
+        """
+        整理訊息內容供日誌顯示，過長則截斷。
+
+        Args:
+            content (str | None): "訊息原文，可能為空"
+
+        Returns:
+            result (str): "(無文字內容) 或截斷後文字"
+        """
+        if not content:
+            return "(無文字內容)"
+        if len(content) <= self.message_audit_content_limit:
+            return content
+        return f"{content[:self.message_audit_content_limit - 3]}..."
+
+    @commands.Cog.listener()
+    async def on_message_edit(self, before: discord.Message, after: discord.Message):
+        """
+        監控訊息編輯，將頻道、作者、編輯前後內容送到管理員日誌。
+        """
+        if after.guild is None or after.guild.id != common.fake_sister_server_id: return
+        if after.author.bot: return
+        if before.content == after.content: return
+
+        embed = Embed(title="訊息編輯", color=0xEAC100)
+        embed.set_author(name=after.author.display_name, icon_url=after.author.display_avatar.url)
+        embed.add_field(name="頻道", value=after.channel.mention, inline=False)
+        embed.add_field(name="作者", value=f"{after.author.mention} (`{after.author.id}`)", inline=False)
+        embed.add_field(name="編輯前", value=self.format_message_audit_content(before.content), inline=False)
+        embed.add_field(name="編輯後", value=self.format_message_audit_content(after.content), inline=False)
+        embed.add_field(name="訊息連結", value=after.jump_url, inline=False)
+        embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
+        await self.bot.get_channel(common.admin_log_channel).send(embed=embed)
+
+    @commands.Cog.listener()
+    async def on_message_delete(self, message: discord.Message):
+        """
+        監控訊息刪除，將頻道、作者、原訊息內容送到管理員日誌。
+        """
+        if message.guild is None or message.guild.id != common.fake_sister_server_id: return
+        if message.author.bot: return
+
+        embed = Embed(title="訊息刪除", color=common.bot_error_color)
+        embed.set_author(name=message.author.display_name, icon_url=message.author.display_avatar.url)
+        embed.add_field(name="頻道", value=message.channel.mention, inline=False)
+        embed.add_field(name="作者", value=f"{message.author.mention} (`{message.author.id}`)", inline=False)
+        embed.add_field(name="內容", value=self.format_message_audit_content(message.content), inline=False)
+        if message.attachments:
+            attachment_urls = "\n".join(attachment.url for attachment in message.attachments)
+            embed.add_field(name="附件", value=self.format_message_audit_content(attachment_urls), inline=False)
+        embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
+        await self.bot.get_channel(common.admin_log_channel).send(embed=embed)
 
     @commands.Cog.listener()
     async def on_member_join(self,member):  
