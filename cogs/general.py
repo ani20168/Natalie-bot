@@ -954,6 +954,19 @@ class General(commands.Cog):
         await common.mongo_storage.ensure_user_document(str(member.id))
 
     @commands.Cog.listener()
+    async def on_member_remove(self, member: discord.Member):
+        """
+        成員離開伺服器時，將紀錄送到管理員日誌。
+        """
+        if member.guild.id != common.fake_sister_server_id: return
+
+        embed = Embed(title="成員離開", description=f"{member.mention} {member.display_name}", color=common.bot_error_color)
+        embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+        embed.set_footer(text=str(member.id))
+        embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
+        await self.bot.get_channel(common.admin_log_channel).send(embed=embed)
+
+    @commands.Cog.listener()
     async def on_message(self,message):
         if message.author.bot:
             return
