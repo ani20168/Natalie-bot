@@ -86,6 +86,17 @@ class Voice5HourQuest(DailyQuest):
         self.target = 300
 
 
+class VoiceStream1HourQuest(DailyQuest):
+    def __init__(self) -> None:
+        super().__init__()
+        self.quest_id = "voice_stream_1h"
+        self.description = "在遊戲區語音房直播超過1小時"
+        self.cake_reward = 5000
+        self.marshmallow_reward = 1
+        self.event_type = "game_voice_stream"
+        self.target = 60
+
+
 class InviteMemberQuest(DailyQuest):
     def __init__(self) -> None:
         super().__init__()
@@ -177,6 +188,7 @@ class Quest(commands.Cog):
             Voice30MinQuest(),
             Voice2HourQuest(),
             Voice5HourQuest(),
+            VoiceStream1HourQuest(),
             InviteMemberQuest(),
             BlackjackQuest(),
             SquidRpsHardWinQuest(),
@@ -455,7 +467,7 @@ class Quest(commands.Cog):
     @tasks.loop(minutes=1)
     async def voice_quest_record(self):
         """
-        每分鐘為待在遊戲區語音房的成員累加語音任務進度。
+        每分鐘為待在遊戲區語音房的成員累加語音任務進度，直播中則另外累加直播任務。
         """
         for channel_id in self.game_voice_channel_ids:
             channel = self.bot.get_channel(channel_id)
@@ -463,6 +475,8 @@ class Quest(commands.Cog):
             for member in channel.members:
                 if member.bot: continue
                 await self.report_event(str(member.id), "game_voice")
+                if member.voice and member.voice.self_stream:
+                    await self.report_event(str(member.id), "game_voice_stream")
 
     @tasks.loop(minutes=1)
     async def daily_settlement(self):
