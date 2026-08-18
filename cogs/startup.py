@@ -248,7 +248,7 @@ class Startup(commands.Cog):
             sorted_data = []
             async for document in userdata_collection.find({"_id": {"$ne": "global"}, "voice_active_minutes": {"$gt": 10}}).sort("voice_active_minutes", -1).limit(3):
                 sorted_data.append((str(document.get("_id")), document))
-            base_rewards = (600, 400, 200)
+            base_rewards = (1200, 750, 400)
             leaderboard_lines = []
             for i, (userid, userdata) in enumerate(sorted_data[:3]):
                 user = self.bot.get_user(int(userid))
