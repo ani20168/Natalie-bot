@@ -21,6 +21,7 @@ cake_emoji = f"<:cake:{cake_emoji_id}>"  #直接顯示蛋糕emoji
 fake_sister_server_id = 419108485435883531
 nitro_booster_role_id = 623486844394536961  #Nitro Booster身分組ID
 vip_role_id = 605730134531637249            #VIP身分組ID
+super_vip_id = 1539107189665308682 #妹妹群的至寶身分組ID
 
 asf_api_url = "http://asf:1242/Api/Command"
 
@@ -227,6 +228,7 @@ class MongoStorage:
         """
         return {
             "cake": 0,
+            "marshmallow": 0,
             "level": 1,
             "level_exp": 0,
             "level_next_exp": 60,

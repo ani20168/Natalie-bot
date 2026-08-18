@@ -160,6 +160,7 @@ class General(commands.Cog):
             "/redeem_member_role 兌換自訂稱號(每月一次)"
         ]
         other_commands_list = [
+            "/quest 查看每日任務",
             "/check_sevencolor_restday 確認七色有沒有休假",
             "/create_bid 建立競標交易",
             "/warnlist 查看警告紀錄"

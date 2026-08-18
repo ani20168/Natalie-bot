@@ -2,6 +2,7 @@
 from discord import app_commands,Embed
 from discord.ext import commands
 from . import common
+from .quest import report_quest_event
 import random
 import itertools
 import re
@@ -1194,6 +1195,8 @@ class BlackJack(commands.Cog):
                     data[userid]["blackjack_win_rate"] += 1
                     data[userid]["blackjack_round"] += 1
                     await common.mongo_storage.replace_user(userid, data[userid])
+                    if len(player_cards) == 2 and self.calculate_point(player_cards) == 21:
+                        await report_quest_event(self.bot, userid, "blackjack")
                     message.add_field(
                         name="結果",
                         value=(
@@ -1215,6 +1218,7 @@ class BlackJack(commands.Cog):
                 data[userid]["blackjack_win_rate"] += 1
                 data[userid]["blackjack_round"] += 1
                 await common.mongo_storage.replace_user(userid, data[userid])
+                await report_quest_event(self.bot, userid, "blackjack")
                 message.set_footer(text=await self.win_rate_show(userid))
                 await interaction.followup.send(embed=message)
                 return
@@ -2772,6 +2776,8 @@ class SquidRPSView(discord.ui.View):
                             inline=False,
                         )
                         await common.mongo_storage.replace_user(userid, data[userid])
+                        if self.difficulty == "hard":
+                            await report_quest_event(self.bot, userid, "squid_rps_hard_win")
 
                         embed.set_footer(
                             text=await SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
