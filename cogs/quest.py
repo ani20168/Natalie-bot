@@ -57,7 +57,7 @@ class Voice30MinQuest(DailyQuest):
     def __init__(self) -> None:
         super().__init__()
         self.quest_id = "voice_30m"
-        self.description = "待在遊戲區語音房的時間超過30分鐘"
+        self.description = "遊戲區語音房待滿30分鐘"
         self.cake_reward = 300
         self.marshmallow_reward = 1
         self.event_type = "game_voice"
@@ -68,7 +68,7 @@ class Voice2HourQuest(DailyQuest):
     def __init__(self) -> None:
         super().__init__()
         self.quest_id = "voice_2h"
-        self.description = "待在遊戲區語音房的時間超過2小時"
+        self.description = "遊戲區語音房待滿2小時"
         self.cake_reward = 2500
         self.marshmallow_reward = 1
         self.event_type = "game_voice"
@@ -79,7 +79,7 @@ class Voice5HourQuest(DailyQuest):
     def __init__(self) -> None:
         super().__init__()
         self.quest_id = "voice_5h"
-        self.description = "待在遊戲區語音房的時間超過5小時"
+        self.description = "遊戲區語音房待滿5小時"
         self.cake_reward = 10000
         self.marshmallow_reward = 2
         self.event_type = "game_voice"
@@ -95,6 +95,17 @@ class VoiceStream1HourQuest(DailyQuest):
         self.marshmallow_reward = 1
         self.event_type = "game_voice_stream"
         self.target = 60
+
+
+class VoiceVideo5MinQuest(DailyQuest):
+    def __init__(self) -> None:
+        super().__init__()
+        self.quest_id = "voice_video_5m"
+        self.description = "在遊戲區語音房分享鏡頭超過5分鐘"
+        self.cake_reward = 5000
+        self.marshmallow_reward = 1
+        self.event_type = "game_voice_video"
+        self.target = 5
 
 
 class InviteMemberQuest(DailyQuest):
@@ -189,6 +200,7 @@ class Quest(commands.Cog):
             Voice2HourQuest(),
             Voice5HourQuest(),
             VoiceStream1HourQuest(),
+            VoiceVideo5MinQuest(),
             InviteMemberQuest(),
             BlackjackQuest(),
             SquidRpsHardWinQuest(),
@@ -398,7 +410,7 @@ class Quest(commands.Cog):
             ),
             color=common.bot_color,
         )
-        embed.add_field(name="你的棉花糖", value=str(marshmallow), inline=False)
+        embed.add_field(name=f"你的{common.marshmallow_emoji}", value=str(marshmallow), inline=False)
 
         for quest in self.quests:
             quest_state = quest_daily.get(quest.quest_id, {})
@@ -408,11 +420,13 @@ class Quest(commands.Cog):
             progress = int(quest_state.get("progress", 0))
             if progress > quest.target:
                 progress = quest.target
-            status_icon = "✅ " if completed else ""
-            progress_text = "已完成" if completed else f"進度：{progress}/{quest.target}"
+            if completed:
+                field_name = f"{quest.description} ✅"
+            else:
+                field_name = f"{quest.description} {progress}/{quest.target}"
             embed.add_field(
-                name=f"{status_icon}{quest.description}",
-                value=f"獎勵：{quest.cake_reward} {common.cake_emoji}　棉花糖 x{quest.marshmallow_reward}\n{progress_text}",
+                name=field_name,
+                value=f"獎勵：{quest.cake_reward} {common.cake_emoji}　{common.marshmallow_emoji}x{quest.marshmallow_reward}",
                 inline=False,
             )
         await interaction.response.send_message(embed=embed)
@@ -467,7 +481,7 @@ class Quest(commands.Cog):
     @tasks.loop(minutes=1)
     async def voice_quest_record(self):
         """
-        每分鐘為待在遊戲區語音房的成員累加語音任務進度，直播中則另外累加直播任務。
+        每分鐘為待在遊戲區語音房的成員累加語音任務進度，直播與分享鏡頭則另外累加。
         """
         for channel_id in self.game_voice_channel_ids:
             channel = self.bot.get_channel(channel_id)
@@ -477,6 +491,8 @@ class Quest(commands.Cog):
                 await self.report_event(str(member.id), "game_voice")
                 if member.voice and member.voice.self_stream:
                     await self.report_event(str(member.id), "game_voice_stream")
+                if member.voice and member.voice.self_video:
+                    await self.report_event(str(member.id), "game_voice_video")
 
     @tasks.loop(minutes=1)
     async def daily_settlement(self):
@@ -515,11 +531,17 @@ class Quest(commands.Cog):
             ranked_users.append(document)
         ranked_users.sort(key=self.super_vip_sort_key, reverse=True)
 
-        winner_id = None
+        eligible_users = []
         for user_document in ranked_users:
             if int(user_document.get("marshmallow", 0)) < self.super_vip_min_marshmallow: continue
-            winner_id = str(user_document.get("_id"))
-            break
+            eligible_users.append(user_document)
+        winner_id = str(eligible_users[0].get("_id")) if eligible_users else None
+        tie_candidates = []
+        if eligible_users:
+            top_marshmallow = int(eligible_users[0].get("marshmallow", 0))
+            for user_document in eligible_users:
+                if int(user_document.get("marshmallow", 0)) != top_marshmallow: continue
+                tie_candidates.append(user_document)
 
         guild = self.bot.get_guild(common.fake_sister_server_id)
         if guild is not None:
@@ -535,7 +557,7 @@ class Quest(commands.Cog):
                     winner_member = guild.get_member(int(winner_id))
                     if winner_member is not None and super_vip_role not in winner_member.roles:
                         try:
-                            await winner_member.add_roles(super_vip_role, reason="每日任務結算：棉花糖最多")
+                            await winner_member.add_roles(super_vip_role, reason=f"每日任務結算：{common.marshmallow_emoji}最多")
                         except discord.HTTPException:
                             pass
 
@@ -545,11 +567,21 @@ class Quest(commands.Cog):
             marshmallow = int(user_document.get("marshmallow", 0))
             display_name = self.resolve_display_name(guild, user_id)
             suffix = " (目前至寶)" if winner_id is not None and user_id == winner_id else ""
-            log_lines.append(f"{index}.{display_name} - {marshmallow}{suffix}")
-        log_text = "\n".join(log_lines) if log_lines else "目前沒有人持有棉花糖"
+            log_lines.append(f"{index}.{display_name} - {marshmallow}{common.marshmallow_emoji}{suffix}")
+        log_text = "\n".join(log_lines) if log_lines else f"目前沒有人持有{common.marshmallow_emoji}"
         mod_channel = self.bot.get_channel(common.mod_log_channel)
         if mod_channel is not None:
-            await mod_channel.send(embed=Embed(title="每日任務結算", description=log_text, color=common.bot_color))
+            log_embed = Embed(title="每日任務結算", description=log_text, color=common.bot_color)
+            if len(tie_candidates) >= 2:
+                candidate_lines = []
+                for user_document in tie_candidates:
+                    user_id = str(user_document.get("_id"))
+                    display_name = self.resolve_display_name(guild, user_id)
+                    level = int(user_document.get("level", 1))
+                    cake = int(user_document.get("cake", 0))
+                    candidate_lines.append(f"{display_name} - 等級:{level} 蛋糕:{cake} userID:{user_id}")
+                log_embed.add_field(name="至寶候選判斷", value="\n".join(candidate_lines), inline=False)
+            await mod_channel.send(embed=log_embed)
 
         await userdata_collection.update_many(
             {"_id": {"$ne": "global"}},
