@@ -403,6 +403,7 @@ def generate_embed(auction: Auction) -> Embed:
     # 起標價與增額出價
     embed.add_field(name="起標價", value=str(auction.start_price), inline=True)
     embed.add_field(name="增額出價", value=str(auction.increment), inline=True)
+    embed.add_field(name="發起人", value=f"<@{auction.author_id}>", inline=True)
 
     # 最高價與出價次數
     if auction.highest_bidder:
