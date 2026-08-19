@@ -632,8 +632,12 @@ class Trade(commands.Cog):
             user_data = await common.mongo_storage.ensure_user_document(userid)
             await interaction.response.send_message(embed=Embed(title="給予蛋糕",description=f"錯誤:{common.cake_emoji}不足，你只有**{user_data.get('cake', 0)}**塊{common.cake_emoji}。",color=common.bot_error_color))
             return
-
-        commission, commission_percent = self.cake_give_commission_amount(amount, spend_result.get("level", 1))
+        #至寶身分組不抽成
+        has_super_vip = any(role.id == common.super_vip_id for role in interaction.user.roles)
+        if has_super_vip:
+            commission, commission_percent = 0, 0.0
+        else:
+            commission, commission_percent = self.cake_give_commission_amount(amount, spend_result.get("level", 1))
         give_amount = amount - commission
         try:
             await userdata_collection.update_one(

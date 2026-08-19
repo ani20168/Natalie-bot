@@ -621,8 +621,9 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 <@&{self.color_dict[colorchoice.value]['role_id']}> 了!",color=common.bot_error_color))
             return
 
-        #沒在白名單的
-        if colorchoice.value in self.animation_color_dict and userid not in animation_whitelist:
+        #沒在白名單、也沒有至寶身分組的，不能更換動態顏色
+        has_super_vip = any(role.id == common.super_vip_id for role in user_roles)
+        if colorchoice.value in self.animation_color_dict and userid not in animation_whitelist and not has_super_vip:
             await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你當前無法使用 <@&{self.animation_color_dict[colorchoice.value]['role_id']}> !\n動態身分組使用權可以在 #拍賣所 獲得!",color=common.bot_error_color))
             return
 

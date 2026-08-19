@@ -189,11 +189,16 @@ class Startup(commands.Cog):
             if channel is None: continue
             for member in channel.members:
                 if member.bot: continue
-                reward = 3
+                reward = 3  # 在語音房的基礎獎勵
+                # VIP、MOD、ADMIN 額外獎勵
                 if any(role.id in [419185180134080513, common.vip_role_id, 419185995078959104] for role in member.roles):
                     reward += 3
+                # 直播額外獎勵
                 if member.voice and member.voice.self_stream:
                     reward += 10
+                # 至寶額外獎勵
+                if any(role.id == common.super_vip_id for role in member.roles):
+                    reward += 15
                 if reward <= 0: continue
                 member_id = str(member.id)
                 reward_map[member_id] = reward_map.get(member_id, 0) + reward
