@@ -73,8 +73,6 @@ class General(commands.Cog):
             "黃色":{"需求等級":10,"role_id":623547225129091094},
             "暗藍":{"需求等級":10,"role_id":623547226387513345},
             "綠松石":{"需求等級":10,"role_id":623548440210702395},
-            "黑色":{"需求等級":10,"role_id":675586536808382495},
-            "白色":{"需求等級":10,"role_id":675586754710994964},
             "常春藤綠":{"需求等級":10,"role_id":675587892600504342},
             "緋紅":{"需求等級":10,"role_id":675592036555948052},
             "紫色":{"需求等級":10,"role_id":675592363372183607},
@@ -526,6 +524,20 @@ class General(commands.Cog):
         except ValueError:
             await interaction.response.send_message(embed=Embed(title="錯誤!",description="日期格式錯誤!",color=common.bot_error_color))
 
+    async def remove_all_color_roles(self, member, reason="移除顏色身分組"):
+        """
+        移除成員身上所有靜態與動態顏色身分組
+
+        Args:
+            member: Discord 成員物件
+            reason (str): "移除顏色身分組"
+        """
+        color_role_ids = {attributes["role_id"] for attributes in self.color_dict.values()}
+        color_role_ids.update(attributes["role_id"] for attributes in self.animation_color_dict.values())
+        for role in member.roles:
+            if role.id in color_role_ids:
+                await member.remove_roles(role, reason=reason)
+
     @app_commands.command(name = "set_color",description="更換ID的顏色")
     @app_commands.describe(colorchoice="要更換的暱稱顏色")
     @app_commands.rename(colorchoice="選擇顏色")
@@ -537,8 +549,6 @@ class General(commands.Cog):
         app_commands.Choice(name="黃色 LV10", value="黃色"),
         app_commands.Choice(name="暗藍 LV10", value="暗藍"),
         app_commands.Choice(name="綠松石 LV10", value="綠松石"),
-        app_commands.Choice(name="黑色 LV10", value="黑色"),
-        app_commands.Choice(name="白色 LV10", value="白色"),
         app_commands.Choice(name="常春藤綠 LV10", value="常春藤綠"),
         app_commands.Choice(name="緋紅 LV10", value="緋紅"),
         app_commands.Choice(name="紫色 LV10", value="紫色"),
@@ -555,13 +565,19 @@ class General(commands.Cog):
         app_commands.Choice(name="紫丁香色 LV20", value="紫丁香色"),
         app_commands.Choice(name="珊瑚紅 LV20", value="珊瑚紅"),
         app_commands.Choice(name="桃色 LV20", value="桃色"),
+        app_commands.Choice(name="移除顏色身份組", value="移除顏色身份組"),
         ])
     async def set_color(self, interaction, colorchoice:app_commands.Choice[str]):
         userid = str(interaction.user.id)
+        user_roles = interaction.user.roles
+
+        if colorchoice.value == "移除顏色身份組":
+            await self.remove_all_color_roles(interaction.user)
+            await interaction.response.send_message(embed=Embed(title="移除顏色身分組",description="已移除你身上所有的顏色身分組!",color=common.bot_color))
+            return
+
         async with common.jsonio_lock:
             userlevel = await common.LevelSystem().read_info(userid)
-
-        user_roles = interaction.user.roles
 
         if any(role.name == colorchoice.value for role in user_roles):
             await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 <@&{self.color_dict[colorchoice.value]['role_id']}> 了!",color=common.bot_error_color))
@@ -572,18 +588,8 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="錯誤",description=f"等級不足! <@&{self.color_dict[colorchoice.value]['role_id']}> 需要**{self.color_dict[colorchoice.value]['需求等級']}**等，你目前只有**{userlevel.level}**等。",color=common.bot_error_color))
             return
 
-        for role in user_roles:
-            #移除舊的靜態顏色身分組
-            for color, attributes in self.color_dict.items():
-                if role.id == attributes["role_id"]:
-                    await interaction.user.remove_roles(role,reason="移除舊的顏色身分組")
-                    break
-            #移除舊的動態顏色身分組
-            for color, attributes in self.animation_color_dict.items():
-                if role.id == attributes["role_id"]:
-                    await interaction.user.remove_roles(role,reason="移除舊的動態顏色身分組")
-                    break
-        
+        await self.remove_all_color_roles(interaction.user, reason="移除舊的顏色身分組")
+
         if colorchoice.value in self.color_dict:
             await interaction.user.add_roles(interaction.guild.get_role(self.color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
             await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...<@&{self.color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
@@ -602,6 +608,7 @@ class General(commands.Cog):
         app_commands.Choice(name="★【漸層】李紫", value="李紫"),
         app_commands.Choice(name="★【漸層】亮粉紅", value="亮粉紅"),
         app_commands.Choice(name="★【漸層】動態淺紫紅", value="動態淺紫紅"),
+        app_commands.Choice(name="移除顏色身份組", value="移除顏色身份組"),
         ])
     async def set_animation_color(self, interaction, colorchoice:app_commands.Choice[str]):
         animation_whitelist = [
@@ -617,8 +624,13 @@ class General(commands.Cog):
 
         user_roles = interaction.user.roles
 
+        if colorchoice.value == "移除顏色身份組":
+            await self.remove_all_color_roles(interaction.user)
+            await interaction.response.send_message(embed=Embed(title="移除顏色身分組",description="已移除你身上所有的顏色身分組!",color=common.bot_color))
+            return
+
         if any(role.name == colorchoice.value for role in user_roles):
-            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 <@&{self.color_dict[colorchoice.value]['role_id']}> 了!",color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 <@&{self.animation_color_dict[colorchoice.value]['role_id']}> 了!",color=common.bot_error_color))
             return
 
         #沒在白名單、也沒有至寶身分組的，不能更換動態顏色
@@ -627,18 +639,8 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你當前無法使用 <@&{self.animation_color_dict[colorchoice.value]['role_id']}> !\n動態身分組使用權可以在 #拍賣所 獲得!",color=common.bot_error_color))
             return
 
-        for role in user_roles:
-            #移除舊的靜態顏色身分組
-            for color, attributes in self.color_dict.items():
-                if role.id == attributes["role_id"]:
-                    await interaction.user.remove_roles(role,reason="移除舊的顏色身分組")
-                    break
-            #移除舊的動態顏色身分組
-            for color, attributes in self.animation_color_dict.items():
-                if role.id == attributes["role_id"]:
-                    await interaction.user.remove_roles(role,reason="移除舊的動態顏色身分組")
-                    break
-        
+        await self.remove_all_color_roles(interaction.user, reason="移除舊的顏色身分組")
+
         if colorchoice.value in self.animation_color_dict:
             await interaction.user.add_roles(interaction.guild.get_role(self.animation_color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
             await interaction.response.send_message(embed=Embed(title="設置動態顏色身分組",description=f"你目前的動態顏色變更為...<@&{self.animation_color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
