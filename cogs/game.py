@@ -1407,13 +1407,16 @@ class BlackJackButton(discord.ui.View):
             sb_desc = self.side_bet_description()
             if sb_desc is not None:
                 message.description = sb_desc
-            message.add_field(name=f"你的手牌點數:**{BlackJack(self.bot).calculate_point(self.player_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
-            message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
+            player_points = BlackJack(self.bot).calculate_point(self.player_cards)
+            message.add_field(name=f"你的手牌點數:**{player_points}**",value=f"{BlackJack(self.bot).show_cards(self.player_cards)}",inline=False)
+            game_ended = player_points > 21 or len(self.player_cards) >= 5
+            if game_ended and self.insurance_purchased:
+                message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
+            else:
+                message.add_field(name=f"Natalie的手牌點數:**{self.display_bot_points}**",value=f"{self.display_bot_cards}",inline=False)
             
             #爆牌
-            if BlackJack(self.bot).calculate_point(self.player_cards) > 21:
-                if self.insurance_purchased:
-                    message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
+            if player_points > 21:
                 insurance_text = self.resolve_insurance_payout(data, userid, BlackJack(self.bot).dealer_natural_blackjack(self.bot_cards))
                 message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}{BlackJack.side_bet_loss_line(self.side_bet_amount, self.cake_emoji)}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
                 if insurance_text is not None:
@@ -1428,8 +1431,6 @@ class BlackJackButton(discord.ui.View):
             elif len(self.player_cards) >= 5:
                 data[userid]['cake'] += int(self.bet + (self.bet*3))
                 data[userid]["blackjack_win_rate"] += 1
-                if self.insurance_purchased:
-                    message.add_field(name=f"Natalie的手牌點數:**{BlackJack(self.bot).calculate_point(self.bot_cards)}**",value=f"{BlackJack(self.bot).show_cards(self.bot_cards)}",inline=False)
                 insurance_text = self.resolve_insurance_payout(data, userid, BlackJack(self.bot).dealer_natural_blackjack(self.bot_cards))
                 message.add_field(name="結果",value=f"**過五關!**\n你獲得了**{int(self.bet*3)}**塊{self.cake_emoji}(過五關 x 3.0){BlackJack.side_bet_loss_line(self.side_bet_amount, self.cake_emoji)}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
                 if insurance_text is not None:
