@@ -4,6 +4,7 @@ from . import common
 from datetime import datetime, timezone, timedelta
 from dateutil.parser import parse
 import json
+import re
 import discord
 import time
 import random
@@ -105,6 +106,12 @@ class General(commands.Cog):
         self.vip_retain_days = 30  # 取消 Boost 後仍保留 VIP 的天數
         self.message_audit_content_limit = 1000  # 訊息審核 embed 內容字數上限
         self.message_audit_max_attachments = 10  # 訊息審核最多附檔數量
+        self.invite_link_pattern = re.compile(
+            r"(?:https?://)?(?:www\.)?"
+            r"(?:discord(?:app)?\.com/invite|discord\.gg)/"
+            r"([a-zA-Z0-9-]{2,32})",
+            re.IGNORECASE,
+        )
 
     @staticmethod
     def compute_red_packet_amounts(total: int, people: int) -> list[int]:
@@ -940,6 +947,7 @@ class General(commands.Cog):
         embed.add_field(name="訊息連結", value=after.jump_url, inline=False)
         embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
         await self.bot.get_channel(common.admin_log_channel).send(embed=embed)
+        await self.external_invite_detect(after)
 
     @commands.Cog.listener()
     async def on_message_delete(self, message: discord.Message):
@@ -1006,6 +1014,8 @@ class General(commands.Cog):
         await self.want_to_sleep_detect(message)
         #想當大俠偵測
         await self.want_play_wwm_detect(message)
+        #外群邀請連結偵測
+        await self.external_invite_detect(message)
 
         #紀錄最新的3筆訊息(用於機器人偵測)
         message_info = {
@@ -1036,6 +1046,55 @@ class General(commands.Cog):
                     admin_channel = self.bot.get_channel(common.admin_log_channel)
                     await admin_channel.send(f"偵測到機器人行為，使用者ID:<@{memberid}>")
                     asyncio.create_task(self.delete_recent_messages(member))
+
+    async def external_invite_detect(self, message: discord.Message) -> None:
+        """
+        偵測並刪除指向其他伺服器的 Discord 邀請連結訊息。
+
+        Args:
+            message (discord.Message): "discord.gg/abc123"
+        """
+        if message.guild is None or message.guild.id != common.fake_sister_server_id:
+            return
+        if message.author.bot or not message.content:
+            return
+
+        seen_codes: set[str] = set()
+        has_external_invite = False
+        for code in self.invite_link_pattern.findall(message.content):
+            normalized_code = code.lower()
+            if normalized_code in seen_codes:
+                continue
+            seen_codes.add(normalized_code)
+
+            try:
+                invite = await self.bot.fetch_invite(code)
+            except discord.NotFound:
+                continue
+            except discord.HTTPException:
+                continue
+
+            if invite.guild is None or invite.guild.id != common.fake_sister_server_id:
+                has_external_invite = True
+                break
+
+        if not has_external_invite:
+            return
+
+        try:
+            await message.delete()
+        except (discord.Forbidden, discord.NotFound):
+            return
+
+        try:
+            notice_embed = Embed(
+                title="訊息刪除通知",
+                description="在「偽造妹妹」，傳送其他群組的邀請連結是不被允許的，如果想要拉其他玩家進入其他群組，請透過私訊發送邀請。",
+                color=common.bot_error_color,
+            )
+            await message.author.send(embed=notice_embed)
+        except (discord.Forbidden, discord.HTTPException):
+            pass
 
     async def oh_totato_detect(self, message:discord.Message):
         """
