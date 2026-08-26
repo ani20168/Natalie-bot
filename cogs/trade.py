@@ -6,6 +6,7 @@ from datetime import datetime,timezone,timedelta
 import re
 from pathlib import Path
 import asyncio
+import random
 
 class Auction:
     """單一競標的執行中狀態。"""
@@ -422,6 +423,13 @@ class Trade(commands.Cog):
         self.cake_give_commission_min_percent = 1
         self.cake_give_commission_min_level = 1
         self.cake_give_commission_max_level = 300
+        self.robbery_target_min_cake = 100000
+        self.robbery_self_max_cake = 50000
+        self.robbery_cooldown = timedelta(hours=1)
+        self.robbery_base_success_rate = 50.0
+        self.robbery_success_rate_per_level = 0.5
+        self.robbery_cake_per_level = 100
+        self.robbery_interval_key = "robbery interval"
 
     def cake_give_commission_percent(self, level: int) -> float:
         """
@@ -665,6 +673,142 @@ class Trade(commands.Cog):
                 inline=False,
             )
             message.set_footer(text="提示:贈予者等級越低，Natalie更貪吃!")
+        await interaction.response.send_message(embed=message)
+
+    def robbery_success_rate(self, robber_level: int, victim_level: int) -> float:
+        """
+        依雙方等級等差計算搶劫成功率（基礎 50%，每等差 ±0.5%）
+
+        Args:
+            robber_level (int): "50"
+            victim_level (int): "40"
+
+        Returns:
+            rate (float): "55.0"
+        """
+        rate = self.robbery_base_success_rate + (robber_level - victim_level) * self.robbery_success_rate_per_level
+        return max(0.0, min(100.0, rate))
+
+    @app_commands.command(name="robbery", description="搶劫他人的蛋糕")
+    @app_commands.describe(member="你想要搶劫的對象")
+    @app_commands.rename(member="提及用戶")
+    async def robbery(self, interaction: discord.Interaction, member: discord.Member):
+        """
+        搶劫指定成員的蛋糕；通過條件後進入判定並進入 1 小時冷卻。
+
+        Args:
+            interaction (discord.Interaction): "指令互動"
+            member (discord.Member): "要搶劫的對象"
+        """
+        userid = str(interaction.user.id)
+        title = "搶劫"
+        if interaction.user.id == member.id:
+            await interaction.response.send_message(embed=Embed(title=title, description="自己的口袋自己掏不算搶劫啦！", color=common.bot_error_color))
+            return
+        if member.bot:
+            await interaction.response.send_message(embed=Embed(title=title, description="機器人的蛋糕是保養費，動不得！", color=common.bot_error_color))
+            return
+        if any(role.id == common.super_vip_id for role in member.roles):
+            await interaction.response.send_message(embed=Embed(
+                title=title,
+                description=random.choice([
+                    "至寶身上有無敵光環，蛋糕被保護得好好的～",
+                    "碰！至寶的蛋糕護盾把你彈開了",
+                    "至寶太尊貴了，小偷們都自動繞道",
+                ]),
+                color=common.bot_error_color,
+            ))
+            return
+
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        robber_data = await common.mongo_storage.ensure_user_document(userid)
+        victim_data = await common.mongo_storage.ensure_user_document(str(member.id))
+        robber_cake = int(robber_data.get("cake", 0))
+        victim_cake = int(victim_data.get("cake", 0))
+
+        if robber_cake > self.robbery_self_max_cake:
+            await interaction.response.send_message(embed=Embed(
+                title=title,
+                description=f"你已經很有錢了！身上超過 **{self.robbery_self_max_cake}** 塊{common.cake_emoji}就不能當小偷喔（目前 **{robber_cake}**）",
+                color=common.bot_error_color,
+            ))
+            return
+        if victim_cake < self.robbery_target_min_cake:
+            await interaction.response.send_message(embed=Embed(
+                title=title,
+                description=f"對方窮到只剩 **{victim_cake}** 塊{common.cake_emoji}，放過人家吧（至少要 **{self.robbery_target_min_cake}**）",
+                color=common.bot_error_color,
+            ))
+            return
+
+        now = datetime.now()
+        last_robbery_raw = robber_data.get(self.robbery_interval_key)
+        if last_robbery_raw:
+            try:
+                last_robbery = datetime.strptime(last_robbery_raw, "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                last_robbery = datetime.strptime(last_robbery_raw, "%Y-%m-%d %H:%M")
+            if now - last_robbery < self.robbery_cooldown:
+                remaining_time = last_robbery + self.robbery_cooldown - now
+                remaining_seconds = int(remaining_time.total_seconds())
+                remaining_hours, rem = divmod(remaining_seconds, 3600)
+                remaining_minutes, remaining_secs = divmod(rem, 60)
+                await interaction.response.send_message(embed=Embed(
+                    title=title,
+                    description=f"搶太兇會被盯上！再等 **{remaining_hours}** 小時 **{remaining_minutes}** 分 **{remaining_secs}** 秒才能再出手",
+                    color=common.bot_error_color,
+                ))
+                return
+
+        # 進入後續判斷：無論成敗皆寫入冷卻
+        await common.mongo_storage.update_user_fields(userid, {self.robbery_interval_key: now.strftime("%Y-%m-%d %H:%M:%S")})
+
+        robber_level = int(robber_data.get("level", 1))
+        victim_level = int(victim_data.get("level", 1))
+        success_rate = self.robbery_success_rate(robber_level, victim_level)
+        success = random.random() * 100 < success_rate
+        rate_text = f"{success_rate:.1f}".rstrip("0").rstrip(".")
+
+        message = Embed(title=title, color=common.bot_color)
+        message.add_field(name="搶劫者", value=f"<@{userid}> 等級:{robber_level}", inline=True)
+        message.add_field(name="衰鬼", value=f"<@{member.id}> 等級:{victim_level}", inline=True)
+        message.add_field(name="成功率", value=f"**{rate_text}%**", inline=True)
+
+        if not success:
+            message.add_field(name="結果", value="失手了！對方把蛋糕護得緊緊的……下次再來吧", inline=False)
+            await interaction.response.send_message(embed=message)
+            return
+
+        steal_max = max(1, robber_level * self.robbery_cake_per_level)
+        steal_amount = random.randint(1, steal_max)
+        steal_result = await userdata_collection.find_one_and_update(
+            {"_id": str(member.id), "cake": {"$gte": steal_amount}},
+            {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -steal_amount}},
+            upsert=False,
+            return_document=common.ReturnDocument.AFTER,
+        )
+        if steal_result is None:
+            message.add_field(name="結果", value=f"手伸進去了，結果口袋是空的……{common.cake_emoji}不知跑哪去了", inline=False)
+            message.color = common.bot_error_color
+            await interaction.response.send_message(embed=message)
+            return
+
+        try:
+            await userdata_collection.update_one(
+                {"_id": userid},
+                {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": steal_amount}},
+                upsert=True,
+            )
+        except Exception:
+            await userdata_collection.update_one(
+                {"_id": str(member.id)},
+                {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": steal_amount}},
+                upsert=True,
+            )
+            raise
+
+        message.add_field(name="結果", value=f"得手！從 <@{member.id}> 那裡抱走了 **{steal_amount}** 塊{common.cake_emoji}！", inline=False)
         await interaction.response.send_message(embed=message)
 
 
