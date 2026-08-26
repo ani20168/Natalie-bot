@@ -112,6 +112,21 @@ class General(commands.Cog):
             r"([a-zA-Z0-9-]{2,32})",
             re.IGNORECASE,
         )
+        self.svip_intro = (
+            f"至寶是每日任務結算時，{common.marshmallow_emoji}棉花糖數量最多的成員所獲得的榮譽稱號。\n"
+            "持有期間可享有以下特權："
+        )
+        self.svip_privilege_lines = [
+            "身份組獨立顯示",
+            "`/cake_give` 不會被偷吃蛋糕",
+            "可自由選擇動態顏色身份組",
+            "至寶身份組的動態顏色覺得太醜可以隨時換",
+            "語音活躍獎勵額外加成",
+            "群主不定期送禮",
+            "可以使用外部音效版",
+            "可以選擇是否查看語音頻道日誌（`/show_voice_log`）",
+            "可以選擇是否隱藏自己的語音頻道足跡（`/hide_voice_trace`）",
+        ]
 
     @staticmethod
     def compute_red_packet_amounts(total: int, people: int) -> list[int]:
@@ -888,6 +903,65 @@ class General(commands.Cog):
                 pass
         await common.mongo_storage.unset_user_fields(str(member.id), ["hide_voice_trace"])
 
+    def build_svip_info_embed(self) -> Embed:
+        """
+        建立至寶介紹與特權說明的 embed。
+
+        Returns:
+            embed (Embed): "至寶特權說明"
+        """
+        privilege_text = "\n".join(f"- {line}" for line in self.svip_privilege_lines)
+        embed = Embed(title="至寶介紹", description=self.svip_intro, color=common.bot_color)
+        embed.add_field(name="至寶特權", value=privilege_text, inline=False)
+        return embed
+
+    async def send_super_vip_welcome_dm(self, member: discord.Member) -> None:
+        """
+        恭喜新至寶並提示可使用 /svip_info 查看特權。
+
+        Args:
+            member (discord.Member): "剛獲得至寶的成員"
+        """
+        embed = Embed(
+            title="恭喜成為至寶！",
+            description="恭喜你成為今日的至寶！\n可以使用 `/svip_info` 查看你擁有的特權。",
+            color=common.bot_color,
+        )
+        try:
+            await member.send(embed=embed)
+        except discord.HTTPException:
+            pass
+
+    def can_use_svip_info(self, user: discord.abc.User) -> bool:
+        """
+        判斷是否為至寶或 bot owner，可使用 svip_info。
+
+        Args:
+            user (discord.abc.User): "指令使用者"
+
+        Returns:
+            result (bool): "True"
+        """
+        if user.id == common.bot_owner_id: return True
+        if isinstance(user, discord.Member): return self.member_has_super_vip(user)
+        return False
+
+    @app_commands.command(name="svip_info", description="至寶特權：查看至寶介紹與特權說明")
+    async def svip_info(self, interaction: discord.Interaction) -> None:
+        """
+        以只有自己看得到的方式顯示至寶介紹與特權。
+
+        Args:
+            interaction (discord.Interaction): "斜線指令互動"
+        """
+        if interaction.guild is None or interaction.guild.id != common.fake_sister_server_id:
+            await interaction.response.send_message(embed=Embed(title="至寶介紹", description="此指令僅能在「偽造妹妹」伺服器使用。", color=common.bot_error_color), ephemeral=True)
+            return
+        if not self.can_use_svip_info(interaction.user):
+            await interaction.response.send_message(embed=Embed(title="權限不足", description="此指令僅供至寶使用。", color=common.bot_error_color), ephemeral=True)
+            return
+        await interaction.response.send_message(embed=self.build_svip_info_embed(), ephemeral=True)
+
     @app_commands.command(name="show_voice_log", description="至寶特權：選擇是否查看語音頻道日誌")
     @app_commands.describe(choice="是否查看語音頻道日誌")
     @app_commands.rename(choice="開關")
@@ -1294,13 +1368,15 @@ class General(commands.Cog):
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         """
-        Nitro Booster 進出時同步 VIP；失去至寶時撤銷語音日誌相關特權。
+        Nitro Booster 進出時同步 VIP；至寶進出時歡迎私訊或撤銷語音日誌特權。
         """
         if after.guild.id == common.fake_sister_server_id:
             had_super_vip = any(role.id == common.super_vip_id for role in before.roles)
             has_super_vip = any(role.id == common.super_vip_id for role in after.roles)
             if had_super_vip and not has_super_vip:
                 await self.revoke_super_vip_voice_privileges(after)
+            elif not had_super_vip and has_super_vip:
+                await self.send_super_vip_welcome_dm(after)
 
         before_has_booster = any(role.id == common.nitro_booster_role_id for role in before.roles)
         after_has_booster = any(role.id == common.nitro_booster_role_id for role in after.roles)
