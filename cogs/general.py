@@ -846,27 +846,141 @@ class General(commands.Cog):
         embed = Embed(title="搶紅包", description="請先選擇要發佈紅包的文字頻道（**#大廳**、**#機器人指令區**），接著設定人數與總金額。\n時長固定 **5 分鐘**；未搶完的蛋糕會退回給你。", color=common.bot_color)
         await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
 
+    def member_has_super_vip(self, member: discord.Member) -> bool:
+        """
+        判斷成員是否擁有至寶身分組。
+
+        Args:
+            member (discord.Member): "伺服器成員"
+
+        Returns:
+            result (bool): "True"
+        """
+        return any(role.id == common.super_vip_id for role in member.roles)
+
+    async def is_voice_trace_hidden(self, member: discord.Member) -> bool:
+        """
+        判斷至寶是否已開啟隱藏語音足跡。
+
+        Args:
+            member (discord.Member): "伺服器成員"
+
+        Returns:
+            result (bool): "True"
+        """
+        if not self.member_has_super_vip(member): return False
+        user_data = await common.mongo_storage.get_user(str(member.id))
+        if not isinstance(user_data, dict): return False
+        return bool(user_data.get("hide_voice_trace"))
+
+    async def revoke_super_vip_voice_privileges(self, member: discord.Member) -> None:
+        """
+        失去至寶時撤銷語音日誌瀏覽權與隱藏足跡設定。
+
+        Args:
+            member (discord.Member): "剛失去至寶的成員"
+        """
+        channel = self.bot.get_channel(common.mod_log_channel)
+        if isinstance(channel, discord.TextChannel):
+            try:
+                await channel.set_permissions(member, overwrite=None)
+            except discord.HTTPException:
+                pass
+        await common.mongo_storage.unset_user_fields(str(member.id), ["hide_voice_trace"])
+
+    @app_commands.command(name="show_voice_log", description="至寶特權：選擇是否查看語音頻道日誌")
+    @app_commands.describe(choice="是否查看語音頻道日誌")
+    @app_commands.rename(choice="開關")
+    @app_commands.choices(choice=[
+        app_commands.Choice(name="開啟", value="開啟"),
+        app_commands.Choice(name="關閉", value="關閉"),
+    ])
+    async def show_voice_log(self, interaction: discord.Interaction, choice: app_commands.Choice[str]) -> None:
+        """
+        為至寶開關管理員日誌頻道的瀏覽權限。
+
+        Args:
+            interaction (discord.Interaction): "斜線指令互動"
+            choice (app_commands.Choice[str]): "開啟"
+        """
+        if interaction.guild is None or interaction.guild.id != common.fake_sister_server_id:
+            await interaction.response.send_message(embed=Embed(title="語音頻道日誌", description="此指令僅能在「偽造妹妹」伺服器使用。", color=common.bot_error_color), ephemeral=True)
+            return
+        if not self.member_has_super_vip(interaction.user):
+            await interaction.response.send_message(embed=Embed(title="權限不足", description="此指令僅供至寶使用。", color=common.bot_error_color), ephemeral=True)
+            return
+
+        channel = self.bot.get_channel(common.mod_log_channel)
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message(embed=Embed(title="語音頻道日誌", description="找不到語音日誌頻道。", color=common.bot_error_color), ephemeral=True)
+            return
+
+        try:
+            if choice.value == "開啟":
+                await channel.set_permissions(interaction.user, view_channel=True, read_message_history=True)
+                await interaction.response.send_message(embed=Embed(title="語音頻道日誌", description=f"已開啟，你現在可以查看 {channel.mention}。", color=common.bot_color), ephemeral=True)
+                return
+            await channel.set_permissions(interaction.user, overwrite=None)
+            await interaction.response.send_message(embed=Embed(title="語音頻道日誌", description="已關閉語音頻道日誌瀏覽權限。", color=common.bot_color), ephemeral=True)
+        except discord.HTTPException:
+            await interaction.response.send_message(embed=Embed(title="語音頻道日誌", description="無法變更頻道權限，請稍後再試或聯繫管理員。", color=common.bot_error_color), ephemeral=True)
+
+    @app_commands.command(name="hide_voice_trace", description="至寶特權：選擇是否隱藏自己的語音頻道足跡")
+    @app_commands.describe(choice="是否隱藏語音進出日誌")
+    @app_commands.rename(choice="開關")
+    @app_commands.choices(choice=[
+        app_commands.Choice(name="開啟", value="開啟"),
+        app_commands.Choice(name="關閉", value="關閉"),
+    ])
+    async def hide_voice_trace(self, interaction: discord.Interaction, choice: app_commands.Choice[str]) -> None:
+        """
+        為至寶開關隱藏語音進出／切換日誌。
+
+        Args:
+            interaction (discord.Interaction): "斜線指令互動"
+            choice (app_commands.Choice[str]): "開啟"
+        """
+        if interaction.guild is None or interaction.guild.id != common.fake_sister_server_id:
+            await interaction.response.send_message(embed=Embed(title="隱藏語音足跡", description="此指令僅能在「偽造妹妹」伺服器使用。", color=common.bot_error_color), ephemeral=True)
+            return
+        if not self.member_has_super_vip(interaction.user):
+            await interaction.response.send_message(embed=Embed(title="權限不足", description="此指令僅供至寶使用。", color=common.bot_error_color), ephemeral=True)
+            return
+
+        userid = str(interaction.user.id)
+        if choice.value == "開啟":
+            await common.mongo_storage.update_user_fields(userid, {"hide_voice_trace": True})
+            await interaction.response.send_message(embed=Embed(title="隱藏語音足跡", description="已開啟。你進入、退出、切換語音頻道時不會留下日誌。", color=common.bot_color), ephemeral=True)
+            return
+        await common.mongo_storage.unset_user_fields(userid, ["hide_voice_trace"])
+        await interaction.response.send_message(embed=Embed(title="隱藏語音足跡", description="已關閉。你的語音進出將恢復記錄。", color=common.bot_color), ephemeral=True)
+
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
         if member.guild.id != 419108485435883531: return #如果語音事件不在妹妹群內則略過(例如在測試群進語音之類的)
+        hide_trace = await self.is_voice_trace_hidden(member)
         #進入語音頻道
         if after.channel and not before.channel:
             self.member_invoice_time[str(member.id)] = time.time()
-            embed = Embed(title="", description=f"{member.display_name} 進入了 {after.channel.name} 語音頻道", color=common.bot_color)
-            embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
-            embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
-            await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
+            if not hide_trace:
+                embed = Embed(title="", description=f"{member.display_name} 進入了 {after.channel.name} 語音頻道", color=common.bot_color)
+                embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
+                embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
+                await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
 
         #離開語音頻道
         if before.channel and not after.channel:
-            embed = Embed(title="", description=f"{member.display_name} 離開了 {before.channel.name} 語音頻道", color=common.bot_color)
-            invoice_time = time.time() - self.member_invoice_time.get(str(member.id),60)
-            if invoice_time  < 10:
-                embed = Embed(title="", description=f"{member.display_name} 離開了 {before.channel.name} 語音頻道 (在{invoice_time:.2f}秒內進出)", color=0xEAC100)
-            self.member_invoice_time.pop(str(member.id),None)
-            embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
-            embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
-            await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
+            if not hide_trace:
+                embed = Embed(title="", description=f"{member.display_name} 離開了 {before.channel.name} 語音頻道", color=common.bot_color)
+                invoice_time = time.time() - self.member_invoice_time.get(str(member.id),60)
+                if invoice_time  < 10:
+                    embed = Embed(title="", description=f"{member.display_name} 離開了 {before.channel.name} 語音頻道 (在{invoice_time:.2f}秒內進出)", color=0xEAC100)
+                self.member_invoice_time.pop(str(member.id),None)
+                embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
+                embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
+                await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
+            else:
+                self.member_invoice_time.pop(str(member.id), None)
 
             member_data = await common.mongo_storage.get_user(str(member.id))
             if isinstance(member_data, dict) and "afk_start" in member_data:
@@ -875,16 +989,17 @@ class General(commands.Cog):
         #切換語音頻道
         if before.channel != after.channel:
             if before.channel and after.channel:
-                embed = Embed(title="", description=f"{member.display_name} 從 {before.channel.name} 移動到 {after.channel.name} 頻道", color=common.bot_color)
-                #如果除了自己外房間還有其他人，則檢查進出時間
-                if len(before.channel.members) >= 2:
-                    invoice_time = time.time() - self.member_invoice_time.get(str(member.id),60)
-                    if invoice_time  < 10:
-                        embed = Embed(title="", description=f"{member.display_name} 從 {before.channel.name} 移動到 {after.channel.name} 頻道 (在{invoice_time:.2f}秒內切換頻道)", color=0xEAC100)
+                if not hide_trace:
+                    embed = Embed(title="", description=f"{member.display_name} 從 {before.channel.name} 移動到 {after.channel.name} 頻道", color=common.bot_color)
+                    #如果除了自己外房間還有其他人，則檢查進出時間
+                    if len(before.channel.members) >= 2:
+                        invoice_time = time.time() - self.member_invoice_time.get(str(member.id),60)
+                        if invoice_time  < 10:
+                            embed = Embed(title="", description=f"{member.display_name} 從 {before.channel.name} 移動到 {after.channel.name} 頻道 (在{invoice_time:.2f}秒內切換頻道)", color=0xEAC100)
+                    embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
+                    embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
+                    await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
                 self.member_invoice_time[str(member.id)] = time.time()
-                embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
-                embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
-                await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
 
     def format_message_audit_content(self, content: str | None) -> str:
         """
@@ -1179,8 +1294,14 @@ class General(commands.Cog):
     @commands.Cog.listener()
     async def on_member_update(self, before: discord.Member, after: discord.Member):
         """
-        Nitro Booster 進出時同步 VIP：新 Boost 賦予 VIP；未滿保留天數取消 Boost 則移除 VIP。
+        Nitro Booster 進出時同步 VIP；失去至寶時撤銷語音日誌相關特權。
         """
+        if after.guild.id == common.fake_sister_server_id:
+            had_super_vip = any(role.id == common.super_vip_id for role in before.roles)
+            has_super_vip = any(role.id == common.super_vip_id for role in after.roles)
+            if had_super_vip and not has_super_vip:
+                await self.revoke_super_vip_voice_privileges(after)
+
         before_has_booster = any(role.id == common.nitro_booster_role_id for role in before.roles)
         after_has_booster = any(role.id == common.nitro_booster_role_id for role in after.roles)
         if before_has_booster == after_has_booster: return
