@@ -131,19 +131,10 @@ class General(commands.Cog):
     @staticmethod
     def compute_red_packet_amounts(total: int, people: int) -> list[int]:
         """依規則切分紅包金額（整數蛋糕），回傳長度為 people 的清單，加總為 total。"""
-        if people < 1 or people > 15:
-            raise ValueError("人數需在 1～15 之間")
+        if people < 3 or people > 15:
+            raise ValueError("人數需在 3～15 之間")
         if total < 1:
             raise ValueError("總金額須為正整數")
-        if people == 1:
-            return [total]
-        if people == 2:
-            if total < 2:
-                raise ValueError("兩人紅包時總金額至少為 2")
-            cut = random.randint(1, total - 1)
-            parts = [cut, total - cut]
-            random.shuffle(parts)
-            return parts
         if total < people:
             raise ValueError(f"總金額至少需等於人數（每人至少 1 塊{common.cake_emoji}）")
         cuts = sorted(random.sample(range(1, total), people - 1))
@@ -784,7 +775,7 @@ class General(commands.Cog):
             self.stop()
 
     class RedPacketModal(discord.ui.Modal, title="搶紅包設定"):
-        people_field = discord.ui.TextInput(label="人數 (1～15)", placeholder="要發給幾個人", required=True, max_length=2)
+        people_field = discord.ui.TextInput(label="人數 (3～15)", placeholder="要發給幾個人", required=True, max_length=2)
         total_field = discord.ui.TextInput(label="總金額 (蛋糕)", placeholder="整數，未搶完會退回剩餘", required=True, max_length=12)
         short_message_field = discord.ui.TextInput(label="短言", placeholder="可留空，最多 100 字", required=False, max_length=100)
 
