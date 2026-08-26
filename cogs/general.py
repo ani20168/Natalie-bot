@@ -126,6 +126,7 @@ class General(commands.Cog):
             "可以使用外部音效版",
             "可以選擇是否查看語音頻道日誌（`/show_voice_log`）",
             "可以選擇是否隱藏自己的語音頻道足跡（`/hide_voice_trace`）",
+            "別人無法掠奪你的蛋糕"
         ]
 
     @staticmethod
@@ -155,7 +156,8 @@ class General(commands.Cog):
         cake_commands_list = [
             f"/eat 餵食Natalie一些{cake_emoji} (1 cake = 1 exp)",
             f"/cake_give 給予他人{cake_emoji}",
-            "/red_packet 發紅包(蛋糕)"
+            "/red_packet 發紅包(蛋糕)",
+            "/robbery 掠奪別人的蛋糕"
         ]
         game_commands_list = [
             "/mining_info 挖礦小遊戲資訊",
