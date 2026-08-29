@@ -1,3 +1,4 @@
+import time
 import discord
 from discord import app_commands, Embed
 from discord.ext import commands, tasks
@@ -192,6 +193,17 @@ class Quest(commands.Cog):
         self.leaderboard_limit = 10
         self.settlement_hour = 6
         self.settlement_minute = 0
+        self.lobby_chat_cooldown_seconds = 10  # 發言防濫用: 同一人兩則「算進度」的發言，至少要隔幾秒
+        self.lobby_chat_min_length = 3  # 發言防濫用: 訊息至少幾個字才算進度（太短不算）
+        self.lobby_chat_min_non_whitespace = 3  # 發言防濫用: 空白不算，真正有字的部分至少幾個才算
+        self.lobby_chat_min_unique_chars = 2  # 發言防濫用: 至少要幾個不同字（擋 aaaa 這種）
+        self.lobby_chat_spam_window_seconds = 6  # 發言防濫用: 用幾秒內的無效發言來判斷有沒有在刷
+        self.lobby_chat_spam_non_progress_count = 3  # 發言防濫用: 短時間內幾則「不算進度」就暫時封鎖
+        self.lobby_chat_penalty_seconds = 600  # 發言防濫用: 被判定在刷之後，多久內發言都不算進度(單位:秒)
+        self.lobby_chat_last_counted_at = {}  # 發言防濫用狀態: 每人上次「算進度」的時間
+        self.lobby_chat_last_counted_content = {}  # 發言防濫用狀態: 每人上次「算進度」的內容（拿來擋重貼）
+        self.lobby_chat_non_progress_times = {}  # 發言防濫用狀態: 每人最近幾則「不算進度」的時間
+        self.lobby_chat_penalty_until = {}  # 發言防濫用狀態: 每人暫時封鎖到什麼時候
         self.invite_cache = {}
         self.quests = [
             LobbyChat3Quest(self.lobby_text_channel_id),
@@ -269,6 +281,90 @@ class Quest(commands.Cog):
         user = self.bot.get_user(int(user_id))
         if user is not None: return user.display_name
         return user_id
+
+    def normalize_lobby_chat_content(self, content: str) -> str:
+        """
+        正規化大廳發言內容，供門檻與去重比對。
+
+        Args:
+            content (str): "  Hello   world  "
+
+        Returns:
+            normalized (str): "hello world"
+        """
+        return " ".join(content.strip().split()).casefold()
+
+    def is_valid_lobby_chat_content(self, content: str) -> bool:
+        """
+        檢查大廳發言是否通過最低內容門檻。
+        判斷：正規化後長度、非空白字元數、相異字元數皆達門檻。
+
+        Args:
+            content (str): "hello"
+
+        Returns:
+            valid (bool): "True"
+        """
+        if len(content) < self.lobby_chat_min_length: return False
+        non_whitespace = "".join(character for character in content if not character.isspace())
+        if len(non_whitespace) < self.lobby_chat_min_non_whitespace: return False
+        if len(set(non_whitespace)) < self.lobby_chat_min_unique_chars: return False
+        return True
+
+    def register_lobby_chat_non_progress(self, user_id: str, now: float) -> None:
+        """
+        記錄一則未計入進度的大廳發言，必要時套用暫時懲罰。
+        判斷：時間窗內未計入次數達門檻則寫入懲罰結束時間並清空計數。
+
+        Args:
+            user_id (str): "410847926236086272"
+            now (float): "123456.7"
+        """
+        times = self.lobby_chat_non_progress_times.setdefault(user_id, [])
+        times.append(now)
+        cutoff = now - self.lobby_chat_spam_window_seconds
+        times[:] = [timestamp for timestamp in times if timestamp >= cutoff]
+        if len(times) < self.lobby_chat_spam_non_progress_count: return
+        self.lobby_chat_penalty_until[user_id] = now + self.lobby_chat_penalty_seconds
+        times.clear()
+
+    def accept_lobby_chat_for_quest(self, user_id: str, content: str) -> bool:
+        """
+        判斷大廳發言是否可計入任務進度（lobby_chat_3 / lobby_chat_10 共用）。
+        判斷機制（依序，全部通過才計入）：
+        1. 不在懲罰期內（否則直接拒絕，且不記入「未計入」計數）
+        2. 內容正規化後通過最低門檻（長度／非空白／相異字元）
+        3. 與上一則「已計入」正規化內容不同（去重）
+        4. 距上一則「已計入」已滿冷卻秒數
+        未通過 2～4 視為「未計入」：寫入時間窗；窗內達次數則進入懲罰期。
+        通過後更新已計入時間與內容，並清空該使用者的未計入計數。
+
+        Args:
+            user_id (str): "410847926236086272"
+            content (str): "大家好"
+
+        Returns:
+            accepted (bool): "True"
+        """
+        now = time.monotonic()
+        if now < self.lobby_chat_penalty_until.get(user_id, 0): return False
+
+        normalized = self.normalize_lobby_chat_content(content)
+        if not self.is_valid_lobby_chat_content(normalized):
+            self.register_lobby_chat_non_progress(user_id, now)
+            return False
+        if normalized == self.lobby_chat_last_counted_content.get(user_id):
+            self.register_lobby_chat_non_progress(user_id, now)
+            return False
+        last_counted_at = self.lobby_chat_last_counted_at.get(user_id, 0)
+        if now - last_counted_at < self.lobby_chat_cooldown_seconds:
+            self.register_lobby_chat_non_progress(user_id, now)
+            return False
+
+        self.lobby_chat_last_counted_at[user_id] = now
+        self.lobby_chat_last_counted_content[user_id] = normalized
+        self.lobby_chat_non_progress_times.pop(user_id, None)
+        return True
 
     async def report_event(self, user_id: str, event_type: str, amount: int = 1):
         """
@@ -406,7 +502,8 @@ class Quest(commands.Cog):
                 "透過完成每日任務，獲取棉花糖跟蛋糕!\n"
                 "試著成為棉花糖數量最多的人，領取稱號獎勵吧!\n"
                 "※每日任務在早上6:00刷新\n"
-                "※刷新時如果每日任務未達成任何一項，棉花糖會歸0"
+                "※刷新時如果每日任務未達成任何一項，棉花糖會歸0\n"
+                "※發言相關任務受到防濫用機制保護"
             ),
             color=common.bot_color,
         )
@@ -453,7 +550,7 @@ class Quest(commands.Cog):
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
         """
-        大廳發言時推進聊天任務。
+        大廳發言時推進聊天任務（含防濫用檢查）。
 
         Args:
             message (discord.Message): "Message(...)"
@@ -461,7 +558,9 @@ class Quest(commands.Cog):
         if message.author.bot: return
         if message.guild is None or message.guild.id != common.fake_sister_server_id: return
         if message.channel.id != self.lobby_text_channel_id: return
-        await self.report_event(str(message.author.id), "lobby_chat")
+        user_id = str(message.author.id)
+        if not self.accept_lobby_chat_for_quest(user_id, message.content or ""): return
+        await self.report_event(user_id, "lobby_chat")
 
     @commands.Cog.listener()
     async def on_member_join(self, member: discord.Member):
