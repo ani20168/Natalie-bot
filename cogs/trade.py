@@ -578,41 +578,31 @@ class Trade(commands.Cog):
                 await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description="兌換失敗:與現有身分組重複或相似。",color=common.bot_error_color))
                 return
                 
-            async with common.jsonio_lock:
-                now = datetime.now()
-                memberid = str(interaction.user.id)
+            now = datetime.now()
+            memberid = str(interaction.user.id)
+            interval_key = "redeem member role interval"
+            user_data = await common.mongo_storage.get_user(memberid)
+            if user_data is None:
+                await common.mongo_storage.ensure_user_document(memberid)
                 user_data = await common.mongo_storage.get_user(memberid)
-                if user_data is None:
-                    await common.mongo_storage.ensure_user_document(memberid)
-                    user_data = await common.mongo_storage.get_user(memberid)
-                if user_data is None:
-                    await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description="兌換失敗:讀取使用者資料失敗。",color=common.bot_error_color))
+            if user_data is None:
+                await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description="兌換失敗:讀取使用者資料失敗。",color=common.bot_error_color))
+                return
+            if interval_key in user_data:
+                last_redeem = datetime.strptime(user_data[interval_key], "%Y-%m-%d %H:%M")
+                if now - last_redeem < timedelta(days=30):
+                    remaining_time = last_redeem + timedelta(days=30) - now
+                    remaining_days, remaining_seconds = divmod(remaining_time.days * 24 * 60 * 60 + remaining_time.seconds, 86400)
+                    remaining_hours, remaining_seconds = divmod(remaining_seconds, 3600)
+                    await interaction.response.send_message(embed=Embed(
+                            title="兌換自訂稱號",
+                            description=f"兌換失敗:你每個月只能兌換一次，距離下次兌換還有**{remaining_days}**天**{remaining_hours}**小時。",
+                            color=common.bot_error_color))
                     return
-                user_data = {field_name: field_value for field_name, field_value in user_data.items() if field_name != "_id"}
-                if "redeem member role interval" in user_data:
-                    last_redeem = datetime.strptime(user_data['redeem member role interval'], '%Y-%m-%d %H:%M')
-                    #如果有資料，則進行天數比對
-                    if now - last_redeem >=timedelta(days=30):
-                        user_data['redeem member role interval'] = now.strftime('%Y-%m-%d %H:%M')
-                    else:
-                        #不符合資格(尚在兌換冷卻期)
-                        remaining_time = last_redeem + timedelta(days=30) - now
-                        remaining_days, remaining_seconds = divmod(remaining_time.days * 24 * 60 * 60 + remaining_time.seconds, 86400)
-                        remaining_hours, remaining_seconds = divmod(remaining_seconds, 3600)
-                        await interaction.response.send_message(embed=Embed(
-                                title="兌換自訂稱號",
-                                description=f"兌換失敗:你每個月只能兌換一次，距離下次兌換還有**{remaining_days}**天**{remaining_hours}**小時。",
-                                color=common.bot_error_color))
-                        return
-
-                #如果沒有資料
-                else:
-                    user_data['redeem member role interval'] = now.strftime('%Y-%m-%d %H:%M')
-                #添加身分組
-                await interaction.guild.create_role(name=rolename,color=colorhex,reason="Nitro Booster兌換每月自訂稱號")
-                await interaction.user.add_roles(discord.utils.get(interaction.guild.roles,name=rolename))
-                await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description=f"兌換成功!你現在擁有《 **{rolename}** 》稱號。",color=common.bot_color))
-                await common.mongo_storage.upsert_user(memberid, user_data)
+            await interaction.guild.create_role(name=rolename,color=colorhex,reason="Nitro Booster兌換每月自訂稱號")
+            await interaction.user.add_roles(discord.utils.get(interaction.guild.roles,name=rolename))
+            await interaction.response.send_message(embed=Embed(title="兌換自訂稱號",description=f"兌換成功!你現在擁有《 **{rolename}** 》稱號。",color=common.bot_color))
+            await common.mongo_storage.update_user_fields(memberid, {interval_key: now.strftime("%Y-%m-%d %H:%M")})
             
     @app_commands.command(name = "cake_give", description = "贈送蛋糕")
     @app_commands.describe(member_give="你想要給予的人(使用提及)",amount="給予的蛋糕數量")

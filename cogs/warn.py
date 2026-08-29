@@ -45,26 +45,37 @@ class WarnDeleteConfirmButton(discord.ui.Button):
             return
         target_key = str(view.target_user_id)
         idx = view.index_one_based - 1
-        error_key: str | None = None
-        async with common.jsonio_lock:
-            user_block = await common.mongo_storage.get_user(target_key)
-            if not isinstance(user_block, dict):
-                error_key = "no_user"
-            else:
-                user_block = {field_name: field_value for field_name, field_value in user_block.items() if field_name != "_id"}
-                warn_list = user_block.get("warn_list")
-                if not isinstance(warn_list, list) or idx < 0 or idx >= len(warn_list):
-                    error_key = "bad_idx"
-                else:
-                    del warn_list[idx]
-                    await common.mongo_storage.upsert_user(target_key, user_block)
-        if error_key == "no_user":
+        if idx < 0:
             await interaction.response.send_message(
-                embed=Embed(title="刪除警告", description="找不到該使用者的資料。", color=common.bot_error_color),
+                embed=Embed(title="刪除警告", description="該序號已不存在或資料已變更。", color=common.bot_error_color),
                 ephemeral=True,
             )
             return
-        if error_key == "bad_idx":
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        updated = await userdata_collection.find_one_and_update(
+            {"_id": target_key, f"warn_list.{idx}": {"$exists": True}},
+            [
+                {
+                    "$set": {
+                        "warn_list": {
+                            "$concatArrays": [
+                                {"$slice": ["$warn_list", idx]},
+                                {"$slice": ["$warn_list", {"$add": [idx, 1]}, {"$size": "$warn_list"}]},
+                            ]
+                        }
+                    }
+                }
+            ],
+            return_document=common.ReturnDocument.AFTER,
+        )
+        if updated is None:
+            existing = await userdata_collection.find_one({"_id": target_key}, {"_id": 1})
+            if existing is None:
+                await interaction.response.send_message(
+                    embed=Embed(title="刪除警告", description="找不到該使用者的資料。", color=common.bot_error_color),
+                    ephemeral=True,
+                )
+                return
             await interaction.response.send_message(
                 embed=Embed(title="刪除警告", description="該序號已不存在或資料已變更。", color=common.bot_error_color),
                 ephemeral=True,
@@ -127,22 +138,26 @@ class Warn(commands.Cog):
                 ephemeral=True,
             )
             return
+        await interaction.response.defer(ephemeral=True)
         target_key = str(member.id)
         now_utc = datetime.now(timezone.utc)
-        ts_str = now_utc.isoformat()
-        async with common.jsonio_lock:
-            user_block = await common.mongo_storage.get_user(target_key)
-            if not isinstance(user_block, dict):
-                user_block = {"cake": 0, "warn_list": []}
-            else:
-                user_block = {field_name: field_value for field_name, field_value in user_block.items() if field_name != "_id"}
-            if "warn_list" not in user_block or not isinstance(user_block["warn_list"], list):
-                user_block["warn_list"] = []
-            user_block["warn_list"].insert(0, {"reason": reason, "timestamp": ts_str})
-            await common.mongo_storage.upsert_user(target_key, user_block)
-            warn_list = user_block["warn_list"]
-            total = len(warn_list)
-            effective = self.count_effective_warns(warn_list, now_utc)
+        warn_entry = {"reason": reason, "timestamp": now_utc.isoformat()}
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        updated = await userdata_collection.find_one_and_update(
+            {"_id": target_key},
+            {
+                "$setOnInsert": defaults,
+                "$push": {"warn_list": {"$each": [warn_entry], "$position": 0}},
+            },
+            upsert=True,
+            return_document=common.ReturnDocument.AFTER,
+        )
+        warn_list = updated.get("warn_list") if isinstance(updated, dict) else []
+        if not isinstance(warn_list, list):
+            warn_list = []
+        total = len(warn_list)
+        effective = self.count_effective_warns(warn_list, now_utc)
         warn_msg_list = [
             "你已被管理員警告",
             f"理由：{reason}",
@@ -170,7 +185,7 @@ class Warn(commands.Cog):
         admin_embed.add_field(name="理由", value=reason_field, inline=False)
         if not dm_ok:
             admin_embed.description = (admin_embed.description or "") + "\n（無法傳送私人訊息給該成員，請對方開啟伺服器成員私訊。）"
-        await interaction.response.send_message(embed=admin_embed, ephemeral=True)
+        await interaction.followup.send(embed=admin_embed, ephemeral=True)
 
     @app_commands.command(name="warnlist", description="查看警告紀錄")
     @app_commands.describe(member="要查詢的成員（僅管理員）")
