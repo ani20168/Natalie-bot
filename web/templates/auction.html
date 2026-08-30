@@ -1,7 +1,7 @@
 {% extends "app_layout.html" %}
 {% block main %}
 <h2>拍賣所</h2>
-<p class="auction-lead">你可以在這裡競標商品。如果想要建立你的競標，請使用/create_bid 指令。</p>
+<p class="auction-lead">你可以在這裡競標商品。如果想要建立你的競標，請使用/create_bid 指令。<br>若剩餘時間低於 60 秒後有人出價，系統將自動延長 30 秒。</p>
 
 <section class="auction-section">
   <h3>進行中的競標</h3>
@@ -55,11 +55,15 @@
       return Math.floor((endMs - Date.now()) / 1000);
     }
 
-    function showToast(ok, message) {
+    function cakeIcon() {
+      return '<img class="cake-icon" src="/static/cake.png" alt="蛋糕">';
+    }
+
+    function showToast(ok, messageHtml) {
       if (!toastBox) return;
       if (toastHideTimer) clearTimeout(toastHideTimer);
       if (toastOutTimer) clearTimeout(toastOutTimer);
-      toastBox.textContent = message;
+      toastBox.innerHTML = messageHtml;
       toastBox.className = "auction-toast " + (ok ? "is-ok" : "is-error");
       void toastBox.offsetWidth;
       toastBox.classList.add("is-in");
@@ -68,14 +72,14 @@
         toastBox.classList.add("is-out");
         toastOutTimer = setTimeout(function () {
           toastBox.className = "auction-toast";
-          toastBox.textContent = "";
+          toastBox.innerHTML = "";
         }, 400);
       }, 2400);
     }
 
     function updateCake(cake) {
       if (cakeBox && cake !== undefined && cake !== null) {
-        cakeBox.textContent = "蛋糕 " + cake;
+        cakeBox.innerHTML = cakeIcon() + " " + cake;
       }
     }
 
@@ -96,10 +100,17 @@
         var remaining = started ? remainingFromIso(item.end_time) : remainingFromIso(item.start_time);
         var timeLabel = started ? "剩餘時間" : "開始倒數";
         var highest = item.highest_bidder_name
-          ? item.highest_bid + "（" + item.highest_bidder_name + "）"
+          ? item.highest_bid + cakeIcon() + "（" + escapeHtml(item.highest_bidder_name) + "）"
           : "尚無";
         var canBid = started && !item.is_highest_bidder && remaining > 0 && !biddingIds[item.id];
-        var bidLabel = biddingIds[item.id] ? "處理中…" : (item.is_highest_bidder ? "你已是最高出價者" : (started ? "出價 " + item.next_price : "尚未開始"));
+        var bidInner = "尚未開始";
+        if (biddingIds[item.id]) {
+          bidInner = "處理中…";
+        } else if (item.is_highest_bidder) {
+          bidInner = "你已是最高出價者";
+        } else if (started) {
+          bidInner = "出價 " + item.next_price + cakeIcon();
+        }
         return (
           '<article class="auction-card" data-id="' + item.id + '">' +
             '<div class="auction-card-head">' +
@@ -109,13 +120,13 @@
             '<p class="auction-time">' + timeLabel + ' <strong>' + formatSpan(remaining) + '</strong></p>' +
             '<dl class="auction-meta">' +
               '<div><dt>發起人</dt><dd>' + escapeHtml(item.author_name) + '</dd></div>' +
-              '<div><dt>起標價</dt><dd>' + item.start_price + '</dd></div>' +
-              '<div><dt>增額出價</dt><dd>' + item.increment + '</dd></div>' +
-              '<div><dt>目前最高價</dt><dd>' + escapeHtml(String(highest)) + '</dd></div>' +
+              '<div><dt>起標價</dt><dd>' + item.start_price + cakeIcon() + '</dd></div>' +
+              '<div><dt>增額出價</dt><dd>' + item.increment + cakeIcon() + '</dd></div>' +
+              '<div><dt>目前最高價</dt><dd>' + highest + '</dd></div>' +
               '<div><dt>出價次數</dt><dd>' + item.bid_count + '</dd></div>' +
             '</dl>' +
             '<button type="button" class="btn btn-bid" data-id="' + item.id + '" data-price="' + item.next_price + '"' +
-              (canBid ? "" : " disabled") + '>' + escapeHtml(bidLabel) + '</button>' +
+              (canBid ? "" : " disabled") + '>' + bidInner + '</button>' +
           '</article>'
         );
       }).join("");
@@ -128,7 +139,7 @@
       }
       endedBox.innerHTML = items.map(function (item) {
         var result = item.highest_bidder_name
-          ? item.highest_bidder_name + " 以 " + item.highest_bid + " 得標"
+          ? escapeHtml(item.highest_bidder_name) + " 以 " + item.highest_bid + cakeIcon() + " 得標"
           : "流標";
         return (
           '<article class="auction-card is-ended">' +
@@ -138,7 +149,7 @@
             '</div>' +
             '<dl class="auction-meta">' +
               '<div><dt>發起人</dt><dd>' + escapeHtml(item.author_name) + '</dd></div>' +
-              '<div><dt>結果</dt><dd>' + escapeHtml(result) + '</dd></div>' +
+              '<div><dt>結果</dt><dd>' + result + '</dd></div>' +
               '<div><dt>出價次數</dt><dd>' + item.bid_count + '</dd></div>' +
             '</dl>' +
           '</article>'
@@ -159,9 +170,9 @@
         var data = await response.json();
         updateCake(data.cake);
         if (data.ok) {
-          showToast(true, "出價成功：你以 " + data.price + " 塊蛋糕出價");
+          showToast(true, "出價成功：你以 " + data.price + cakeIcon() + " 出價");
         } else {
-          showToast(false, "出價失敗:" + (data.error || "未知錯誤"));
+          showToast(false, "出價失敗:" + escapeHtml(data.error || "未知錯誤"));
         }
       } catch (error) {
         showToast(false, "出價失敗:系統忙碌，請稍後再試");

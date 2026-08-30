@@ -811,7 +811,7 @@ def generate_embed(auction: Auction) -> Embed:
         embed.add_field(name="目前最高價", value="尚無", inline=False)
     embed.add_field(name="此商品出價次數", value=str(auction.bid_count), inline=False)
 
-    embed.set_footer(text=f"⚠️ 若剩餘時間低於 60 秒後有人出價，系統將自動延長 30 秒。 ID:{auction.auction_id}")
+    embed.set_footer(text=f"⚠️ discord競標資訊更新較慢，僅供參考，資訊以網頁顯示為準。ID:{auction.auction_id}")
     return embed
 
 class Trade(commands.Cog):
@@ -828,6 +828,10 @@ class Trade(commands.Cog):
         self.robbery_success_rate_per_level = 0.5
         self.robbery_cake_per_level = 100
         self.robbery_interval_key = "robbery interval"
+        self.auction_start_price_min = 500
+        self.auction_increment_min = 500
+        self.auction_duration_max_minutes = 60
+        self.auction_preparation_max_minutes = 300
         self.auction_house = AuctionHouse(client)
         self.restore_task: asyncio.Task | None = None
         client.auction_house = self.auction_house
@@ -916,10 +920,10 @@ class Trade(commands.Cog):
 
     class CreateBidModal(discord.ui.Modal, title="建立競標"):
         item = discord.ui.TextInput(label="商品", placeholder="300元禮物卡", required=True)
-        start_price = discord.ui.TextInput(label="起標價", placeholder="輸入數字", required=True)
-        increment = discord.ui.TextInput(label="增額出價", placeholder="每次最少加多少", required=True)
-        duration = discord.ui.TextInput(label="持續時間 (分鐘)", placeholder="例如 10", required=True)
-        preparation = discord.ui.TextInput(label="準備時間 (分鐘)", placeholder="例如 5 (可留白)", required=False)
+        start_price = discord.ui.TextInput(label="起標價", placeholder="至少 500", required=True)
+        increment = discord.ui.TextInput(label="增額出價", placeholder="至少 500", required=True)
+        duration = discord.ui.TextInput(label="持續時間 (分鐘)", placeholder="1～60", required=True)
+        preparation = discord.ui.TextInput(label="準備時間 (分鐘)", placeholder="0～300（可留白）", required=False)
 
         def __init__(self, parent_cog: "Trade", channel_id: int):
             super().__init__()
@@ -938,6 +942,20 @@ class Trade(commands.Cog):
                     raise ValueError
             except ValueError:
                 await interaction.response.send_message("輸入格式錯誤，請確認皆為正整數。", ephemeral=True)
+                return
+
+            trade_cog = self.parent_cog
+            if start < trade_cog.auction_start_price_min:
+                await interaction.response.send_message(f"起標價至少為 {trade_cog.auction_start_price_min}。", ephemeral=True)
+                return
+            if inc < trade_cog.auction_increment_min:
+                await interaction.response.send_message(f"增額出價至少為 {trade_cog.auction_increment_min}。", ephemeral=True)
+                return
+            if dur_minutes > trade_cog.auction_duration_max_minutes:
+                await interaction.response.send_message(f"持續時間最長為 {trade_cog.auction_duration_max_minutes} 分鐘。", ephemeral=True)
+                return
+            if prep_minutes > trade_cog.auction_preparation_max_minutes:
+                await interaction.response.send_message(f"準備時間最長為 {trade_cog.auction_preparation_max_minutes} 分鐘。", ephemeral=True)
                 return
 
             now = datetime.now(timezone.utc)

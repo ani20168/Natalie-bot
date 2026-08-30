@@ -219,6 +219,9 @@ a {
 }
 
 .meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   padding: 6px 10px;
   border-radius: 8px;
   background: var(--accent-dim);
@@ -299,6 +302,7 @@ a {
   color: #062126;
   width: 100%;
   margin-top: 14px;
+  gap: 4px;
 }
 
 .btn-bid:hover:not(:disabled) {
@@ -310,8 +314,16 @@ a {
   cursor: not-allowed;
 }
 
+.cake-icon {
+  width: 1.15em;
+  height: 1.15em;
+  vertical-align: -0.2em;
+  object-fit: contain;
+}
+
 .auction-lead {
   margin-bottom: 20px;
+  line-height: 1.7;
 }
 
 .auction-section {
