@@ -32,6 +32,10 @@ class WebPanel:
         self.client_id = str(self.secret_config.get("DISCORD_CLIENT_ID") or "")
         self.client_secret = str(self.secret_config.get("DISCORD_CLIENT_SECRET") or "")
         self.session_secret = str(self.secret_config.get("WEB_SESSION_SECRET") or secrets.token_hex(32))
+        self.public_base_url = ""
+        if common.mongo_storage.get_runtime_env() == "PRD":
+            self.public_base_url = str(self.secret_config.get("WEB_PUBLIC_BASE_URL") or "").rstrip("/")
+        self.session_https_only = self.public_base_url.startswith("https://")
         self.app = self.create_app()
 
     def create_app(self) -> FastAPI:
@@ -42,7 +46,12 @@ class WebPanel:
             app (FastAPI): "FastAPI()"
         """
         app = FastAPI(title="偽造妹妹伺服器互動面板")
-        app.add_middleware(SessionMiddleware, secret_key=self.session_secret, same_site="lax", https_only=False)
+        app.add_middleware(
+            SessionMiddleware,
+            secret_key=self.session_secret,
+            same_site="lax",
+            https_only=self.session_https_only,
+        )
         app.mount("/static", StaticFiles(directory=str(self.package_dir / "static")), name="static")
         app.state.web_panel = self
         app.add_api_route("/", self.index, methods=["GET"], response_class=HTMLResponse, name="index")
@@ -206,14 +215,16 @@ class WebPanel:
 
     def build_redirect_uri(self, request: Request) -> str:
         """
-        依瀏覽器實際造訪的網址組出 OAuth callback。
+        組出 OAuth callback。正式環境優先用 WEB_PUBLIC_BASE_URL（避免反向代理造成 http/https 不符）。
 
         Args:
             request (Request): FastAPI request
 
         Returns:
-            redirect_uri (str): "http://localhost:8080/auth/callback"
+            redirect_uri (str): "https://fake-sister.ani20168.com/auth/callback"
         """
+        if self.public_base_url:
+            return f"{self.public_base_url}{self.oauth_callback_path}"
         return str(request.url_for("auth_callback"))
 
     def build_avatar_url(self, user_info: dict) -> str:
@@ -290,7 +301,14 @@ class WebPanel:
         """
         在現有 event loop 啟動 uvicorn。
         """
-        config = uvicorn.Config(self.app, host="0.0.0.0", port=self.port, log_level="info")
+        config = uvicorn.Config(
+            self.app,
+            host="0.0.0.0",
+            port=self.port,
+            log_level="info",
+            proxy_headers=True,
+            forwarded_allow_ips="*",
+        )
         server = uvicorn.Server(config)
         await server.serve()
 
