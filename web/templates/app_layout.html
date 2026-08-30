@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block body_class %}layout-app{% endblock %}
+{% block content %}
+<aside class="sidebar">
+  <a class="sidebar-brand" href="/panel">偽造妹妹伺服器互動面板</a>
+  <nav class="sidebar-nav">
+    <a href="/panel" class="{% if active_nav == 'home' %}is-active{% endif %}">首頁</a>
+    <a href="/auction" class="{% if active_nav == 'auction' %}is-active{% endif %}">拍賣所</a>
+  </nav>
+</aside>
+<div class="main-wrap">
+  <header class="topbar">
+    <div class="topbar-user">
+      <img class="avatar" src="{{ avatar }}" alt="avatar">
+      <span class="username">{{ username }}</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="meta-item">等級 {{ level }}</span>
+      <span class="meta-item" id="topbar-cake">蛋糕 {{ cake }}</span>
+      <span class="meta-item identity">{{ identity }}</span>
+      <button type="button" class="btn btn-outline btn-sm" id="logout-open">登出</button>
+    </div>
+  </header>
+  <main class="content">
+    {% block main %}{% endblock %}
+  </main>
+</div>
+
+<div class="dialog-backdrop" id="logout-dialog" role="dialog" aria-modal="true" aria-labelledby="logout-dialog-title">
+  <div class="dialog-card">
+    <h3 id="logout-dialog-title">確認登出</h3>
+    <p>確定要登出互動面板嗎？</p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="logout-cancel">取消</button>
+      <a class="btn btn-danger btn-sm" href="/auth/logout">確認登出</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var dialog = document.getElementById("logout-dialog");
+    var openButton = document.getElementById("logout-open");
+    var cancelButton = document.getElementById("logout-cancel");
+    if (!dialog || !openButton || !cancelButton) return;
+
+    function openDialog() {
+      dialog.classList.add("is-open");
+    }
+
+    function closeDialog() {
+      dialog.classList.remove("is-open");
+    }
+
+    openButton.addEventListener("click", openDialog);
+    cancelButton.addEventListener("click", closeDialog);
+    dialog.addEventListener("click", function (event) {
+      if (event.target === dialog) closeDialog();
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") closeDialog();
+    });
+  })();
+</script>
+{% block extra_script %}{% endblock %}
+{% endblock %}

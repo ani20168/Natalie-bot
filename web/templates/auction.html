@@ -1,0 +1,185 @@
+{% extends "app_layout.html" %}
+{% block main %}
+<h2>拍賣所</h2>
+<p class="auction-lead">出價會依序處理。兩人同時點同一價格時，只有較早進入佇列的人會成功。</p>
+<div id="auction-toast" class="auction-toast" hidden></div>
+
+<section class="auction-section">
+  <h3>進行中的競標</h3>
+  <div id="auction-active" class="auction-list">
+    <p class="auction-empty">載入中…</p>
+  </div>
+</section>
+
+<section class="auction-section">
+  <h3>已結束的競標</h3>
+  <div id="auction-ended" class="auction-list">
+    <p class="auction-empty">載入中…</p>
+  </div>
+</section>
+{% endblock %}
+{% block extra_script %}
+<script>
+  (function () {
+    var activeBox = document.getElementById("auction-active");
+    var endedBox = document.getElementById("auction-ended");
+    var toastBox = document.getElementById("auction-toast");
+    var cakeBox = document.getElementById("topbar-cake");
+    var biddingIds = {};
+    var toastTimer = null;
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function formatSpan(seconds) {
+      seconds = Math.max(0, seconds);
+      var hours = Math.floor(seconds / 3600);
+      var minutes = Math.floor((seconds % 3600) / 60);
+      var secs = seconds % 60;
+      function pad(number) {
+        return String(number).padStart(2, "0");
+      }
+      if (hours > 0) return pad(hours) + ":" + pad(minutes) + ":" + pad(secs);
+      return pad(minutes) + ":" + pad(secs);
+    }
+
+    function remainingFromIso(isoText) {
+      var endMs = Date.parse(isoText);
+      if (isNaN(endMs)) return 0;
+      return Math.floor((endMs - Date.now()) / 1000);
+    }
+
+    function showToast(ok, message) {
+      if (!toastBox) return;
+      toastBox.hidden = false;
+      toastBox.className = "auction-toast " + (ok ? "is-ok" : "is-error");
+      toastBox.textContent = message;
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () {
+        toastBox.hidden = true;
+      }, 4000);
+    }
+
+    function updateCake(cake) {
+      if (cakeBox && cake !== undefined && cake !== null) {
+        cakeBox.textContent = "蛋糕 " + cake;
+      }
+    }
+
+    function renderActive(items) {
+      if (!items || !items.length) {
+        activeBox.innerHTML = '<p class="auction-empty">目前沒有進行中的競標</p>';
+        return;
+      }
+      activeBox.innerHTML = items.map(function (item) {
+        var started = !!item.started;
+        var remaining = started ? remainingFromIso(item.end_time) : remainingFromIso(item.start_time);
+        var timeLabel = started ? "剩餘時間" : "開始倒數";
+        var highest = item.highest_bidder_name
+          ? item.highest_bid + "（" + item.highest_bidder_name + "）"
+          : "尚無";
+        var canBid = started && !item.is_highest_bidder && remaining > 0 && !biddingIds[item.id];
+        var bidLabel = item.is_highest_bidder ? "你已是最高出價者" : (started ? "出價 " + item.next_price : "尚未開始");
+        return (
+          '<article class="auction-card" data-id="' + item.id + '">' +
+            '<div class="auction-card-head">' +
+              '<h4>' + escapeHtml(item.item) + '</h4>' +
+              '<span class="auction-id">ID:' + item.id + '</span>' +
+            '</div>' +
+            '<p class="auction-time">' + timeLabel + ' <strong>' + formatSpan(remaining) + '</strong></p>' +
+            '<dl class="auction-meta">' +
+              '<div><dt>發起人</dt><dd>' + escapeHtml(item.author_name) + '</dd></div>' +
+              '<div><dt>起標價</dt><dd>' + item.start_price + '</dd></div>' +
+              '<div><dt>增額出價</dt><dd>' + item.increment + '</dd></div>' +
+              '<div><dt>目前最高價</dt><dd>' + escapeHtml(String(highest)) + '</dd></div>' +
+              '<div><dt>出價次數</dt><dd>' + item.bid_count + '</dd></div>' +
+            '</dl>' +
+            '<button type="button" class="btn btn-bid" data-id="' + item.id + '" data-price="' + item.next_price + '"' +
+              (canBid ? "" : " disabled") + '>' + escapeHtml(bidLabel) + '</button>' +
+          '</article>'
+        );
+      }).join("");
+    }
+
+    function renderEnded(items) {
+      if (!items || !items.length) {
+        endedBox.innerHTML = '<p class="auction-empty">目前沒有已結束的競標</p>';
+        return;
+      }
+      endedBox.innerHTML = items.map(function (item) {
+        var result = item.highest_bidder_name
+          ? item.highest_bidder_name + " 以 " + item.highest_bid + " 得標"
+          : "流標";
+        return (
+          '<article class="auction-card is-ended">' +
+            '<div class="auction-card-head">' +
+              '<h4>' + escapeHtml(item.item) + '</h4>' +
+              '<span class="auction-id">ID:' + item.id + '</span>' +
+            '</div>' +
+            '<dl class="auction-meta">' +
+              '<div><dt>發起人</dt><dd>' + escapeHtml(item.author_name) + '</dd></div>' +
+              '<div><dt>結果</dt><dd>' + escapeHtml(result) + '</dd></div>' +
+              '<div><dt>出價次數</dt><dd>' + item.bid_count + '</dd></div>' +
+            '</dl>' +
+          '</article>'
+        );
+      }).join("");
+    }
+
+    async function refreshList() {
+      try {
+        var response = await fetch("/api/auction/list", { credentials: "same-origin" });
+        if (!response.ok) return;
+        var data = await response.json();
+        updateCake(data.cake);
+        renderActive(data.active || []);
+        renderEnded(data.ended || []);
+      } catch (error) {
+        activeBox.innerHTML = '<p class="auction-empty">載入失敗，稍後會再試</p>';
+      }
+    }
+
+    async function placeBid(auctionId, expectedPrice, button) {
+      biddingIds[auctionId] = true;
+      button.disabled = true;
+      button.textContent = "處理中…";
+      try {
+        var response = await fetch("/api/auction/bid", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ auction_id: auctionId, expected_price: expectedPrice })
+        });
+        var data = await response.json();
+        updateCake(data.cake);
+        if (data.ok) {
+          showToast(true, "出價成功：你以 " + data.price + " 塊蛋糕出價");
+        } else {
+          showToast(false, "出價失敗:" + (data.error || "未知錯誤"));
+        }
+      } catch (error) {
+        showToast(false, "出價失敗:系統忙碌，請稍後再試");
+      }
+      delete biddingIds[auctionId];
+      await refreshList();
+    }
+
+    activeBox.addEventListener("click", function (event) {
+      var button = event.target.closest(".btn-bid");
+      if (!button || button.disabled) return;
+      var auctionId = parseInt(button.getAttribute("data-id"), 10);
+      var expectedPrice = parseInt(button.getAttribute("data-price"), 10);
+      if (!auctionId || !expectedPrice) return;
+      placeBid(auctionId, expectedPrice, button);
+    });
+
+    refreshList();
+    setInterval(refreshList, 3000);
+  })();
+</script>
+{% endblock %}

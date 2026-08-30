@@ -4,7 +4,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.middleware.sessions import SessionMiddleware
@@ -59,6 +59,9 @@ class WebPanel:
         app.add_api_route("/auth/callback", self.auth_callback, methods=["GET"], name="auth_callback")
         app.add_api_route("/auth/logout", self.auth_logout, methods=["GET"], name="auth_logout")
         app.add_api_route("/panel", self.panel, methods=["GET"], response_class=HTMLResponse, name="panel")
+        app.add_api_route("/auction", self.auction_page, methods=["GET"], response_class=HTMLResponse, name="auction")
+        app.add_api_route("/api/auction/list", self.auction_list, methods=["GET"], name="auction_list")
+        app.add_api_route("/api/auction/bid", self.auction_bid, methods=["POST"], name="auction_bid")
         return app
 
     async def index(self, request: Request):
@@ -154,7 +157,8 @@ class WebPanel:
         request.session["user_id"] = str(user_info["id"])
         request.session["username"] = user_info.get("global_name") or user_info.get("username") or "未知使用者"
         request.session["avatar"] = self.build_avatar_url(user_info)
-        return RedirectResponse(url="/panel", status_code=302)
+        next_path = self.safe_next_path(request.session.pop("login_next", None))
+        return RedirectResponse(url=next_path, status_code=302)
 
     async def auth_logout(self, request: Request):
         """
@@ -179,14 +183,109 @@ class WebPanel:
         Returns:
             response: 面板、拒絕頁或導向登入
         """
+        reject, context = await self.load_panel_context(request, "/panel")
+        if reject is not None:
+            return reject
+        context["title"] = "偽造妹妹伺服器互動面板"
+        context["active_nav"] = "home"
+        return self.templates.TemplateResponse(request, "panel.html", context)
+
+    async def auction_page(self, request: Request):
+        """
+        拍賣所列表頁。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: 拍賣所、拒絕頁或導向登入
+        """
+        reject, context = await self.load_panel_context(request, "/auction")
+        if reject is not None:
+            return reject
+        context["title"] = "拍賣所"
+        context["active_nav"] = "auction"
+        return self.templates.TemplateResponse(request, "auction.html", context)
+
+    async def auction_list(self, request: Request):
+        """
+        回傳進行中／已結束競標列表。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'active': [], 'ended': []}"
+        """
+        reject, context = await self.load_panel_context(request, "/auction")
+        if reject is not None:
+            if isinstance(reject, RedirectResponse):
+                return JSONResponse({"ok": False, "error": "請先登入"}, status_code=401)
+            return JSONResponse({"ok": False, "error": "你不在偽造妹妹伺服器中"}, status_code=403)
+        house = getattr(self.bot, "auction_house", None)
+        viewer_id = int(context["user_id"])
+        active = house.list_active_public(viewer_id) if house is not None else []
+        ended = await house.list_ended_public() if house is not None else []
+        return JSONResponse(
+            {
+                "cake": context["cake"],
+                "active": active,
+                "ended": ended,
+            }
+        )
+
+    async def auction_bid(self, request: Request):
+        """
+        將網頁出價放入佇列並回傳處理結果。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True, 'price': 65000}"
+        """
+        reject, context = await self.load_panel_context(request, "/auction")
+        if reject is not None:
+            if isinstance(reject, RedirectResponse):
+                return JSONResponse({"ok": False, "error": "請先登入"}, status_code=401)
+            return JSONResponse({"ok": False, "error": "你不在偽造妹妹伺服器中"}, status_code=403)
+        house = getattr(self.bot, "auction_house", None)
+        if house is None:
+            return JSONResponse({"ok": False, "error": "拍賣所尚未就緒"}, status_code=503)
+        try:
+            body = await request.json()
+            auction_id = int(body.get("auction_id"))
+            expected_price = int(body.get("expected_price"))
+        except Exception:
+            return JSONResponse({"ok": False, "error": "出價資料格式錯誤"}, status_code=400)
+        if auction_id < 1 or expected_price < 1:
+            return JSONResponse({"ok": False, "error": "出價資料格式錯誤"}, status_code=400)
+        display_name = house.resolve_name(int(context["user_id"])) or context["username"]
+        result = await house.enqueue_bid(auction_id, int(context["user_id"]), expected_price, display_name)
+        user_data = await common.mongo_storage.ensure_user_document(context["user_id"])
+        result["cake"] = user_data.get("cake", 0)
+        return JSONResponse(result)
+
+    async def load_panel_context(self, request: Request, next_path: str):
+        """
+        確認已登入且在群內，並組出共用頁面資料。
+
+        Args:
+            request (Request): FastAPI request
+            next_path (str): "/auction"
+
+        Returns:
+            result (tuple): "(None, {'user_id': '4108', 'cake': 0})"
+        """
         user_id = request.session.get("user_id")
         if not user_id:
-            return RedirectResponse(url="/", status_code=302)
+            request.session["login_next"] = next_path
+            return RedirectResponse(url="/", status_code=302), None
 
         guild = self.bot.get_guild(common.fake_sister_server_id)
         member = guild.get_member(int(user_id)) if guild is not None else None
         if member is None:
-            return self.templates.TemplateResponse(
+            denied = self.templates.TemplateResponse(
                 request,
                 "denied.html",
                 {
@@ -197,21 +296,33 @@ class WebPanel:
                 },
                 status_code=403,
             )
+            return denied, None
 
         user_data = await common.mongo_storage.ensure_user_document(user_id)
-        identity = self.resolve_identity(member)
-        return self.templates.TemplateResponse(
-            request,
-            "panel.html",
-            {
-                "title": "偽造妹妹伺服器互動面板",
-                "username": request.session.get("username"),
-                "avatar": request.session.get("avatar"),
-                "level": user_data.get("level", 1),
-                "cake": user_data.get("cake", 0),
-                "identity": identity,
-            },
-        )
+        context = {
+            "user_id": user_id,
+            "username": request.session.get("username"),
+            "avatar": request.session.get("avatar"),
+            "level": user_data.get("level", 1),
+            "cake": user_data.get("cake", 0),
+            "identity": self.resolve_identity(member),
+        }
+        return None, context
+
+    def safe_next_path(self, path: str | None, default: str = "/panel") -> str:
+        """
+        過濾登入後導向路徑，避免開放重新導向。
+
+        Args:
+            path (str | None): "/auction"
+            default (str): "/panel"
+
+        Returns:
+            next_path (str): "/auction"
+        """
+        if not path or not path.startswith("/") or path.startswith("//"):
+            return default
+        return path
 
     def build_redirect_uri(self, request: Request) -> str:
         """

@@ -7,39 +7,40 @@ import re
 from pathlib import Path
 import asyncio
 import random
+import traceback
 
 class Auction:
     """單一競標的執行中狀態。"""
 
-    # -----------------------------
-    # 防搶標參數 (類別層級)
-    # -----------------------------
-    EXTEND_THRESHOLD = 60  # 剩餘秒數 ≤ 此值時觸發延長
-    EXTEND_DURATION = 30   # 每次延長的秒數
-
-    def __init__(self, *, item: str, start_price: int, increment: int,
-                 end_time: datetime, author_id: int, message: discord.Message,
-                 bot: commands.Bot, start_time: datetime | None = None):
-        self.item = item                        # 商品名稱
-        self.start_price = start_price          # 起標價
-        self.increment = increment              # 每次最小加價
-        self.end_time = end_time                # 競標結束時間 (UTC)
-        self.author_id = author_id              # 建立者 ID
-        self.message = message                  # Discord 訊息物件 (用來更新)
-        self.view: "AuctionView | None" = None  # 留存 View 物件以便後續更新
-        self.bot = bot                          # Bot 實例，供後續通知使用
-
-        # 競標狀態
-        self.highest_bid = start_price - increment  # 設為 "尚未有人出價" 的前置值
-        self.highest_bidder: int | None = None      # 目前最高出價者 ID
-        self.bid_count: int = 0                     # 出價次數
-        self.bid_history: dict[int, int] = {}       # 用戶預扣金額紀錄 {user_id: 已預扣總額}
-        self.lock = asyncio.Lock()                  # 保護競態條件
-        safe_name = self._safe_filename(self.item)          # ← 轉成安全檔名
-        self.log_path = Path("log/bid") / f"{safe_name}_{message.id}.txt"
+    def __init__(self, *, auction_id: int, item: str, start_price: int, increment: int,
+                 end_time: datetime, author_id: int, bot: commands.Bot,
+                 channel_id: int, message_id: int = 0,
+                 message: discord.Message | None = None,
+                 start_time: datetime | None = None):
+        self.extend_threshold = 60
+        self.extend_duration = 30
+        self.log_dir = Path("log/bid")
+        self.auction_id = auction_id
+        self.item = item
+        self.start_price = start_price
+        self.increment = increment
+        self.end_time = end_time
+        self.author_id = author_id
+        self.channel_id = channel_id
+        self.message = message
+        self.message_id = message.id if message is not None else message_id
+        self.view: "AuctionView | None" = None
+        self.bot = bot
+        self.highest_bid = start_price - increment
+        self.highest_bidder: int | None = None
+        self.bid_count: int = 0
+        self.bid_history: dict[int, int] = {}
+        self.lock = asyncio.Lock()
+        self.status = "active"
+        self.log_path = self.log_dir / f"{self.auction_id}_{self.safe_filename(self.item)}.txt"
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.start_time = start_time or datetime.now(timezone.utc)
-        self.reminder_users: set[int] = set()       # 記錄希望提醒的用戶
+        self.reminder_users: set[int] = set()
         now = datetime.now(timezone.utc)
         self.start_event_handled: bool = self.start_time <= now
         self.reminder_notified: bool = False
@@ -66,37 +67,70 @@ class Auction:
 
     def needs_extension(self) -> bool:
         """判斷是否觸發防搶標延長。"""
-        return self.remaining() <= self.EXTEND_THRESHOLD
+        return self.remaining() <= self.extend_threshold
 
-    async def reserve(self, user_id: int, amount: int):
-        """預扣指定用戶的蛋糕。"""
-        userdata_collection = common.mongo_storage.get_collection("userdata")
-        defaults = common.mongo_storage.get_user_defaults()
-        spend_result = await userdata_collection.find_one_and_update(
-            {"_id": str(user_id), "cake": {"$gte": amount}},
-            {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -amount}},
-            upsert=False,
-            return_document=common.ReturnDocument.AFTER,
-        )
-        if spend_result is None:
-            raise ValueError(f"{common.cake_emoji}不足")
+    def to_document(self) -> dict:
+        """
+        轉成 Mongo 文件。
+
+        Returns:
+            document (dict): "{'_id': 1, 'item': '禮物卡', 'status': 'active'}"
+        """
+        return {
+            "_id": self.auction_id,
+            "item": self.item,
+            "start_price": self.start_price,
+            "increment": self.increment,
+            "start_time": self.start_time.isoformat(),
+            "end_time": self.end_time.isoformat(),
+            "author_id": self.author_id,
+            "channel_id": self.channel_id,
+            "message_id": self.message_id,
+            "highest_bid": self.highest_bid,
+            "highest_bidder": self.highest_bidder,
+            "bid_count": self.bid_count,
+            "bid_history": {str(user_id): amount for user_id, amount in self.bid_history.items()},
+            "reminder_users": list(self.reminder_users),
+            "status": self.status,
+            "start_event_handled": self.start_event_handled,
+            "reminder_notified": self.reminder_notified,
+        }
+
+    async def save(self):
+        """將目前狀態寫入 Mongo。"""
+        collection = common.mongo_storage.get_collection("auction")
+        await collection.replace_one({"_id": self.auction_id}, self.to_document(), upsert=True)
 
     async def refund(self, user_id: int, amount: int):
-        """退款給指定用戶。"""
+        """
+        退款給指定用戶。
+
+        Args:
+            user_id (int): "410847926236086272"
+            amount (int): "65000"
+        """
         userdata_collection = common.mongo_storage.get_collection("userdata")
         defaults = common.mongo_storage.get_user_defaults()
         await userdata_collection.update_one({"_id": str(user_id)}, {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": amount}}, upsert=True)
 
-    async def place_bid(self, interaction: discord.Interaction):
-        """處理按鈕互動產生的出價。必須於 self.lock 內呼叫。"""
-        bidder_id = interaction.user.id
+    async def place_bid(self, bidder_id: int, expected_price: int):
+        """
+        處理網頁送出的出價。必須於 self.lock 內呼叫。
+
+        Args:
+            bidder_id (int): "410847926236086272"
+            expected_price (int): "65000"
+        """
+        if self.status == "ended" or self.remaining() <= 0:
+            raise ValueError("競標已結束")
         if not self.started:
             raise ValueError("競標尚未開始，請稍候再出價")
-        # 固定最高價者不得連續出價
         if bidder_id == self.highest_bidder:
             raise ValueError("你已是最高出價者，無法再次出價")
 
         next_price = self.next_price()
+        if expected_price != next_price:
+            raise ValueError("此價格已經有人出價")
         previously_reserved = self.bid_history.get(bidder_id, 0)
         additional_needed = next_price - previously_reserved
         if additional_needed <= 0:
@@ -112,42 +146,48 @@ class Auction:
         if spend_result is None:
             raise ValueError(f"{common.cake_emoji}不足，無法出價")
 
-        # 更新競標狀態
         self.bid_history[bidder_id] = previously_reserved + additional_needed
         self.highest_bid = next_price
         self.highest_bidder = bidder_id
         self.bid_count += 1
-
-        # 防搶標：如剩餘時間過短則延長
         if self.needs_extension():
-            self.end_time += timedelta(seconds=self.EXTEND_DURATION)
+            self.end_time += timedelta(seconds=self.extend_duration)
+        await self.save()
+
+    def append_log_line(self, line: str):
+        """
+        將一行文字附加到競標日誌。
+
+        Args:
+            line (str): "第1次出價:ani 出價65000個蛋糕\\n"
+        """
+        self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.log_path.open("a", encoding="utf-8") as file:
+            file.write(line)
 
     async def write_log(self, bidder_name: str):
         """
-        將成功出價寫入 log/bid/<商品名稱_訊息ID>.txt
+        將成功出價寫入 log/bid/<ID_商品>.txt
+
         Args:
-            bidder_name (str): Discord 的 display_name
-        Returns:
-            None
+            bidder_name (str): "ani"
         """
         line = f"第{self.bid_count}次出價:{bidder_name} 出價{self.highest_bid}個蛋糕\n"
-        # 用 run_in_executor 避免阻塞 event-loop
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            None,                      # 預設 ThreadPool
-            self.log_path.open("a", encoding="utf-8").write,
-            line
-        )
+        await loop.run_in_executor(None, self.append_log_line, line)
 
     async def notify_reminders(self):
         """通知設定提醒的用戶競標已經開始。"""
         if not self.reminder_users or self.reminder_notified:
             return
         self.reminder_notified = True
-        message = (
-            f"競標 **{self.item}** 已經開始囉！\n"
-            f"直接前往：{self.message.jump_url}"
-        )
+        lines = [f"競標 **{self.item}** 已經開始囉！"]
+        if self.message is not None:
+            lines.append(f"直接前往：{self.message.jump_url}")
+        house = getattr(self.bot, "auction_house", None)
+        if house is not None:
+            lines.append(f"拍賣所：{house.page_url()}")
+        message = "\n".join(lines)
         for user_id in list(self.reminder_users):
             user = self.bot.get_user(user_id)
             if user is None:
@@ -170,46 +210,63 @@ class Auction:
         if self.view:
             await self.view.transition_to_bidding()
         await self.notify_reminders()
+        await self.save()
+
+    @classmethod
+    def from_document(cls, document: dict, message: discord.Message | None, bot: commands.Bot) -> "Auction":
+        """
+        從 Mongo 文件還原競標。
+
+        Args:
+            document (dict): "{'_id': 1, 'item': '禮物卡'}"
+            message (discord.Message | None): Discord 訊息
+            bot (commands.Bot): Bot 實例
+
+        Returns:
+            auction (Auction): 還原後的競標
+        """
+        auction = cls(
+            auction_id=int(document["_id"]),
+            item=document["item"],
+            start_price=int(document["start_price"]),
+            increment=int(document["increment"]),
+            end_time=datetime.fromisoformat(document["end_time"]),
+            author_id=int(document["author_id"]),
+            bot=bot,
+            channel_id=int(document["channel_id"]),
+            message_id=int(document.get("message_id", 0)),
+            message=message,
+            start_time=datetime.fromisoformat(document["start_time"]),
+        )
+        auction.highest_bid = int(document.get("highest_bid", auction.start_price - auction.increment))
+        highest_bidder = document.get("highest_bidder")
+        auction.highest_bidder = int(highest_bidder) if highest_bidder is not None else None
+        auction.bid_count = int(document.get("bid_count", 0))
+        auction.bid_history = {int(user_id): int(amount) for user_id, amount in document.get("bid_history", {}).items()}
+        auction.reminder_users = {int(user_id) for user_id in document.get("reminder_users", [])}
+        auction.start_event_handled = bool(document.get("start_event_handled", False))
+        auction.reminder_notified = bool(document.get("reminder_notified", False))
+        auction.status = str(document.get("status", "active"))
+        return auction
 
     @staticmethod
-    def _safe_filename(name: str) -> str:
-        # Windows 禁止: \ / : * ? " < > |   ── 全平台最大公約數
+    def safe_filename(name: str) -> str:
+        """
+        去掉檔名不合法字元。
+
+        Args:
+            name (str): "300元禮物卡"
+
+        Returns:
+            safe_name (str): "300元禮物卡"
+        """
         return re.sub(r'[\\/*?:"<>|]', '', name).replace(' ', '_')
 
-class BidButton(discord.ui.Button):
-    """出價按鈕元件。"""
+class GoToAuctionButton(discord.ui.Button):
+    """導向網頁拍賣所的連結按鈕。"""
 
-    def __init__(self, auction: Auction):
-        emoji = discord.PartialEmoji(id=common.cake_emoji_id, name="cake")
-        super().__init__(label=f"出價!({auction.next_price()})", style=discord.ButtonStyle.green, emoji=emoji)
-        self.auction = auction
-
-    async def callback(self, interaction: discord.Interaction):
-        """處理出價按鈕點擊。"""
-        async with self.auction.lock:
-            try:
-                await self.auction.place_bid(interaction)
-            except ValueError as e:
-                # 使用 embed 呈現錯誤訊息，並僅對使用者可見
-                error_embed = Embed(title="❌ 出價失敗", description=str(e), color=common.bot_error_color)
-                await interaction.response.send_message(embed=error_embed, ephemeral=True)
-                return
-        # ---------------- 出價成功 ----------------
-        # 更新按鈕文字
-        self.label = f"出價!({self.auction.next_price()})"
-        success_embed = Embed(title="✅ 出價成功", description=f"你成功以 **{self.auction.highest_bid}** 塊{common.cake_emoji}出價!", color=common.bot_color)
-        await interaction.response.send_message(embed=success_embed, ephemeral=True)
-        # 4 秒後自動刪除出價成功訊息
-        async def delete_after_delay():
-            try:
-                await asyncio.sleep(4)
-                msg = await interaction.original_response()
-                await msg.delete()
-            except (discord.NotFound, discord.HTTPException):
-                pass  # 訊息可能已被user刪除
-        asyncio.create_task(delete_after_delay())
-        await AuctionView.update_embed(self.auction)
-        await self.auction.write_log(interaction.user.display_name)
+    def __init__(self, page_url: str):
+        super().__init__(label="前往競標", style=discord.ButtonStyle.link, url=page_url)
 
 class ReminderButton(discord.ui.Button):
     """競標尚未開始時提供提醒的按鈕。"""
@@ -230,152 +287,441 @@ class ReminderButton(discord.ui.Button):
             return
 
         self.auction.reminder_users.add(user_id)
+        await self.auction.save()
         await interaction.response.send_message("提醒設置成功! 競標開始時會以私訊提醒你。", ephemeral=True)
 
 class AuctionView(discord.ui.View):
-    """提供按鈕並定期更新 embed 的 View。"""
+    """Discord embed 上的前往競標連結，以及開始前記得按鈕。"""
 
-    def __init__(self, auction: Auction):
+    def __init__(self, auction: Auction, page_url: str):
         super().__init__(timeout=None)
         self.auction = auction
-        self.bid_button: BidButton | None = None
+        self.page_url = page_url
         self.reminder_button: ReminderButton | None = None
-        if auction.started:
-            self.bid_button = BidButton(auction)
-            self.add_item(self.bid_button)
-        else:
+        self.add_item(GoToAuctionButton(page_url))
+        if not auction.started:
             self.reminder_button = ReminderButton(auction)
             self.add_item(self.reminder_button)
         auction.view = self
-        # 將競標交給背景迴圈持續追蹤
-        AuctionLoop.instance().track(auction)
 
     async def on_timeout(self):
-        # 由 AuctionLoop 統一處理結束，不在此處理
         pass
 
     async def transition_to_bidding(self):
-        """競標開始後，把提醒按鈕換成出價按鈕。"""
-        if self.bid_button is not None:
+        """競標開始後移除提醒按鈕，只留前往競標。"""
+        if self.reminder_button is None:
             return
-        self.clear_items()
+        self.remove_item(self.reminder_button)
         self.reminder_button = None
-        self.bid_button = BidButton(self.auction)
-        self.add_item(self.bid_button)
         await AuctionView.update_embed(self.auction)
 
     @staticmethod
     async def update_embed(auction: Auction):
+        """
+        更新 Discord 競標 embed。
+
+        Args:
+            auction (Auction): 要更新的競標
+        """
+        if auction.message is None:
+            return
         embed = generate_embed(auction)
         await auction.message.edit(embed=embed, view=auction.view)
 
-class AuctionLoop:
-    """背景持續更新所有進行中競標的單例。"""
+class BidRequest:
+    """網頁出價佇列中的一筆請求。"""
 
-    _instance = None
+    def __init__(self, auction_id: int, user_id: int, expected_price: int, display_name: str, result_future: asyncio.Future):
+        self.auction_id = auction_id
+        self.user_id = user_id
+        self.expected_price = expected_price
+        self.display_name = display_name
+        self.result_future = result_future
 
-    @classmethod
-    def instance(cls):
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
+class AuctionHouse:
+    """管理進行中競標、embed 更新與出價佇列。"""
 
-    def __init__(self):
-        self.active: dict[int, Auction] = {}  # message_id -> Auction
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.embed_update_seconds_before_start = 30
+        self.embed_update_seconds_after_start = 30
+        self.embed_update_seconds_last_minute = 15
+        self.last_minute_threshold = 60
+        self.ended_list_limit = 100
+        self.active: dict[int, Auction] = {}
         self.last_update: dict[int, float] = {}
-        self.task = asyncio.create_task(self._run())
+        self.bid_queue: asyncio.Queue[BidRequest] = asyncio.Queue()
+        self.loop_task: asyncio.Task | None = None
+        self.queue_task: asyncio.Task | None = None
+
+    def start_tasks(self):
+        """啟動 embed 更新與出價佇列背景工作。"""
+        if self.loop_task is None or self.loop_task.done():
+            self.loop_task = asyncio.create_task(self.run_embed_loop())
+        if self.queue_task is None or self.queue_task.done():
+            self.queue_task = asyncio.create_task(self.run_bid_queue())
+
+    def stop_tasks(self):
+        """停止背景工作。"""
+        if self.loop_task is not None:
+            self.loop_task.cancel()
+            self.loop_task = None
+        if self.queue_task is not None:
+            self.queue_task.cancel()
+            self.queue_task = None
+
+    def page_url(self) -> str:
+        """
+        組出網頁拍賣所網址。
+
+        Returns:
+            url (str): "https://fake-sister.ani20168.com/auction"
+        """
+        panel = getattr(self.bot, "web_panel", None)
+        if panel is not None and panel.public_base_url:
+            return f"{panel.public_base_url}/auction"
+        port = getattr(panel, "port", 8080) if panel is not None else 8080
+        return f"http://localhost:{port}/auction"
 
     def track(self, auction: Auction):
-        """加入追蹤。"""
-        self.active[auction.message.id] = auction
-        self.last_update[auction.message.id] = 0.0
+        """
+        加入進行中追蹤。
 
-    async def _run(self):
+        Args:
+            auction (Auction): 要追蹤的競標
+        """
+        self.active[auction.auction_id] = auction
+        self.last_update[auction.auction_id] = asyncio.get_event_loop().time()
+
+    def get_active(self, auction_id: int) -> Auction | None:
+        """
+        取得進行中的競標。
+
+        Args:
+            auction_id (int): "1"
+
+        Returns:
+            auction (Auction | None): 進行中的競標
+        """
+        return self.active.get(auction_id)
+
+    async def allocate_id(self) -> int:
+        """
+        配置下一個競標 ID（從 1 開始）。
+
+        Returns:
+            auction_id (int): "1"
+        """
+        collection = common.mongo_storage.get_collection("auction")
+        result = await collection.find_one_and_update(
+            {"_id": "counter"},
+            {"$inc": {"next_id": 1}},
+            upsert=True,
+            return_document=common.ReturnDocument.AFTER,
+        )
+        return int(result["next_id"])
+
+    async def register(self, auction: Auction):
+        """
+        寫入資料庫並開始追蹤。
+
+        Args:
+            auction (Auction): 新建立的競標
+        """
+        await auction.save()
+        self.track(auction)
+
+    async def enqueue_bid(self, auction_id: int, user_id: int, expected_price: int, display_name: str) -> dict:
+        """
+        將出價放入佇列，依序處理後回傳結果。
+
+        Args:
+            auction_id (int): "1"
+            user_id (int): "410847926236086272"
+            expected_price (int): "65000"
+            display_name (str): "ani"
+
+        Returns:
+            result (dict): "{'ok': True, 'price': 65000}"
+        """
+        result_future = asyncio.get_running_loop().create_future()
+        await self.bid_queue.put(BidRequest(auction_id, user_id, expected_price, display_name, result_future))
+        return await result_future
+
+    async def run_bid_queue(self):
+        """依序處理網頁出價，避免兩人同時點同一價格。"""
         while True:
-            await asyncio.sleep(1)  # 固定輪詢間隔
+            request = await self.bid_queue.get()
+            try:
+                result = await self.process_bid(request)
+            except Exception:
+                traceback.print_exc()
+                result = {"ok": False, "error": "系統錯誤，請稍後再試"}
+            if not request.result_future.done():
+                request.result_future.set_result(result)
+
+    async def process_bid(self, request: BidRequest) -> dict:
+        """
+        處理單筆出價。
+
+        Args:
+            request (BidRequest): 佇列中的出價
+
+        Returns:
+            result (dict): "{'ok': True, 'price': 65000}"
+        """
+        auction = self.get_active(request.auction_id)
+        if auction is None:
+            return {"ok": False, "error": "競標不存在或已結束"}
+        async with auction.lock:
+            try:
+                await auction.place_bid(request.user_id, request.expected_price)
+            except ValueError as error:
+                return {"ok": False, "error": str(error)}
+        await auction.write_log(request.display_name)
+        return {"ok": True, "price": auction.highest_bid, "next_price": auction.next_price()}
+
+    async def run_embed_loop(self):
+        """依冷卻時間更新 Discord embed，並在到期時結算。"""
+        while True:
+            await asyncio.sleep(1)
             now = asyncio.get_event_loop().time()
             finished: list[int] = []
-            for msg_id, auction in list(self.active.items()):
-                if not auction.start_event_handled and auction.started:
-                    await auction.handle_start()
-                    self.last_update[msg_id] = now
+            for auction_id, auction in list(self.active.items()):
+                try:
+                    if not auction.start_event_handled and auction.started:
+                        await auction.handle_start()
+                        await auction.save()
+                        self.last_update[auction_id] = now
 
-                if not auction.started:
-                    interval = 30 #競標開始前每30秒更新一次倒數計時器
-                    last = self.last_update.get(msg_id, 0.0)
+                    remaining = auction.remaining()
+                    if auction.started and remaining <= 0:
+                        await self.settle(auction)
+                        if auction.status == "ended":
+                            finished.append(auction_id)
+                        continue
+
+                    interval = self.embed_interval(auction)
+                    last = self.last_update.get(auction_id, 0.0)
                     if now - last >= interval:
                         await AuctionView.update_embed(auction)
-                        self.last_update[msg_id] = now
-                    continue
+                        self.last_update[auction_id] = now
+                except Exception:
+                    traceback.print_exc()
+            for auction_id in finished:
+                self.active.pop(auction_id, None)
+                self.last_update.pop(auction_id, None)
 
-                remaining = auction.remaining()
-                if remaining <= 0:
-                    finished.append(msg_id)
-                    await self._settle(auction)  # 結算
-                else:
-                    should_update = False
-                    if remaining > 60:
-                        # 剩餘時間 > 60 秒時，每 60 秒更新一次
-                        interval = 60
-                        last = self.last_update.get(msg_id, 0.0)
-                        if now - last >= interval:
-                            should_update = True
-                    else:
-                        # 剩餘時間 <= 60 秒時，在特定時間點更新（30、15、5 秒）
-                        if remaining == 30 or remaining == 15 or remaining == 5:
-                            should_update = True
-                    if should_update:
-                        await AuctionView.update_embed(auction)
-                        self.last_update[msg_id] = now
-            for msg_id in finished:
-                del self.active[msg_id]
-                self.last_update.pop(msg_id, None)
+    def embed_interval(self, auction: Auction) -> int:
+        """
+        依競標階段決定 Discord embed 更新間隔。
 
-    async def _settle(self, auction: Auction):
-        # 1. 禁用按鈕並顯示 00:00
+        Args:
+            auction (Auction): 進行中的競標
+
+        Returns:
+            seconds (int): "30"
+        """
+        if not auction.started:
+            return self.embed_update_seconds_before_start
+        if auction.remaining() > self.last_minute_threshold:
+            return self.embed_update_seconds_after_start
+        return self.embed_update_seconds_last_minute
+
+    async def settle(self, auction: Auction):
+        """
+        結算競標：退款未得標者、撥款給賣家、在 Discord 公告結果。
+
+        Args:
+            auction (Auction): 到期的競標
+        """
+        async with auction.lock:
+            if auction.status == "ended":
+                return
+            if auction.remaining() > 0:
+                return
+            auction.status = "ended"
+            for user_id, reserved in auction.bid_history.items():
+                if user_id != auction.highest_bidder:
+                    await auction.refund(user_id, reserved)
+            if auction.highest_bidder is not None:
+                userdata_collection = common.mongo_storage.get_collection("userdata")
+                defaults = common.mongo_storage.get_user_defaults()
+                await userdata_collection.update_one(
+                    {"_id": str(auction.author_id)},
+                    {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": auction.highest_bid}},
+                    upsert=True,
+                )
+            await auction.save()
+
         if auction.view:
             for child in auction.view.children:
-                if isinstance(child, discord.ui.Button):
+                if isinstance(child, discord.ui.Button) and child.style != discord.ButtonStyle.link:
                     child.disabled = True
-            await auction.message.edit(embed=generate_embed(auction), view=auction.view)  # embed 亦更新為 00:00
+        try:
+            await AuctionView.update_embed(auction)
+        except (discord.HTTPException, discord.NotFound):
+            pass
 
-        # 2. 退款未得標者
-        for uid, reserved in auction.bid_history.items():
-            if uid != auction.highest_bidder:
-                await auction.refund(uid, reserved)
+        channel = auction.message.channel if auction.message is not None else self.bot.get_channel(auction.channel_id)
+        if channel is None:
+            return
+        try:
+            if auction.highest_bidder is None:
+                await channel.send(f"競標結束! **{auction.item}** 流標了!")
+            else:
+                await channel.send(
+                    f"競標結束! 恭喜 <@{auction.highest_bidder}> 以 **{auction.highest_bid}** 塊{common.cake_emoji}得標 **{auction.item}** !"
+                )
+        except discord.HTTPException:
+            pass
 
-        # 3. 撥款給賣家
-        if auction.highest_bidder is not None:
-            userdata_collection = common.mongo_storage.get_collection("userdata")
-            defaults = common.mongo_storage.get_user_defaults()
-            await userdata_collection.update_one(
-                {"_id": str(auction.author_id)},
-                {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": auction.highest_bid}},
-                upsert=True,
-            )
+    async def restore_active(self):
+        """機器人重啟後還原尚未結束的競標。"""
+        collection = common.mongo_storage.get_collection("auction")
+        async for document in collection.find({"status": "active"}):
+            try:
+                channel = self.bot.get_channel(int(document["channel_id"]))
+                message = None
+                if channel is not None:
+                    try:
+                        message = await channel.fetch_message(int(document["message_id"]))
+                    except (discord.NotFound, discord.HTTPException):
+                        message = None
+                auction = Auction.from_document(document, message, self.bot)
+                if message is not None:
+                    auction.view = AuctionView(auction, self.page_url())
+                    try:
+                        await message.edit(embed=generate_embed(auction), view=auction.view)
+                    except discord.HTTPException:
+                        pass
+                self.track(auction)
+            except Exception:
+                traceback.print_exc()
 
-        # 4. 公告結果
-        if auction.highest_bidder is None:
-            await auction.message.channel.send(f"競標結束! **{auction.item}** 流標了!")
-        else:
-            winner = f"<@{auction.highest_bidder}>"
-            await auction.message.channel.send(
-                f"競標結束! 恭喜 {winner} 以 **{auction.highest_bid}** 塊{common.cake_emoji}得標 **{auction.item}** !"
-            )
+    def resolve_name(self, user_id: int | None) -> str:
+        """
+        解析顯示名稱。
+
+        Args:
+            user_id (int | None): "410847926236086272"
+
+        Returns:
+            name (str): "ani"
+        """
+        if user_id is None:
+            return ""
+        guild = self.bot.get_guild(common.fake_sister_server_id)
+        member = guild.get_member(user_id) if guild is not None else None
+        if member is not None:
+            return member.display_name
+        user = self.bot.get_user(user_id)
+        if user is not None:
+            return user.display_name
+        return str(user_id)
+
+    def auction_to_public(self, auction: Auction, viewer_id: int | None) -> dict:
+        """
+        轉成網頁列表用的進行中資料。
+
+        Args:
+            auction (Auction): 進行中的競標
+            viewer_id (int | None): "410847926236086272"
+
+        Returns:
+            payload (dict): "{'id': 1, 'item': '禮物卡'}"
+        """
+        has_bidder = auction.highest_bidder is not None
+        return {
+            "id": auction.auction_id,
+            "item": auction.item,
+            "start_price": auction.start_price,
+            "increment": auction.increment,
+            "author_name": self.resolve_name(auction.author_id),
+            "highest_bid": auction.highest_bid if has_bidder else None,
+            "highest_bidder_name": self.resolve_name(auction.highest_bidder) if has_bidder else None,
+            "bid_count": auction.bid_count,
+            "next_price": auction.next_price(),
+            "started": auction.started,
+            "start_time": auction.start_time.isoformat(),
+            "end_time": auction.end_time.isoformat(),
+            "remaining": auction.remaining(),
+            "time_until_start": auction.time_until_start(),
+            "is_highest_bidder": viewer_id is not None and auction.highest_bidder == viewer_id,
+        }
+
+    def ended_document_to_public(self, document: dict) -> dict:
+        """
+        轉成網頁列表用的已結束資料。
+
+        Args:
+            document (dict): "{'_id': 1, 'item': '禮物卡', 'status': 'ended'}"
+
+        Returns:
+            payload (dict): "{'id': 1, 'item': '禮物卡'}"
+        """
+        highest_bidder = document.get("highest_bidder")
+        has_bidder = highest_bidder is not None
+        return {
+            "id": int(document["_id"]),
+            "item": document["item"],
+            "start_price": int(document.get("start_price", 0)),
+            "increment": int(document.get("increment", 0)),
+            "author_name": self.resolve_name(int(document["author_id"])) if document.get("author_id") is not None else "",
+            "highest_bid": int(document["highest_bid"]) if has_bidder else None,
+            "highest_bidder_name": self.resolve_name(int(highest_bidder)) if has_bidder else None,
+            "bid_count": int(document.get("bid_count", 0)),
+            "ended": True,
+        }
+
+    def list_active_public(self, viewer_id: int | None) -> list[dict]:
+        """
+        進行中競標列表（依 ID 由小到大）。
+
+        Args:
+            viewer_id (int | None): "410847926236086272"
+
+        Returns:
+            items (list): "[{'id': 1}]"
+        """
+        auctions = sorted(self.active.values(), key=lambda auction: auction.auction_id)
+        return [self.auction_to_public(auction, viewer_id) for auction in auctions]
+
+    async def list_ended_public(self) -> list[dict]:
+        """
+        已結束競標列表（依 ID 由大到小）。
+
+        Returns:
+            items (list): "[{'id': 2}]"
+        """
+        collection = common.mongo_storage.get_collection("auction")
+        items = []
+        async for document in collection.find({"status": "ended"}).sort("_id", -1).limit(self.ended_list_limit):
+            items.append(self.ended_document_to_public(document))
+        return items
 
 # ------------------------------------------------------------
 #  產生 embed 區塊
 # ------------------------------------------------------------
 
-def generate_embed(auction: Auction) -> Embed:
-    def format_span(seconds: int) -> str:
-        seconds = max(0, seconds)
-        h, rem = divmod(seconds, 3600)
-        m, s = divmod(rem, 60)
-        if h:
-            return f"{h:02d}:{m:02d}:{s:02d}"
-        return f"{m:02d}:{s:02d}"
+def format_span(seconds: int) -> str:
+    """
+    將秒數格式化成倒數文字。
 
+    Args:
+        seconds (int): "75"
+
+    Returns:
+        text (str): "01:15"
+    """
+    seconds = max(0, seconds)
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+def generate_embed(auction: Auction) -> Embed:
     tz_taipei = timezone(timedelta(hours=8))
     end_local = auction.end_time.astimezone(tz_taipei)
     end_str = end_local.strftime("%Y-%m-%d %H:%M:%S")
@@ -413,7 +759,7 @@ def generate_embed(auction: Auction) -> Embed:
         embed.add_field(name="目前最高價", value="尚無", inline=False)
     embed.add_field(name="此商品出價次數", value=str(auction.bid_count), inline=False)
 
-    embed.set_footer(text="⚠️ 若剩餘時間低於 60 秒後有人出價，系統將自動延長 30 秒。")
+    embed.set_footer(text=f"⚠️ 若剩餘時間低於 60 秒後有人出價，系統將自動延長 30 秒。 ID:{auction.auction_id}")
     return embed
 
 class Trade(commands.Cog):
@@ -430,6 +776,26 @@ class Trade(commands.Cog):
         self.robbery_success_rate_per_level = 0.5
         self.robbery_cake_per_level = 100
         self.robbery_interval_key = "robbery interval"
+        self.auction_house = AuctionHouse(client)
+        self.restore_task: asyncio.Task | None = None
+        client.auction_house = self.auction_house
+
+    async def cog_load(self):
+        """啟動拍賣所背景工作，並在 bot ready 後還原進行中的競標。"""
+        self.auction_house.start_tasks()
+        self.restore_task = asyncio.create_task(self.restore_auctions_when_ready())
+
+    async def cog_unload(self):
+        """停止拍賣所背景工作。"""
+        self.auction_house.stop_tasks()
+        if self.restore_task is not None:
+            self.restore_task.cancel()
+            self.restore_task = None
+
+    async def restore_auctions_when_ready(self):
+        """等 bot ready 後還原尚未結束的競標。"""
+        await self.bot.wait_until_ready()
+        await self.auction_house.restore_active()
 
     def cake_give_commission_percent(self, level: int) -> float:
         """
@@ -526,22 +892,26 @@ class Trade(commands.Cog):
                 await interaction.response.send_message("找不到指定的頻道，請重新選擇。", ephemeral=True)
                 return
 
+            auction_id = await self.parent_cog.auction_house.allocate_id()
             dummy_msg = await channel.send("稍等…正在建立競標…")
 
             auction = Auction(
+                auction_id=auction_id,
                 item=self.item.value,
                 start_price=start,
                 increment=inc,
                 end_time=end_time,
                 author_id=interaction.user.id,
-                message=dummy_msg,
                 bot=self.parent_cog.bot,
-                start_time=start_time
+                channel_id=channel.id,
+                message=dummy_msg,
+                start_time=start_time,
             )
 
             embed = generate_embed(auction)
-            view = AuctionView(auction)
+            view = AuctionView(auction, self.parent_cog.auction_house.page_url())
             await dummy_msg.edit(content="", embed=embed, view=view)
+            await self.parent_cog.auction_house.register(auction)
             await interaction.response.send_message("競標已建立!", ephemeral=True)
 
     @app_commands.command(name="create_bid", description="建立競標交易")
