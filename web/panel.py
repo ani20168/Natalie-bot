@@ -1,0 +1,310 @@
+import asyncio
+import secrets
+from pathlib import Path
+from urllib.parse import urlencode
+
+from fastapi import FastAPI, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.middleware.sessions import SessionMiddleware
+import uvicorn
+
+from cogs import common
+
+
+class WebPanel:
+    def __init__(self, bot) -> None:
+        self.bot = bot
+        self.port = 8080
+        self.mod_role_id = common.mod_role_id
+        self.oauth_authorize_url = "https://discord.com/api/oauth2/authorize"
+        self.oauth_token_url = "https://discord.com/api/oauth2/token"
+        self.oauth_user_url = "https://discord.com/api/users/@me"
+        self.oauth_scopes = "identify"
+        self.oauth_callback_path = "/auth/callback"
+        self.identity_bot_owner = "總管理員"
+        self.identity_mod = "MOD"
+        self.identity_member = "一般成員"
+        self.package_dir = Path(__file__).resolve().parent
+        self.templates = Jinja2Templates(directory=str(self.package_dir / "templates"))
+        self.secret_config = common.mongo_storage.read_secret_config()
+        self.client_id = str(self.secret_config.get("DISCORD_CLIENT_ID") or "")
+        self.client_secret = str(self.secret_config.get("DISCORD_CLIENT_SECRET") or "")
+        self.session_secret = str(self.secret_config.get("WEB_SESSION_SECRET") or secrets.token_hex(32))
+        self.app = self.create_app()
+
+    def create_app(self) -> FastAPI:
+        """
+        建立 FastAPI 應用與路由。
+
+        Returns:
+            app (FastAPI): "FastAPI()"
+        """
+        app = FastAPI(title="偽造妹妹伺服器互動面板")
+        app.add_middleware(SessionMiddleware, secret_key=self.session_secret, same_site="lax", https_only=False)
+        app.mount("/static", StaticFiles(directory=str(self.package_dir / "static")), name="static")
+        app.state.web_panel = self
+        app.add_api_route("/", self.index, methods=["GET"], response_class=HTMLResponse, name="index")
+        app.add_api_route("/auth/login", self.auth_login, methods=["GET"], name="auth_login")
+        app.add_api_route("/auth/callback", self.auth_callback, methods=["GET"], name="auth_callback")
+        app.add_api_route("/auth/logout", self.auth_logout, methods=["GET"], name="auth_logout")
+        app.add_api_route("/panel", self.panel, methods=["GET"], response_class=HTMLResponse, name="panel")
+        return app
+
+    async def index(self, request: Request):
+        """
+        首頁：已登入導向面板，否則顯示登入頁。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: HTML 或導向
+        """
+        if request.session.get("user_id"):
+            return RedirectResponse(url="/panel", status_code=302)
+        return self.templates.TemplateResponse(
+            request,
+            "login.html",
+            {"title": "偽造妹妹伺服器互動面板", "error": None},
+        )
+
+    async def auth_login(self, request: Request):
+        """
+        導向 Discord OAuth 授權頁。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: 導向或錯誤頁
+        """
+        if not self.client_id or not self.client_secret:
+            return self.templates.TemplateResponse(
+                request,
+                "login.html",
+                {
+                    "title": "偽造妹妹伺服器互動面板",
+                    "error": "尚未設定 Discord OAuth（請檢查 secret.json 的 DISCORD_CLIENT_ID / DISCORD_CLIENT_SECRET）。",
+                },
+                status_code=500,
+            )
+        state = secrets.token_urlsafe(16)
+        redirect_uri = self.build_redirect_uri(request)
+        request.session["oauth_state"] = state
+        request.session["oauth_redirect_uri"] = redirect_uri
+        query = urlencode(
+            {
+                "client_id": self.client_id,
+                "response_type": "code",
+                "redirect_uri": redirect_uri,
+                "scope": self.oauth_scopes,
+                "state": state,
+            }
+        )
+        return RedirectResponse(url=f"{self.oauth_authorize_url}?{query}", status_code=302)
+
+    async def auth_callback(self, request: Request, code: str | None = None, state: str | None = None, error: str | None = None):
+        """
+        處理 Discord OAuth callback。
+
+        Args:
+            request (Request): FastAPI request
+            code (str | None): "oauth_code"
+            state (str | None): "csrf_state"
+            error (str | None): "access_denied"
+
+        Returns:
+            response: 導向面板或錯誤頁
+        """
+        if error:
+            return self.templates.TemplateResponse(
+                request,
+                "login.html",
+                {"title": "偽造妹妹伺服器互動面板", "error": f"Discord 登入失敗：{error}"},
+                status_code=400,
+            )
+        expected_state = request.session.pop("oauth_state", None)
+        redirect_uri = request.session.pop("oauth_redirect_uri", None) or self.build_redirect_uri(request)
+        if not code or not state or state != expected_state:
+            return self.templates.TemplateResponse(
+                request,
+                "login.html",
+                {"title": "偽造妹妹伺服器互動面板", "error": "登入驗證失敗，請重新嘗試。"},
+                status_code=400,
+            )
+        user_info = await self.exchange_code_for_user(code, redirect_uri)
+        if user_info is None:
+            return self.templates.TemplateResponse(
+                request,
+                "login.html",
+                {"title": "偽造妹妹伺服器互動面板", "error": "無法取得 Discord 使用者資料。"},
+                status_code=400,
+            )
+        request.session["user_id"] = str(user_info["id"])
+        request.session["username"] = user_info.get("global_name") or user_info.get("username") or "未知使用者"
+        request.session["avatar"] = self.build_avatar_url(user_info)
+        return RedirectResponse(url="/panel", status_code=302)
+
+    async def auth_logout(self, request: Request):
+        """
+        清除登入 session。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: 導向首頁
+        """
+        request.session.clear()
+        return RedirectResponse(url="/", status_code=302)
+
+    async def panel(self, request: Request):
+        """
+        互動面板主頁：檢查群籍後顯示等級／蛋糕／身份。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: 面板、拒絕頁或導向登入
+        """
+        user_id = request.session.get("user_id")
+        if not user_id:
+            return RedirectResponse(url="/", status_code=302)
+
+        guild = self.bot.get_guild(common.fake_sister_server_id)
+        member = guild.get_member(int(user_id)) if guild is not None else None
+        if member is None:
+            return self.templates.TemplateResponse(
+                request,
+                "denied.html",
+                {
+                    "title": "拒絕訪問",
+                    "username": request.session.get("username"),
+                    "avatar": request.session.get("avatar"),
+                    "message": "你不在偽造妹妹伺服器中，無法使用互動面板。",
+                },
+                status_code=403,
+            )
+
+        user_data = await common.mongo_storage.ensure_user_document(user_id)
+        identity = self.resolve_identity(member)
+        return self.templates.TemplateResponse(
+            request,
+            "panel.html",
+            {
+                "title": "偽造妹妹伺服器互動面板",
+                "username": request.session.get("username"),
+                "avatar": request.session.get("avatar"),
+                "level": user_data.get("level", 1),
+                "cake": user_data.get("cake", 0),
+                "identity": identity,
+            },
+        )
+
+    def build_redirect_uri(self, request: Request) -> str:
+        """
+        依瀏覽器實際造訪的網址組出 OAuth callback。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            redirect_uri (str): "http://localhost:8080/auth/callback"
+        """
+        return str(request.url_for("auth_callback"))
+
+    def build_avatar_url(self, user_info: dict) -> str:
+        """
+        組出 Discord 頭像網址。
+
+        Args:
+            user_info (dict): "{'id': '4108', 'avatar': 'abc'}"
+
+        Returns:
+            avatar_url (str): "https://cdn.discordapp.com/avatars/..."
+        """
+        user_id = user_info.get("id")
+        avatar_hash = user_info.get("avatar")
+        if user_id and avatar_hash:
+            return f"https://cdn.discordapp.com/avatars/{user_id}/{avatar_hash}.png?size=64"
+        discriminator = user_info.get("discriminator") or "0"
+        try:
+            index = int(discriminator) % 5
+        except ValueError:
+            index = 0
+        return f"https://cdn.discordapp.com/embed/avatars/{index}.png"
+
+    def resolve_identity(self, member) -> str:
+        """
+        依 bot_owner / MOD 身分組判定顯示身份。
+
+        Args:
+            member: Discord guild member
+
+        Returns:
+            identity (str): "總管理員"
+        """
+        if member.id == common.bot_owner_id:
+            return self.identity_bot_owner
+        if any(role.id == self.mod_role_id for role in member.roles):
+            return self.identity_mod
+        return self.identity_member
+
+    async def exchange_code_for_user(self, code: str, redirect_uri: str) -> dict | None:
+        """
+        用授權碼交換 access token 並取得使用者資料。
+
+        Args:
+            code (str): "oauth_authorization_code"
+            redirect_uri (str): "http://localhost:8080/auth/callback"
+
+        Returns:
+            user_info (dict | None): "{'id': '4108', 'username': 'ani'}"
+        """
+        session = self.bot.session
+        token_data = {
+            "client_id": self.client_id,
+            "client_secret": self.client_secret,
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirect_uri,
+        }
+        headers = {"Content-Type": "application/x-www-form-urlencoded"}
+        async with session.post(self.oauth_token_url, data=token_data, headers=headers) as token_response:
+            if token_response.status != 200:
+                return None
+            token_payload = await token_response.json()
+        access_token = token_payload.get("access_token")
+        if not access_token:
+            return None
+        user_headers = {"Authorization": f"Bearer {access_token}"}
+        async with session.get(self.oauth_user_url, headers=user_headers) as user_response:
+            if user_response.status != 200:
+                return None
+            return await user_response.json()
+
+    async def start(self) -> None:
+        """
+        在現有 event loop 啟動 uvicorn。
+        """
+        config = uvicorn.Config(self.app, host="0.0.0.0", port=self.port, log_level="info")
+        server = uvicorn.Server(config)
+        await server.serve()
+
+
+def start_web_panel(bot) -> asyncio.Task:
+    """
+    建立 WebPanel 並以背景 task 啟動。
+
+    Args:
+        bot: Discord bot 實例
+
+    Returns:
+        task (asyncio.Task): "Task(...)"
+    """
+    panel = WebPanel(bot)
+    bot.web_panel = panel
+    return asyncio.create_task(panel.start())

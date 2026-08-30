@@ -4,6 +4,7 @@ from discord.ext import commands
 import os
 import aiohttp
 from cogs import common
+from web.panel import start_web_panel
 
 class Natalie(commands.Bot):
     def __init__(self):
@@ -15,6 +16,7 @@ class Natalie(commands.Bot):
             if filename.endswith('.py') and not(filename == 'common.py'):
                 await self.load_extension(f'cogs.{filename[:-3]}')
         await client.tree.sync()
+        start_web_panel(self)
 
     async def close(self):
         await super().close()

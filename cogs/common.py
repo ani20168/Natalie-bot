@@ -19,6 +19,7 @@ bot_id = 896675590239842304              #機器人ID
 cake_emoji_id = 896670335326371840       #蛋糕ID
 cake_emoji = f"<:cake:{cake_emoji_id}>"  #直接顯示蛋糕emoji
 fake_sister_server_id = 419108485435883531
+mod_role_id = 419185180134080513            #MOD身分組ID
 nitro_booster_role_id = 623486844394536961  #Nitro Booster身分組ID
 vip_role_id = 605730134531637249            #VIP身分組ID
 super_vip_id = 1539107189665308682 #妹妹群的至寶身分組ID

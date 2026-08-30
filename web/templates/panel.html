@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block body_class %}layout-app{% endblock %}
+{% block content %}
+<aside class="sidebar">
+  <div class="sidebar-brand">偽造妹妹伺服器互動面板</div>
+  <nav class="sidebar-nav">
+    <p class="sidebar-empty">選單將於後續開放</p>
+  </nav>
+</aside>
+<div class="main-wrap">
+  <header class="topbar">
+    <div class="topbar-user">
+      <img class="avatar" src="{{ avatar }}" alt="avatar">
+      <span class="username">{{ username }}</span>
+    </div>
+    <div class="topbar-meta">
+      <span class="meta-item">等級 {{ level }}</span>
+      <span class="meta-item">蛋糕 {{ cake }}</span>
+      <span class="meta-item identity">{{ identity }}</span>
+      <button type="button" class="btn btn-outline btn-sm" id="logout-open">登出</button>
+    </div>
+  </header>
+  <main class="content">
+    <h2>歡迎回來，{{ username }}</h2>
+    <p>互動面板第一階段殼層已就緒，後續功能會放在左側選單。</p>
+  </main>
+</div>
+
+<div class="dialog-backdrop" id="logout-dialog" role="dialog" aria-modal="true" aria-labelledby="logout-dialog-title">
+  <div class="dialog-card">
+    <h3 id="logout-dialog-title">確認登出</h3>
+    <p>確定要登出互動面板嗎？</p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="logout-cancel">取消</button>
+      <a class="btn btn-danger btn-sm" href="/auth/logout">確認登出</a>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var dialog = document.getElementById("logout-dialog");
+    var openButton = document.getElementById("logout-open");
+    var cancelButton = document.getElementById("logout-cancel");
+    if (!dialog || !openButton || !cancelButton) return;
+
+    function openDialog() {
+      dialog.classList.add("is-open");
+    }
+
+    function closeDialog() {
+      dialog.classList.remove("is-open");
+    }
+
+    openButton.addEventListener("click", openDialog);
+    cancelButton.addEventListener("click", closeDialog);
+    dialog.addEventListener("click", function (event) {
+      if (event.target === dialog) closeDialog();
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape") closeDialog();
+    });
+  })();
+</script>
+{% endblock %}

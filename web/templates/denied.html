@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block body_class %}page-center{% endblock %}
+{% block content %}
+<main class="auth-card">
+  <h1>拒絕訪問</h1>
+  {% if avatar %}
+  <img class="avatar avatar-lg" src="{{ avatar }}" alt="avatar">
+  {% endif %}
+  {% if username %}
+  <p class="auth-user">{{ username }}</p>
+  {% endif %}
+  <p class="auth-desc">{{ message }}</p>
+  <a class="btn btn-outline" href="/auth/logout">登出</a>
+</main>
+{% endblock %}

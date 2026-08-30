@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block body_class %}page-center{% endblock %}
+{% block content %}
+<main class="auth-card">
+  <h1>偽造妹妹伺服器互動面板</h1>
+  <p class="auth-desc">請使用 Discord 帳號登入</p>
+  {% if error %}
+  <p class="error-banner">{{ error }}</p>
+  {% endif %}
+  <a class="btn btn-discord" href="/auth/login">使用 Discord 登入</a>
+</main>
+{% endblock %}
