@@ -1,8 +1,7 @@
 {% extends "app_layout.html" %}
 {% block main %}
 <h2>拍賣所</h2>
-<p class="auction-lead">出價會依序處理。兩人同時點同一價格時，只有較早進入佇列的人會成功。</p>
-<div id="auction-toast" class="auction-toast" hidden></div>
+<p class="auction-lead">你可以在這裡競標商品。如果想要建立你的競標，請使用/create_bid 指令。</p>
 
 <section class="auction-section">
   <h3>進行中的競標</h3>
@@ -19,6 +18,7 @@
 </section>
 {% endblock %}
 {% block extra_script %}
+<div id="auction-toast" class="auction-toast" role="status"></div>
 <script>
   (function () {
     var activeBox = document.getElementById("auction-active");
@@ -26,7 +26,11 @@
     var toastBox = document.getElementById("auction-toast");
     var cakeBox = document.getElementById("topbar-cake");
     var biddingIds = {};
-    var toastTimer = null;
+    var lastSnapshot = { cake: 0, active: [], ended: [] };
+    var toastHideTimer = null;
+    var toastOutTimer = null;
+    var reconnectTimer = null;
+    var socket = null;
 
     function escapeHtml(value) {
       return String(value)
@@ -41,11 +45,8 @@
       var hours = Math.floor(seconds / 3600);
       var minutes = Math.floor((seconds % 3600) / 60);
       var secs = seconds % 60;
-      function pad(number) {
-        return String(number).padStart(2, "0");
-      }
-      if (hours > 0) return pad(hours) + ":" + pad(minutes) + ":" + pad(secs);
-      return pad(minutes) + ":" + pad(secs);
+      var hourText = hours > 0 ? String(hours).padStart(2, "0") + ":" : "";
+      return hourText + String(minutes).padStart(2, "0") + ":" + String(secs).padStart(2, "0");
     }
 
     function remainingFromIso(isoText) {
@@ -56,19 +57,33 @@
 
     function showToast(ok, message) {
       if (!toastBox) return;
-      toastBox.hidden = false;
-      toastBox.className = "auction-toast " + (ok ? "is-ok" : "is-error");
+      if (toastHideTimer) clearTimeout(toastHideTimer);
+      if (toastOutTimer) clearTimeout(toastOutTimer);
       toastBox.textContent = message;
-      if (toastTimer) clearTimeout(toastTimer);
-      toastTimer = setTimeout(function () {
-        toastBox.hidden = true;
-      }, 4000);
+      toastBox.className = "auction-toast " + (ok ? "is-ok" : "is-error");
+      void toastBox.offsetWidth;
+      toastBox.classList.add("is-in");
+      toastHideTimer = setTimeout(function () {
+        toastBox.classList.remove("is-in");
+        toastBox.classList.add("is-out");
+        toastOutTimer = setTimeout(function () {
+          toastBox.className = "auction-toast";
+          toastBox.textContent = "";
+        }, 400);
+      }, 2400);
     }
 
     function updateCake(cake) {
       if (cakeBox && cake !== undefined && cake !== null) {
         cakeBox.textContent = "蛋糕 " + cake;
       }
+    }
+
+    function applySnapshot(data) {
+      lastSnapshot = data || lastSnapshot;
+      updateCake(lastSnapshot.cake);
+      renderActive(lastSnapshot.active || []);
+      renderEnded(lastSnapshot.ended || []);
     }
 
     function renderActive(items) {
@@ -84,7 +99,7 @@
           ? item.highest_bid + "（" + item.highest_bidder_name + "）"
           : "尚無";
         var canBid = started && !item.is_highest_bidder && remaining > 0 && !biddingIds[item.id];
-        var bidLabel = item.is_highest_bidder ? "你已是最高出價者" : (started ? "出價 " + item.next_price : "尚未開始");
+        var bidLabel = biddingIds[item.id] ? "處理中…" : (item.is_highest_bidder ? "你已是最高出價者" : (started ? "出價 " + item.next_price : "尚未開始"));
         return (
           '<article class="auction-card" data-id="' + item.id + '">' +
             '<div class="auction-card-head">' +
@@ -131,23 +146,9 @@
       }).join("");
     }
 
-    async function refreshList() {
-      try {
-        var response = await fetch("/api/auction/list", { credentials: "same-origin" });
-        if (!response.ok) return;
-        var data = await response.json();
-        updateCake(data.cake);
-        renderActive(data.active || []);
-        renderEnded(data.ended || []);
-      } catch (error) {
-        activeBox.innerHTML = '<p class="auction-empty">載入失敗，稍後會再試</p>';
-      }
-    }
-
-    async function placeBid(auctionId, expectedPrice, button) {
+    async function placeBid(auctionId, expectedPrice) {
       biddingIds[auctionId] = true;
-      button.disabled = true;
-      button.textContent = "處理中…";
+      applySnapshot(lastSnapshot);
       try {
         var response = await fetch("/api/auction/bid", {
           method: "POST",
@@ -166,7 +167,30 @@
         showToast(false, "出價失敗:系統忙碌，請稍後再試");
       }
       delete biddingIds[auctionId];
-      await refreshList();
+      applySnapshot(lastSnapshot);
+    }
+
+    function connectSocket() {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      var protocol = location.protocol === "https:" ? "wss:" : "ws:";
+      socket = new WebSocket(protocol + "//" + location.host + "/ws/auction");
+      socket.onmessage = function (event) {
+        try {
+          applySnapshot(JSON.parse(event.data));
+        } catch (error) {
+          return;
+        }
+      };
+      socket.onclose = function (event) {
+        if (event.code === 4401 || event.code === 4403) {
+          location.href = "/";
+          return;
+        }
+        reconnectTimer = setTimeout(connectSocket, 2000);
+      };
     }
 
     activeBox.addEventListener("click", function (event) {
@@ -175,11 +199,10 @@
       var auctionId = parseInt(button.getAttribute("data-id"), 10);
       var expectedPrice = parseInt(button.getAttribute("data-price"), 10);
       if (!auctionId || !expectedPrice) return;
-      placeBid(auctionId, expectedPrice, button);
+      placeBid(auctionId, expectedPrice);
     });
 
-    refreshList();
-    setInterval(refreshList, 3000);
+    connectSocket();
   })();
 </script>
 {% endblock %}

@@ -3,7 +3,7 @@ import secrets
 from pathlib import Path
 from urllib.parse import urlencode
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -11,6 +11,117 @@ from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 
 from cogs import common
+
+
+class AuctionSocketClient:
+    """一條拍賣所 WebSocket 連線。"""
+
+    def __init__(self, websocket: WebSocket, user_id: str):
+        self.websocket = websocket
+        self.user_id = user_id
+
+
+class AuctionSocketHub:
+    """把拍賣所狀態推給所有已連線的網頁。"""
+
+    def __init__(self, panel: "WebPanel"):
+        self.panel = panel
+        self.broadcast_seconds = 1
+        self.clients: list[AuctionSocketClient] = []
+        self.broadcast_lock = asyncio.Lock()
+        self.tick_task: asyncio.Task | None = None
+
+    def start_tick(self):
+        """開始每秒推送。"""
+        if self.tick_task is None or self.tick_task.done():
+            self.tick_task = asyncio.create_task(self.run_tick())
+
+    def stop_tick(self):
+        """停止每秒推送。"""
+        if self.tick_task is None:
+            return
+        self.tick_task.cancel()
+        self.tick_task = None
+
+    def add_client(self, client: AuctionSocketClient):
+        """
+        登記連線。
+
+        Args:
+            client (AuctionSocketClient): WebSocket 連線
+        """
+        self.clients.append(client)
+
+    def remove_client(self, client: AuctionSocketClient):
+        """
+        移除連線。
+
+        Args:
+            client (AuctionSocketClient): WebSocket 連線
+        """
+        if client in self.clients:
+            self.clients.remove(client)
+
+    async def run_tick(self):
+        """有進行中的競標時，每秒向網頁推送最新狀態。"""
+        while True:
+            await asyncio.sleep(self.broadcast_seconds)
+            if not self.clients:
+                continue
+            house = getattr(self.panel.bot, "auction_house", None)
+            if house is None or not house.active:
+                continue
+            await self.broadcast()
+
+    async def send_to(self, client: AuctionSocketClient):
+        """
+        推送一份快照給單一連線。
+
+        Args:
+            client (AuctionSocketClient): WebSocket 連線
+        """
+        payload = await self.build_snapshot(client.user_id)
+        await client.websocket.send_json(payload)
+
+    async def broadcast(self):
+        """向所有連線推送各自的拍賣所快照。"""
+        async with self.broadcast_lock:
+            if not self.clients:
+                return
+            house = getattr(self.panel.bot, "auction_house", None)
+            ended = await house.list_ended_public() if house is not None else []
+            stale: list[AuctionSocketClient] = []
+            for client in list(self.clients):
+                try:
+                    payload = await self.build_snapshot(client.user_id, ended)
+                    await client.websocket.send_json(payload)
+                except Exception:
+                    stale.append(client)
+            for client in stale:
+                self.remove_client(client)
+
+    async def build_snapshot(self, user_id: str, ended: list[dict] | None = None) -> dict:
+        """
+        組出該使用者看到的拍賣所資料。
+
+        Args:
+            user_id (str): "410847926236086272"
+            ended (list | None): "[{'id': 1}]"
+
+        Returns:
+            payload (dict): "{'cake': 0, 'active': [], 'ended': []}"
+        """
+        house = getattr(self.panel.bot, "auction_house", None)
+        viewer_id = int(user_id)
+        if ended is None:
+            ended = await house.list_ended_public() if house is not None else []
+        user_data = await common.mongo_storage.get_user(user_id)
+        cake = user_data.get("cake", 0) if isinstance(user_data, dict) else 0
+        return {
+            "cake": cake,
+            "active": house.list_active_public(viewer_id) if house is not None else [],
+            "ended": ended,
+        }
 
 
 class WebPanel:
@@ -36,6 +147,7 @@ class WebPanel:
         if common.mongo_storage.get_runtime_env() == "PRD":
             self.public_base_url = str(self.secret_config.get("WEB_PUBLIC_BASE_URL") or "").rstrip("/")
         self.session_https_only = self.public_base_url.startswith("https://")
+        self.auction_hub = AuctionSocketHub(self)
         self.app = self.create_app()
 
     def create_app(self) -> FastAPI:
@@ -62,6 +174,7 @@ class WebPanel:
         app.add_api_route("/auction", self.auction_page, methods=["GET"], response_class=HTMLResponse, name="auction")
         app.add_api_route("/api/auction/list", self.auction_list, methods=["GET"], name="auction_list")
         app.add_api_route("/api/auction/bid", self.auction_bid, methods=["POST"], name="auction_bid")
+        app.add_api_websocket_route("/ws/auction", self.auction_socket, name="auction_socket")
         return app
 
     async def index(self, request: Request):
@@ -266,6 +379,36 @@ class WebPanel:
         result["cake"] = user_data.get("cake", 0)
         return JSONResponse(result)
 
+    async def auction_socket(self, websocket: WebSocket):
+        """
+        拍賣所即時更新通道：連上後立刻推一次，之後每秒與出價時再推。
+
+        Args:
+            websocket (WebSocket): 瀏覽器連線
+        """
+        session = websocket.scope.get("session") or {}
+        user_id = session.get("user_id")
+        guild = self.bot.get_guild(common.fake_sister_server_id)
+        member = guild.get_member(int(user_id)) if guild is not None and user_id else None
+        await websocket.accept()
+        if not user_id:
+            await websocket.close(code=4401)
+            return
+        if member is None:
+            await websocket.close(code=4403)
+            return
+        client = AuctionSocketClient(websocket, str(user_id))
+        self.auction_hub.add_client(client)
+        try:
+            await self.auction_hub.send_to(client)
+            while True:
+                await websocket.receive()
+        except WebSocketDisconnect:
+            pass
+        except Exception:
+            pass
+        self.auction_hub.remove_client(client)
+
     async def load_panel_context(self, request: Request, next_path: str):
         """
         確認已登入且在群內，並組出共用頁面資料。
@@ -421,7 +564,11 @@ class WebPanel:
             forwarded_allow_ips="*",
         )
         server = uvicorn.Server(config)
-        await server.serve()
+        self.auction_hub.start_tick()
+        try:
+            await server.serve()
+        finally:
+            self.auction_hub.stop_tick()
 
 
 def start_web_panel(bot) -> asyncio.Task:

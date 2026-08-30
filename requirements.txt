@@ -20,3 +20,4 @@ uvicorn
 jinja2
 itsdangerous
 python-multipart
+websockets

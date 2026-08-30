@@ -77,7 +77,8 @@ class Auction:
             document (dict): "{'_id': 1, 'item': '禮物卡', 'status': 'active'}"
         """
         return {
-            "_id": self.auction_id,
+            "_id": str(self.auction_id),
+            "auction_id": self.auction_id,
             "item": self.item,
             "start_price": self.start_price,
             "increment": self.increment,
@@ -99,7 +100,7 @@ class Auction:
     async def save(self):
         """將目前狀態寫入 Mongo。"""
         collection = common.mongo_storage.get_collection("auction")
-        await collection.replace_one({"_id": self.auction_id}, self.to_document(), upsert=True)
+        await collection.replace_one({"_id": str(self.auction_id)}, self.to_document(), upsert=True)
 
     async def refund(self, user_id: int, amount: int):
         """
@@ -226,7 +227,7 @@ class Auction:
             auction (Auction): 還原後的競標
         """
         auction = cls(
-            auction_id=int(document["_id"]),
+            auction_id=Auction.parse_document_id(document),
             item=document["item"],
             start_price=int(document["start_price"]),
             increment=int(document["increment"]),
@@ -248,6 +249,21 @@ class Auction:
         auction.reminder_notified = bool(document.get("reminder_notified", False))
         auction.status = str(document.get("status", "active"))
         return auction
+
+    @staticmethod
+    def parse_document_id(document: dict) -> int:
+        """
+        從文件讀出競標 ID（相容舊的整數 _id）。
+
+        Args:
+            document (dict): "{'_id': '1', 'auction_id': 1}"
+
+        Returns:
+            auction_id (int): "1"
+        """
+        if document.get("auction_id") is not None:
+            return int(document["auction_id"])
+        return int(document["_id"])
 
     @staticmethod
     def safe_filename(name: str) -> str:
@@ -430,6 +446,7 @@ class AuctionHouse:
         """
         await auction.save()
         self.track(auction)
+        await self.notify_web_clients()
 
     async def enqueue_bid(self, auction_id: int, user_id: int, expected_price: int, display_name: str) -> dict:
         """
@@ -479,6 +496,7 @@ class AuctionHouse:
             except ValueError as error:
                 return {"ok": False, "error": str(error)}
         await auction.write_log(request.display_name)
+        await self.notify_web_clients()
         return {"ok": True, "price": auction.highest_bid, "next_price": auction.next_price()}
 
     async def run_embed_loop(self):
@@ -511,6 +529,8 @@ class AuctionHouse:
             for auction_id in finished:
                 self.active.pop(auction_id, None)
                 self.last_update.pop(auction_id, None)
+            if finished:
+                await self.notify_web_clients()
 
     def embed_interval(self, auction: Auction) -> int:
         """
@@ -575,6 +595,38 @@ class AuctionHouse:
                 )
         except discord.HTTPException:
             pass
+
+    async def notify_web_clients(self):
+        """立刻把最新拍賣所狀態推給所有網頁連線。"""
+        panel = getattr(self.bot, "web_panel", None)
+        if panel is None:
+            return
+        try:
+            await panel.auction_hub.broadcast()
+        except Exception:
+            traceback.print_exc()
+
+    async def migrate_auction_documents(self):
+        """
+        把舊的整數 _id 改成字串，避免 mongo-express 點進去 502。
+        """
+        collection = common.mongo_storage.get_collection("auction")
+        async for document in collection.find({"_id": {"$ne": "counter"}}):
+            document_id = document["_id"]
+            if isinstance(document_id, str):
+                if document.get("auction_id") is None and document_id.isdigit():
+                    await collection.update_one({"_id": document_id}, {"$set": {"auction_id": int(document_id)}})
+                continue
+            new_id = str(int(document_id))
+            existing = await collection.find_one({"_id": new_id})
+            if existing is not None:
+                await collection.delete_one({"_id": document_id})
+                continue
+            new_document = dict(document)
+            new_document["_id"] = new_id
+            new_document["auction_id"] = int(document_id)
+            await collection.insert_one(new_document)
+            await collection.delete_one({"_id": document_id})
 
     async def restore_active(self):
         """機器人重啟後還原尚未結束的競標。"""
@@ -663,7 +715,7 @@ class AuctionHouse:
         highest_bidder = document.get("highest_bidder")
         has_bidder = highest_bidder is not None
         return {
-            "id": int(document["_id"]),
+            "id": Auction.parse_document_id(document),
             "item": document["item"],
             "start_price": int(document.get("start_price", 0)),
             "increment": int(document.get("increment", 0)),
@@ -696,7 +748,7 @@ class AuctionHouse:
         """
         collection = common.mongo_storage.get_collection("auction")
         items = []
-        async for document in collection.find({"status": "ended"}).sort("_id", -1).limit(self.ended_list_limit):
+        async for document in collection.find({"status": "ended"}).sort("auction_id", -1).limit(self.ended_list_limit):
             items.append(self.ended_document_to_public(document))
         return items
 
@@ -795,6 +847,10 @@ class Trade(commands.Cog):
     async def restore_auctions_when_ready(self):
         """等 bot ready 後還原尚未結束的競標。"""
         await self.bot.wait_until_ready()
+        try:
+            await self.auction_house.migrate_auction_documents()
+        except Exception:
+            traceback.print_exc()
         await self.auction_house.restore_active()
 
     def cake_give_commission_percent(self, level: int) -> float:
