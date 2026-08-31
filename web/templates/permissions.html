@@ -1,0 +1,88 @@
+{% extends "app_layout.html" %}
+{% block main %}
+<h2>權限控制</h2>
+<p class="permission-lead">有勾選的身分才會看到對應功能。預設皆未開放（包含總管理員）。勾選後會立即儲存。</p>
+<p class="permission-status" id="permission-status" aria-live="polite"></p>
+
+<div class="permission-table-wrap">
+  <table class="permission-table">
+    <thead>
+      <tr>
+        <th>權限</th>
+        {% for role_key in permission_role_keys %}
+        <th>{{ permission_role_labels[role_key] }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for category in permission_catalog %}
+      <tr class="permission-category">
+        <th colspan="{{ 1 + permission_role_keys|length }}">{{ category.label }}</th>
+      </tr>
+      {% for permission in category.permissions %}
+      <tr>
+        <td>
+          <strong>{{ permission.label }}</strong>
+          {% if permission.description %}
+          <p>{{ permission.description }}</p>
+          {% endif %}
+        </td>
+        {% for role_key in permission_role_keys %}
+        <td class="permission-check">
+          <input type="checkbox"
+                 data-permission="{{ permission.key }}"
+                 data-role="{{ role_key }}"
+                 {% if permission_grants[permission.key][role_key] %}checked{% endif %}>
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+{% block extra_script %}
+<script>
+  (function () {
+    var statusBox = document.getElementById("permission-status");
+    var table = document.querySelector(".permission-table");
+    if (!table) return;
+
+    function setStatus(message, ok) {
+      if (!statusBox) return;
+      statusBox.textContent = message;
+      statusBox.className = "permission-status " + (ok ? "is-ok" : "is-error");
+    }
+
+    table.addEventListener("change", async function (event) {
+      var checkbox = event.target.closest("input[type='checkbox'][data-permission]");
+      if (!checkbox) return;
+      checkbox.disabled = true;
+      try {
+        var response = await fetch("/api/permissions", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            permission: checkbox.getAttribute("data-permission"),
+            role: checkbox.getAttribute("data-role"),
+            enabled: checkbox.checked
+          })
+        });
+        var data = await response.json();
+        if (!data.ok) {
+          checkbox.checked = !checkbox.checked;
+          setStatus(data.error || "儲存失敗", false);
+        } else {
+          setStatus("已儲存", true);
+        }
+      } catch (error) {
+        checkbox.checked = !checkbox.checked;
+        setStatus("儲存失敗，請稍後再試", false);
+      }
+      checkbox.disabled = false;
+    });
+  })();
+</script>
+{% endblock %}

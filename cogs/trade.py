@@ -37,6 +37,7 @@ class Auction:
         self.bid_history: dict[int, int] = {}
         self.lock = asyncio.Lock()
         self.status = "active"
+        self.cancelled = False
         self.log_path = self.log_dir / f"{self.auction_id}_{self.safe_filename(self.item)}.txt"
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.start_time = start_time or datetime.now(timezone.utc)
@@ -93,6 +94,7 @@ class Auction:
             "bid_history": {str(user_id): amount for user_id, amount in self.bid_history.items()},
             "reminder_users": list(self.reminder_users),
             "status": self.status,
+            "cancelled": self.cancelled,
             "start_event_handled": self.start_event_handled,
             "reminder_notified": self.reminder_notified,
         }
@@ -248,6 +250,7 @@ class Auction:
         auction.start_event_handled = bool(document.get("start_event_handled", False))
         auction.reminder_notified = bool(document.get("reminder_notified", False))
         auction.status = str(document.get("status", "active"))
+        auction.cancelled = bool(document.get("cancelled", False))
         return auction
 
     @staticmethod
@@ -596,6 +599,52 @@ class AuctionHouse:
         except discord.HTTPException:
             pass
 
+    async def cancel(self, auction_id: int) -> dict:
+        """
+        撤銷競標：結束競標、歸還全部出價蛋糕，結果顯示為競標已取消。
+
+        Args:
+            auction_id (int): "1"
+
+        Returns:
+            result (dict): "{'ok': True}"
+        """
+        auction = self.get_active(auction_id)
+        if auction is None:
+            return {"ok": False, "error": "競標不存在或已結束"}
+        async with auction.lock:
+            if auction.status == "ended":
+                return {"ok": False, "error": "競標已結束"}
+            auction.status = "ended"
+            auction.cancelled = True
+            for user_id, reserved in auction.bid_history.items():
+                await auction.refund(user_id, reserved)
+            await auction.save()
+
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, auction.append_log_line, "競標已取消，全部出價蛋糕已歸還\n")
+        self.active.pop(auction_id, None)
+        self.last_update.pop(auction_id, None)
+
+        if auction.view:
+            for child in auction.view.children:
+                if isinstance(child, discord.ui.Button) and child.style != discord.ButtonStyle.link:
+                    child.disabled = True
+        try:
+            await AuctionView.update_embed(auction)
+        except (discord.HTTPException, discord.NotFound):
+            pass
+
+        channel = auction.message.channel if auction.message is not None else self.bot.get_channel(auction.channel_id)
+        if channel is not None:
+            try:
+                await channel.send(f"競標已取消! **{auction.item}** 已撤銷，所有出價的蛋糕已歸還。")
+            except discord.HTTPException:
+                pass
+
+        await self.notify_web_clients()
+        return {"ok": True}
+
     async def notify_web_clients(self):
         """立刻把最新拍賣所狀態推給所有網頁連線。"""
         panel = getattr(self.bot, "web_panel", None)
@@ -723,6 +772,7 @@ class AuctionHouse:
             "highest_bid": int(document["highest_bid"]) if has_bidder else None,
             "highest_bidder_name": self.resolve_name(int(highest_bidder)) if has_bidder else None,
             "bid_count": int(document.get("bid_count", 0)),
+            "cancelled": bool(document.get("cancelled", False)),
             "ended": True,
         }
 
@@ -774,6 +824,19 @@ def format_span(seconds: int) -> str:
     return f"{minutes:02d}:{secs:02d}"
 
 def generate_embed(auction: Auction) -> Embed:
+    if auction.cancelled:
+        embed = Embed(
+            title="❌ 競標已取消 – " + auction.item,
+            description="此競標已被撤銷，所有出價的蛋糕已歸還。",
+            color=common.bot_error_color,
+        )
+        embed.add_field(name="起標價", value=str(auction.start_price), inline=True)
+        embed.add_field(name="增額出價", value=str(auction.increment), inline=True)
+        embed.add_field(name="發起人", value=f"<@{auction.author_id}>", inline=True)
+        embed.add_field(name="此商品出價次數", value=str(auction.bid_count), inline=False)
+        embed.set_footer(text=f"ID:{auction.auction_id}")
+        return embed
+
     tz_taipei = timezone(timedelta(hours=8))
     end_local = auction.end_time.astimezone(tz_taipei)
     end_str = end_local.strftime("%Y-%m-%d %H:%M:%S")

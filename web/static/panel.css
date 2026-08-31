@@ -301,7 +301,7 @@ a {
   background: var(--accent);
   color: #062126;
   width: 100%;
-  margin-top: 14px;
+  margin-top: 0;
   gap: 4px;
 }
 
@@ -393,9 +393,109 @@ a {
   margin: 2px 0 0;
 }
 
+.auction-card-foot {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.auction-card-foot .btn-bid {
+  flex: 1;
+  width: auto;
+}
+
+.btn-cancel-auction {
+  flex-shrink: 0;
+  white-space: nowrap;
+  align-self: flex-end;
+}
+
 .auction-empty {
   margin: 0;
   color: var(--text-muted);
+}
+
+.content .permission-lead {
+  margin-bottom: 12px;
+  line-height: 1.7;
+}
+
+.content .permission-status {
+  min-height: 1.4em;
+  margin: 0 0 16px;
+  font-size: 0.9rem;
+}
+
+.permission-status.is-ok {
+  color: var(--accent);
+}
+
+.permission-status.is-error {
+  color: var(--danger);
+}
+
+.permission-table-wrap {
+  overflow-x: auto;
+}
+
+.permission-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.permission-table th,
+.permission-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.permission-table thead th {
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 700;
+  background: rgba(0, 223, 235, 0.06);
+}
+
+.permission-table thead th:not(:first-child),
+.permission-check {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.permission-category th {
+  background: #1c2633;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+
+.permission-table td strong {
+  color: var(--text);
+}
+
+.permission-table td p {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.permission-table input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.permission-table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .auction-toast {

@@ -6,6 +6,9 @@
   <nav class="sidebar-nav">
     <a href="/panel" class="sidebar-link{% if active_nav == 'home' %} is-active{% endif %}">首頁</a>
     <a href="/auction" class="sidebar-link{% if active_nav == 'auction' %} is-active{% endif %}">拍賣所</a>
+    {% if show_permission_nav %}
+    <a href="/permissions" class="sidebar-link{% if active_nav == 'permissions' %} is-active{% endif %}">權限控制</a>
+    {% endif %}
   </nav>
 </aside>
 <div class="main-wrap">

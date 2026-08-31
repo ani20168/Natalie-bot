@@ -121,6 +121,7 @@ class AuctionSocketHub:
             "cake": cake,
             "active": house.list_active_public(viewer_id) if house is not None else [],
             "ended": ended,
+            "permissions": await self.panel.permissions_for_user(user_id),
         }
 
 
@@ -137,6 +138,31 @@ class WebPanel:
         self.identity_bot_owner = "總管理員"
         self.identity_mod = "MOD"
         self.identity_member = "一般成員"
+        self.permission_role_owner = "owner"
+        self.permission_role_mod = "mod"
+        self.permission_role_member = "member"
+        self.permission_role_keys = [self.permission_role_owner, self.permission_role_mod, self.permission_role_member]
+        self.permission_role_labels = {
+            self.permission_role_owner: self.identity_bot_owner,
+            self.permission_role_mod: self.identity_mod,
+            self.permission_role_member: self.identity_member,
+        }
+        self.permission_auction_cancel = "auction_cancel"
+        self.permission_catalog = [
+            {
+                "key": "auction",
+                "label": "拍賣所",
+                "permissions": [
+                    {
+                        "key": self.permission_auction_cancel,
+                        "label": "撤銷競標",
+                        "description": "結束這個競標，會變成已結束，但是全部人的蛋糕會歸還",
+                    }
+                ],
+            }
+        ]
+        self.permission_document_id = "grants"
+        self.permission_grants_cache: dict | None = None
         self.package_dir = Path(__file__).resolve().parent
         self.templates = Jinja2Templates(directory=str(self.package_dir / "templates"))
         self.secret_config = common.mongo_storage.read_secret_config()
@@ -174,6 +200,9 @@ class WebPanel:
         app.add_api_route("/auction", self.auction_page, methods=["GET"], response_class=HTMLResponse, name="auction")
         app.add_api_route("/api/auction/list", self.auction_list, methods=["GET"], name="auction_list")
         app.add_api_route("/api/auction/bid", self.auction_bid, methods=["POST"], name="auction_bid")
+        app.add_api_route("/api/auction/cancel", self.auction_cancel, methods=["POST"], name="auction_cancel")
+        app.add_api_route("/permissions", self.permissions_page, methods=["GET"], response_class=HTMLResponse, name="permissions")
+        app.add_api_route("/api/permissions", self.permissions_update, methods=["POST"], name="permissions_update")
         app.add_api_websocket_route("/ws/auction", self.auction_socket, name="auction_socket")
         return app
 
@@ -344,6 +373,7 @@ class WebPanel:
                 "cake": context["cake"],
                 "active": active,
                 "ended": ended,
+                "permissions": context["permissions"],
             }
         )
 
@@ -378,6 +408,93 @@ class WebPanel:
         user_data = await common.mongo_storage.ensure_user_document(context["user_id"])
         result["cake"] = user_data.get("cake", 0)
         return JSONResponse(result)
+
+    async def auction_cancel(self, request: Request):
+        """
+        撤銷進行中的競標，並歸還全部出價蛋糕。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context = await self.load_panel_context(request, "/auction")
+        if reject is not None:
+            if isinstance(reject, RedirectResponse):
+                return JSONResponse({"ok": False, "error": "請先登入"}, status_code=401)
+            return JSONResponse({"ok": False, "error": "你不在偽造妹妹伺服器中"}, status_code=403)
+        if not context["permissions"].get(self.permission_auction_cancel):
+            return JSONResponse({"ok": False, "error": "你沒有撤銷競標的權限"}, status_code=403)
+        house = getattr(self.bot, "auction_house", None)
+        if house is None:
+            return JSONResponse({"ok": False, "error": "拍賣所尚未就緒"}, status_code=503)
+        try:
+            body = await request.json()
+            auction_id = int(body.get("auction_id"))
+        except Exception:
+            return JSONResponse({"ok": False, "error": "撤銷資料格式錯誤"}, status_code=400)
+        if auction_id < 1:
+            return JSONResponse({"ok": False, "error": "撤銷資料格式錯誤"}, status_code=400)
+        result = await house.cancel(auction_id)
+        user_data = await common.mongo_storage.ensure_user_document(context["user_id"])
+        result["cake"] = user_data.get("cake", 0)
+        return JSONResponse(result)
+
+    async def permissions_page(self, request: Request):
+        """
+        權限控制頁，僅總管理員可進入。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: 權限頁、拒絕頁或導向
+        """
+        reject, context = await self.load_panel_context(request, "/permissions")
+        if reject is not None:
+            return reject
+        if context["identity_key"] != self.permission_role_owner:
+            return RedirectResponse(url="/panel", status_code=302)
+        context["title"] = "權限控制"
+        context["active_nav"] = "permissions"
+        context["permission_catalog"] = self.permission_catalog
+        context["permission_role_keys"] = self.permission_role_keys
+        context["permission_role_labels"] = self.permission_role_labels
+        context["permission_grants"] = await self.load_permission_grants()
+        return self.templates.TemplateResponse(request, "permissions.html", context)
+
+    async def permissions_update(self, request: Request):
+        """
+        更新單一權限勾選，僅總管理員可操作。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context = await self.load_panel_context(request, "/permissions")
+        if reject is not None:
+            if isinstance(reject, RedirectResponse):
+                return JSONResponse({"ok": False, "error": "請先登入"}, status_code=401)
+            return JSONResponse({"ok": False, "error": "你不在偽造妹妹伺服器中"}, status_code=403)
+        if context["identity_key"] != self.permission_role_owner:
+            return JSONResponse({"ok": False, "error": "只有總管理員可以使用權限控制"}, status_code=403)
+        try:
+            body = await request.json()
+            permission_key = str(body.get("permission") or "")
+            role_key = str(body.get("role") or "")
+            enabled = bool(body.get("enabled"))
+        except Exception:
+            return JSONResponse({"ok": False, "error": "權限資料格式錯誤"}, status_code=400)
+        grants = await self.load_permission_grants()
+        if permission_key not in grants or role_key not in self.permission_role_keys:
+            return JSONResponse({"ok": False, "error": "未知的權限或身分"}, status_code=400)
+        grants[permission_key][role_key] = enabled
+        await self.persist_permission_grants(grants)
+        await self.auction_hub.broadcast()
+        return JSONResponse({"ok": True, "grants": grants})
 
     async def auction_socket(self, websocket: WebSocket):
         """
@@ -442,13 +559,17 @@ class WebPanel:
             return denied, None
 
         user_data = await common.mongo_storage.ensure_user_document(user_id)
+        identity_key = self.resolve_identity_key(member)
         context = {
             "user_id": user_id,
             "username": request.session.get("username"),
             "avatar": request.session.get("avatar"),
             "level": user_data.get("level", 1),
             "cake": user_data.get("cake", 0),
-            "identity": self.resolve_identity(member),
+            "identity": self.permission_role_labels[identity_key],
+            "identity_key": identity_key,
+            "show_permission_nav": identity_key == self.permission_role_owner,
+            "permissions": await self.permissions_for_role(identity_key),
         }
         return None, context
 
@@ -502,21 +623,100 @@ class WebPanel:
             index = 0
         return f"https://cdn.discordapp.com/embed/avatars/{index}.png"
 
-    def resolve_identity(self, member) -> str:
+    def resolve_identity_key(self, member) -> str:
         """
-        依 bot_owner / MOD 身分組判定顯示身份。
+        依 bot_owner / MOD 身分組判定權限身分鍵。
 
         Args:
             member: Discord guild member
 
         Returns:
-            identity (str): "總管理員"
+            identity_key (str): "owner"
         """
         if member.id == common.bot_owner_id:
-            return self.identity_bot_owner
+            return self.permission_role_owner
         if any(role.id == self.mod_role_id for role in member.roles):
-            return self.identity_mod
-        return self.identity_member
+            return self.permission_role_mod
+        return self.permission_role_member
+
+    def empty_permission_grants(self) -> dict:
+        """
+        產出全部未勾選的權限表。
+
+        Returns:
+            grants (dict): "{'auction_cancel': {'owner': False, 'mod': False, 'member': False}}"
+        """
+        grants = {}
+        for category in self.permission_catalog:
+            for permission in category["permissions"]:
+                grants[permission["key"]] = {role_key: False for role_key in self.permission_role_keys}
+        return grants
+
+    async def load_permission_grants(self) -> dict:
+        """
+        讀取權限勾選（快取優先，缺欄位當未勾選）。
+
+        Returns:
+            grants (dict): "{'auction_cancel': {'owner': False, 'mod': False, 'member': False}}"
+        """
+        if self.permission_grants_cache is not None:
+            return self.permission_grants_cache
+        grants = self.empty_permission_grants()
+        collection = common.mongo_storage.get_collection("web_permission")
+        document = await collection.find_one({"_id": self.permission_document_id})
+        if isinstance(document, dict):
+            for permission_key in grants:
+                stored = document.get(permission_key)
+                if not isinstance(stored, dict):
+                    continue
+                for role_key in self.permission_role_keys:
+                    grants[permission_key][role_key] = bool(stored.get(role_key, False))
+        self.permission_grants_cache = grants
+        return grants
+
+    async def persist_permission_grants(self, grants: dict):
+        """
+        寫入權限勾選並更新快取。
+
+        Args:
+            grants (dict): "{'auction_cancel': {'owner': True, 'mod': False, 'member': False}}"
+        """
+        collection = common.mongo_storage.get_collection("web_permission")
+        await collection.replace_one(
+            {"_id": self.permission_document_id},
+            {"_id": self.permission_document_id, **grants},
+            upsert=True,
+        )
+        self.permission_grants_cache = grants
+
+    async def permissions_for_role(self, role_key: str) -> dict:
+        """
+        依身分取出該角色已開放的功能。
+
+        Args:
+            role_key (str): "owner"
+
+        Returns:
+            flags (dict): "{'auction_cancel': False}"
+        """
+        grants = await self.load_permission_grants()
+        return {permission_key: bool(role_grants.get(role_key, False)) for permission_key, role_grants in grants.items()}
+
+    async def permissions_for_user(self, user_id: str) -> dict:
+        """
+        依使用者在群內身分取出已開放的功能。
+
+        Args:
+            user_id (str): "410847926236086272"
+
+        Returns:
+            flags (dict): "{'auction_cancel': False}"
+        """
+        guild = self.bot.get_guild(common.fake_sister_server_id)
+        member = guild.get_member(int(user_id)) if guild is not None else None
+        if member is None:
+            return {permission_key: False for permission_key in self.empty_permission_grants()}
+        return await self.permissions_for_role(self.resolve_identity_key(member))
 
     async def exchange_code_for_user(self, code: str, redirect_uri: str) -> dict | None:
         """

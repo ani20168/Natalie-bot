@@ -19,14 +19,29 @@
 {% endblock %}
 {% block extra_script %}
 <div id="auction-toast" class="auction-toast" role="status"></div>
+<div class="dialog-backdrop" id="cancel-dialog" role="dialog" aria-modal="true" aria-labelledby="cancel-dialog-title">
+  <div class="dialog-card">
+    <h3 id="cancel-dialog-title">確認撤銷競標</h3>
+    <p>確定要撤銷這個競標嗎？所有人的蛋糕將會歸還，且無法復原。</p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="cancel-dialog-close">取消</button>
+      <button type="button" class="btn btn-danger btn-sm" id="cancel-dialog-confirm">確認撤銷</button>
+    </div>
+  </div>
+</div>
 <script>
   (function () {
     var activeBox = document.getElementById("auction-active");
     var endedBox = document.getElementById("auction-ended");
     var toastBox = document.getElementById("auction-toast");
     var cakeBox = document.getElementById("topbar-cake");
+    var cancelDialog = document.getElementById("cancel-dialog");
+    var cancelDialogClose = document.getElementById("cancel-dialog-close");
+    var cancelDialogConfirm = document.getElementById("cancel-dialog-confirm");
     var biddingIds = {};
-    var lastSnapshot = { cake: 0, active: [], ended: [] };
+    var cancellingIds = {};
+    var pendingCancelId = 0;
+    var lastSnapshot = { cake: 0, active: [], ended: [], permissions: {} };
     var toastHideTimer = null;
     var toastOutTimer = null;
     var reconnectTimer = null;
@@ -57,6 +72,10 @@
 
     function cakeIcon() {
       return '<img class="cake-icon" src="/static/cake.png" alt="蛋糕">';
+    }
+
+    function formatServerText(value) {
+      return String(value).split(/<:cake:\d+>/).map(escapeHtml).join(cakeIcon());
     }
 
     function showToast(ok, messageHtml) {
@@ -103,6 +122,7 @@
           ? item.highest_bid + cakeIcon() + "（" + escapeHtml(item.highest_bidder_name) + "）"
           : "尚無";
         var canBid = started && !item.is_highest_bidder && remaining > 0 && !biddingIds[item.id];
+        var canCancel = !!(lastSnapshot.permissions && lastSnapshot.permissions.auction_cancel);
         var bidInner = "尚未開始";
         if (biddingIds[item.id]) {
           bidInner = "處理中…";
@@ -111,6 +131,11 @@
         } else if (started) {
           bidInner = "出價 " + item.next_price + cakeIcon();
         }
+        var cancelInner = cancellingIds[item.id] ? "處理中…" : "撤銷競標";
+        var cancelButton = canCancel
+          ? '<button type="button" class="btn btn-danger btn-sm btn-cancel-auction" data-id="' + item.id + '"' +
+            (cancellingIds[item.id] ? " disabled" : "") + '>' + cancelInner + '</button>'
+          : "";
         return (
           '<article class="auction-card" data-id="' + item.id + '">' +
             '<div class="auction-card-head">' +
@@ -125,8 +150,11 @@
               '<div><dt>目前最高價</dt><dd>' + highest + '</dd></div>' +
               '<div><dt>出價次數</dt><dd>' + item.bid_count + '</dd></div>' +
             '</dl>' +
-            '<button type="button" class="btn btn-bid" data-id="' + item.id + '" data-price="' + item.next_price + '"' +
-              (canBid ? "" : " disabled") + '>' + bidInner + '</button>' +
+            '<div class="auction-card-foot">' +
+              '<button type="button" class="btn btn-bid" data-id="' + item.id + '" data-price="' + item.next_price + '"' +
+                (canBid ? "" : " disabled") + '>' + bidInner + '</button>' +
+              cancelButton +
+            '</div>' +
           '</article>'
         );
       }).join("");
@@ -138,9 +166,11 @@
         return;
       }
       endedBox.innerHTML = items.map(function (item) {
-        var result = item.highest_bidder_name
-          ? escapeHtml(item.highest_bidder_name) + " 以 " + item.highest_bid + cakeIcon() + " 得標"
-          : "流標";
+        var result = item.cancelled
+          ? "競標已取消"
+          : item.highest_bidder_name
+            ? escapeHtml(item.highest_bidder_name) + " 以 " + item.highest_bid + cakeIcon() + " 得標"
+            : "流標";
         return (
           '<article class="auction-card is-ended">' +
             '<div class="auction-card-head">' +
@@ -155,6 +185,40 @@
           '</article>'
         );
       }).join("");
+    }
+
+    function openCancelDialog(auctionId) {
+      pendingCancelId = auctionId;
+      if (cancelDialog) cancelDialog.classList.add("is-open");
+    }
+
+    function closeCancelDialog() {
+      pendingCancelId = 0;
+      if (cancelDialog) cancelDialog.classList.remove("is-open");
+    }
+
+    async function cancelAuction(auctionId) {
+      cancellingIds[auctionId] = true;
+      applySnapshot(lastSnapshot);
+      try {
+        var response = await fetch("/api/auction/cancel", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ auction_id: auctionId })
+        });
+        var data = await response.json();
+        updateCake(data.cake);
+        if (data.ok) {
+          showToast(true, "已撤銷競標，全部出價蛋糕已歸還");
+        } else {
+          showToast(false, "撤銷失敗:" + formatServerText(data.error || "未知錯誤"));
+        }
+      } catch (error) {
+        showToast(false, "撤銷失敗:系統忙碌，請稍後再試");
+      }
+      delete cancellingIds[auctionId];
+      applySnapshot(lastSnapshot);
     }
 
     async function placeBid(auctionId, expectedPrice) {
@@ -172,7 +236,7 @@
         if (data.ok) {
           showToast(true, "出價成功：你以 " + data.price + cakeIcon() + " 出價");
         } else {
-          showToast(false, "出價失敗:" + escapeHtml(data.error || "未知錯誤"));
+          showToast(false, "出價失敗:" + formatServerText(data.error || "未知錯誤"));
         }
       } catch (error) {
         showToast(false, "出價失敗:系統忙碌，請稍後再試");
@@ -205,6 +269,14 @@
     }
 
     activeBox.addEventListener("click", function (event) {
+      var cancelButton = event.target.closest(".btn-cancel-auction");
+      if (cancelButton) {
+        if (cancelButton.disabled) return;
+        var cancelId = parseInt(cancelButton.getAttribute("data-id"), 10);
+        if (!cancelId) return;
+        openCancelDialog(cancelId);
+        return;
+      }
       var button = event.target.closest(".btn-bid");
       if (!button || button.disabled) return;
       var auctionId = parseInt(button.getAttribute("data-id"), 10);
@@ -212,6 +284,23 @@
       if (!auctionId || !expectedPrice) return;
       placeBid(auctionId, expectedPrice);
     });
+
+    if (cancelDialog && cancelDialogClose && cancelDialogConfirm) {
+      cancelDialogClose.addEventListener("click", closeCancelDialog);
+      cancelDialog.addEventListener("click", function (event) {
+        if (event.target === cancelDialog) closeCancelDialog();
+      });
+      cancelDialogConfirm.addEventListener("click", function () {
+        var auctionId = pendingCancelId;
+        closeCancelDialog();
+        if (auctionId) cancelAuction(auctionId);
+      });
+      document.addEventListener("keydown", function (event) {
+        if (event.key === "Escape" && cancelDialog.classList.contains("is-open")) {
+          closeCancelDialog();
+        }
+      });
+    }
 
     connectSocket();
   })();
