@@ -38,6 +38,7 @@ class Auction:
         self.lock = asyncio.Lock()
         self.status = "active"
         self.cancelled = False
+        self.cancelled_by_id: int | None = None
         self.log_path = self.log_dir / f"{self.auction_id}_{self.safe_filename(self.item)}.txt"
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.start_time = start_time or datetime.now(timezone.utc)
@@ -95,6 +96,7 @@ class Auction:
             "reminder_users": list(self.reminder_users),
             "status": self.status,
             "cancelled": self.cancelled,
+            "cancelled_by_id": self.cancelled_by_id,
             "start_event_handled": self.start_event_handled,
             "reminder_notified": self.reminder_notified,
         }
@@ -251,6 +253,8 @@ class Auction:
         auction.reminder_notified = bool(document.get("reminder_notified", False))
         auction.status = str(document.get("status", "active"))
         auction.cancelled = bool(document.get("cancelled", False))
+        cancelled_by_id = document.get("cancelled_by_id")
+        auction.cancelled_by_id = int(cancelled_by_id) if cancelled_by_id is not None else None
         return auction
 
     @staticmethod
@@ -599,12 +603,13 @@ class AuctionHouse:
         except discord.HTTPException:
             pass
 
-    async def cancel(self, auction_id: int) -> dict:
+    async def cancel(self, auction_id: int, canceller_id: int) -> dict:
         """
-        撤銷競標：結束競標、歸還全部出價蛋糕，結果顯示為競標已取消。
+        撤銷競標：結束競標、歸還全部出價蛋糕，並記下操作者。
 
         Args:
             auction_id (int): "1"
+            canceller_id (int): "410847926236086272"
 
         Returns:
             result (dict): "{'ok': True}"
@@ -617,6 +622,7 @@ class AuctionHouse:
                 return {"ok": False, "error": "競標已結束"}
             auction.status = "ended"
             auction.cancelled = True
+            auction.cancelled_by_id = canceller_id
             for user_id, reserved in auction.bid_history.items():
                 await auction.refund(user_id, reserved)
             await auction.save()
@@ -795,6 +801,7 @@ class AuctionHouse:
             "highest_bidder_name": self.resolve_name(int(highest_bidder)) if has_bidder else None,
             "bid_count": int(document.get("bid_count", 0)),
             "cancelled": bool(document.get("cancelled", False)),
+            "cancelled_by_name": self.resolve_name(int(document["cancelled_by_id"])) if document.get("cancelled_by_id") is not None else "",
             "ended": True,
         }
 

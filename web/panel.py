@@ -443,7 +443,7 @@ class WebPanel:
             return JSONResponse({"ok": False, "error": "撤銷資料格式錯誤"}, status_code=400)
         if auction_id < 1:
             return JSONResponse({"ok": False, "error": "撤銷資料格式錯誤"}, status_code=400)
-        result = await house.cancel(auction_id)
+        result = await house.cancel(auction_id, int(context["user_id"]))
         user_data = await common.mongo_storage.ensure_user_document(context["user_id"])
         result["cake"] = user_data.get("cake", 0)
         return JSONResponse(result)

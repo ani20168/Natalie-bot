@@ -190,7 +190,9 @@
             (deletingIds[item.id] ? " disabled" : "") + '>' + deleteInner + '</button>'
           : "";
         var result = item.cancelled
-          ? "競標已取消"
+          ? (item.cancelled_by_name
+            ? "競標已被 " + escapeHtml(item.cancelled_by_name) + " 取消"
+            : "競標已取消")
           : item.highest_bidder_name
             ? escapeHtml(item.highest_bidder_name) + " 以 " + item.highest_bid + cakeIcon() + " 得標"
             : "流標";
