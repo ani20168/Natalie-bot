@@ -77,7 +77,18 @@ class MongoStorage:
         self.database = None
         self.db_name = "discord"
         self.user_id_pattern = re.compile(r"^\d+$")
-        self.collection_name_map = {"userdata": "userdata", "mining": "mining", "odds": "odds", "auction": "auction", "web_permission": "web_permission"}
+        self.collection_name_map = {
+            "userdata": "userdata",
+            "mining": "mining",
+            "odds": "odds",
+            "auction": "auction",
+            "web_permission": "web_permission",
+            "shop_product": "shop_product",
+            "shop_order": "shop_order",
+            "shop_history": "shop_history",
+            "shop_grant": "shop_grant",
+            "shop_settings": "shop_settings",
+        }
         self.user_global_dataset = {"userdata", "mining"}
         self.single_document_dataset = {"odds"}
         self.replace_user = self.upsert_user

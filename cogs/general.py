@@ -103,6 +103,15 @@ class General(commands.Cog):
             "亮粉紅":{"role_id":1395359026879004744},
             "動態淺紫紅":{"role_id":1422416437036711976},
         }
+        self.animation_color_code_whitelist = [
+            "823967449149603861", #小八
+            "277828424872230912", #七色
+            "1190971324647092237", #泥巴
+            "543126405978783765", #一ㄈ
+            "399210985304489985", #小Q
+            "472308372616773632", #tako
+            "587934995063111681", #xu6
+        ]
         self.vip_retain_days = 30  # 取消 Boost 後仍保留 VIP 的天數
         self.message_audit_content_limit = 1000  # 訊息審核 embed 內容字數上限
         self.message_audit_max_attachments = 10  # 訊息審核最多附檔數量
@@ -609,6 +618,26 @@ class General(commands.Cog):
             await interaction.user.add_roles(interaction.guild.get_role(self.color_dict[colorchoice.value]['role_id']),reason="更換顏色身分組")
             await interaction.response.send_message(embed=Embed(title="設置顏色身分組",description=f"你目前的顏色變更為...<@&{self.color_dict[colorchoice.value]['role_id']}>!",color=common.bot_color))
 
+    async def has_animation_color_access(self, user_id: str, member) -> bool:
+        """
+        是否可用動態顏色：程式白名單、商店 DB 白名單，或至寶身分組。
+
+        Args:
+            user_id (str): "410847926236086272"
+            member: Discord 成員
+
+        Returns:
+            allowed (bool): "True"
+        """
+        if str(user_id) in self.animation_color_code_whitelist:
+            return True
+        if any(role.id == common.super_vip_id for role in member.roles):
+            return True
+        shop_house = getattr(self.bot, "shop_house", None)
+        if shop_house is None:
+            return False
+        return await shop_house.has_animation_color_grant(user_id)
+
     @app_commands.command(name = "set_animation_color",description="更換ID的顏色")
     @app_commands.describe(colorchoice="要更換的暱稱顏色")
     @app_commands.rename(colorchoice="選擇動態顏色")
@@ -626,15 +655,6 @@ class General(commands.Cog):
         app_commands.Choice(name="移除顏色身份組", value="移除顏色身份組"),
         ])
     async def set_animation_color(self, interaction, colorchoice:app_commands.Choice[str]):
-        animation_whitelist = [
-            "823967449149603861", #小八
-            "277828424872230912", #七色
-            "1190971324647092237", #泥巴
-            "543126405978783765", #一ㄈ
-            "399210985304489985", #小Q
-            "472308372616773632", #tako
-            "587934995063111681", #xu6
-        ] #放白名單會員的ID字串
         userid = str(interaction.user.id)
 
         user_roles = interaction.user.roles
@@ -648,10 +668,8 @@ class General(commands.Cog):
             await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你目前的顏色已經是 <@&{self.animation_color_dict[colorchoice.value]['role_id']}> 了!",color=common.bot_error_color))
             return
 
-        #沒在白名單、也沒有至寶身分組的，不能更換動態顏色
-        has_super_vip = any(role.id == common.super_vip_id for role in user_roles)
-        if colorchoice.value in self.animation_color_dict and userid not in animation_whitelist and not has_super_vip:
-            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你當前無法使用 <@&{self.animation_color_dict[colorchoice.value]['role_id']}> !\n動態身分組使用權可以在 #拍賣所 獲得!",color=common.bot_error_color))
+        if colorchoice.value in self.animation_color_dict and not await self.has_animation_color_access(userid, interaction.user):
+            await interaction.response.send_message(embed=Embed(title="錯誤",description=f"你當前無法使用 <@&{self.animation_color_dict[colorchoice.value]['role_id']}> !\n動態身分組使用權可以在商店獲得!",color=common.bot_error_color))
             return
 
         await self.remove_all_color_roles(interaction.user, reason="移除舊的顏色身分組")

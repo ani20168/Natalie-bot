@@ -1,0 +1,79 @@
+{% extends "app_layout.html" %}
+{% block main %}
+<div class="shop-page-head">
+  <div>
+    <h2>後台管理</h2>
+    <p class="shop-lead">成交成功後，會依這個比例從賣家實收的蛋糕抽成。</p>
+  </div>
+  <a class="btn btn-outline btn-sm" href="/shop">返回商店</a>
+</div>
+
+<section class="shop-admin-card">
+  <div class="shop-field">
+    <label for="shop-fee-input">手續費（%）</label>
+    <input type="number" id="shop-fee-input" min="0" max="100" step="0.1" value="{{ fee_percent_text|default('0') }}">
+  </div>
+  <button type="button" class="btn btn-bid btn-sm" id="shop-fee-save">儲存</button>
+</section>
+{% endblock %}
+{% block extra_script %}
+<div id="shop-admin-toast" class="auction-toast" role="status"></div>
+<script>
+  (function () {
+    var input = document.getElementById("shop-fee-input");
+    var saveButton = document.getElementById("shop-fee-save");
+    var toastBox = document.getElementById("shop-admin-toast");
+    var toastHideTimer = null;
+    var toastOutTimer = null;
+    if (!input || !saveButton) return;
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function showToast(ok, messageHtml) {
+      if (!toastBox) return;
+      if (toastHideTimer) clearTimeout(toastHideTimer);
+      if (toastOutTimer) clearTimeout(toastOutTimer);
+      toastBox.innerHTML = messageHtml;
+      toastBox.className = "auction-toast " + (ok ? "is-ok" : "is-error");
+      void toastBox.offsetWidth;
+      toastBox.classList.add("is-in");
+      toastHideTimer = setTimeout(function () {
+        toastBox.classList.remove("is-in");
+        toastBox.classList.add("is-out");
+        toastOutTimer = setTimeout(function () {
+          toastBox.className = "auction-toast";
+          toastBox.innerHTML = "";
+        }, 400);
+      }, 2400);
+    }
+
+    saveButton.addEventListener("click", async function () {
+      saveButton.disabled = true;
+      try {
+        var response = await fetch("/api/shop/fee", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fee_percent: input.value })
+        });
+        var data = await response.json();
+        if (!data.ok) {
+          showToast(false, escapeHtml(data.error || "儲存失敗"));
+        } else {
+          if (data.fee_percent_text !== undefined) input.value = data.fee_percent_text;
+          showToast(true, "已儲存手續費 " + escapeHtml(data.fee_percent_text || input.value) + " %");
+        }
+      } catch (error) {
+        showToast(false, "儲存失敗，請稍後再試");
+      }
+      saveButton.disabled = false;
+    });
+  })();
+</script>
+{% endblock %}

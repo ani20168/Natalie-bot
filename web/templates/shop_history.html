@@ -1,0 +1,87 @@
+{% extends "app_layout.html" %}
+{% block main %}
+<div class="shop-page-head">
+  <div>
+    <h2>交易歷史</h2>
+    <p class="shop-lead">這裡只會顯示你當過買家或賣家的商店成交紀錄。</p>
+  </div>
+  <a class="btn btn-outline btn-sm" href="/shop">返回商店</a>
+</div>
+<section class="shop-section">
+  <div id="shop-history" class="shop-history-list">
+    <p class="shop-empty">載入中…</p>
+  </div>
+</section>
+{% endblock %}
+{% block extra_script %}
+<script>
+  (function () {
+    var box = document.getElementById("shop-history");
+    var cakeBox = document.getElementById("topbar-cake");
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function cakeIcon() {
+      return '<img class="cake-icon" src="/static/cake.png" alt="蛋糕">';
+    }
+
+    function formatTime(isoText) {
+      var date = new Date(isoText);
+      if (isNaN(date.getTime())) return "";
+      var pad = function (value) { return String(value).padStart(2, "0"); };
+      return date.getFullYear() + "/" + pad(date.getMonth() + 1) + "/" + pad(date.getDate()) +
+        " " + pad(date.getHours()) + ":" + pad(date.getMinutes());
+    }
+
+    function render(items, userId) {
+      if (!items || !items.length) {
+        box.innerHTML = '<p class="shop-empty">目前還沒有商店成交紀錄</p>';
+        return;
+      }
+      box.innerHTML = items.map(function (item) {
+        var isSeller = String(item.seller_id) === String(userId);
+        var role = isSeller ? "賣出" : "買入";
+        var other = isSeller ? item.buyer_name : item.seller_name;
+        return (
+          '<article class="shop-history-card">' +
+            '<div class="shop-history-head">' +
+              "<h4>" + escapeHtml(item.product_name) + "</h4>" +
+              '<span class="shop-history-role">' + role + "</span>" +
+            "</div>" +
+            '<p class="shop-card-meta">' + formatTime(item.created_at) + "</p>" +
+            '<p class="shop-card-meta">對象：' + escapeHtml(other) + "</p>" +
+            '<p class="shop-card-meta">單價 ' + item.price + cakeIcon() +
+            " × " + item.quantity + "　合計 " + item.total + cakeIcon() + "</p>" +
+            (item.fee > 0 && isSeller
+              ? '<p class="shop-card-meta">手續費 ' + item.fee + cakeIcon() +
+                "（" + escapeHtml(item.fee_percent_text || "0") + "%）　實收 " + item.seller_gain + cakeIcon() + "</p>"
+              : "") +
+          "</article>"
+        );
+      }).join("");
+    }
+
+    fetch("/api/shop/history", { credentials: "same-origin" })
+      .then(function (response) { return response.json(); })
+      .then(function (data) {
+        if (cakeBox && data.cake !== undefined) {
+          cakeBox.innerHTML = cakeIcon() + " " + data.cake;
+        }
+        if (!data.ok) {
+          box.innerHTML = '<p class="shop-empty">' + escapeHtml(data.error || "載入失敗") + "</p>";
+          return;
+        }
+        render(data.items || [], data.user_id);
+      })
+      .catch(function () {
+        box.innerHTML = '<p class="shop-empty">載入失敗，請稍後再試</p>';
+      });
+  })();
+</script>
+{% endblock %}

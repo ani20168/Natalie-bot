@@ -149,6 +149,9 @@ class WebPanel:
         }
         self.permission_auction_cancel = "auction_cancel"
         self.permission_auction_delete = "auction_delete"
+        self.permission_shop_visit = "shop_visit"
+        self.permission_shop_edit_description = "shop_edit_description"
+        self.permission_shop_admin = "shop_admin"
         self.permission_catalog = [
             {
                 "key": "auction",
@@ -165,7 +168,28 @@ class WebPanel:
                         "description": "從網頁已結束列表移除這筆競標，Discord 訊息不會更動，競標 ID 照常往上累計",
                     },
                 ],
-            }
+            },
+            {
+                "key": "shop",
+                "label": "商店",
+                "permissions": [
+                    {
+                        "key": self.permission_shop_visit,
+                        "label": "造訪商店",
+                        "description": "側邊選單會顯示商店，也可以進入商店頁",
+                    },
+                    {
+                        "key": self.permission_shop_edit_description,
+                        "label": "編輯商品描述",
+                        "description": "可以修改商店商品的描述文字",
+                    },
+                    {
+                        "key": self.permission_shop_admin,
+                        "label": "後台管理",
+                        "description": "可以進入商店後台，調整手續費等設定",
+                    },
+                ],
+            },
         ]
         self.permission_document_id = "grants"
         self.permission_grants_cache: dict | None = None
@@ -210,6 +234,20 @@ class WebPanel:
         app.add_api_route("/api/auction/delete", self.auction_delete, methods=["POST"], name="auction_delete")
         app.add_api_route("/permissions", self.permissions_page, methods=["GET"], response_class=HTMLResponse, name="permissions")
         app.add_api_route("/api/permissions", self.permissions_update, methods=["POST"], name="permissions_update")
+        app.add_api_route("/shop", self.shop_page, methods=["GET"], response_class=HTMLResponse, name="shop")
+        app.add_api_route("/shop/history", self.shop_history_page, methods=["GET"], response_class=HTMLResponse, name="shop_history")
+        app.add_api_route("/shop/admin", self.shop_admin_page, methods=["GET"], response_class=HTMLResponse, name="shop_admin")
+        app.add_api_route("/api/shop/catalog", self.shop_catalog, methods=["GET"], name="shop_catalog")
+        app.add_api_route("/api/shop/product", self.shop_product, methods=["GET"], name="shop_product")
+        app.add_api_route("/api/shop/buy-order", self.shop_buy_order, methods=["POST"], name="shop_buy_order")
+        app.add_api_route("/api/shop/buy-order/cancel", self.shop_buy_order_cancel, methods=["POST"], name="shop_buy_order_cancel")
+        app.add_api_route("/api/shop/sell-order", self.shop_sell_order, methods=["POST"], name="shop_sell_order")
+        app.add_api_route("/api/shop/sell-order/cancel", self.shop_sell_order_cancel, methods=["POST"], name="shop_sell_order_cancel")
+        app.add_api_route("/api/shop/buy-listing", self.shop_buy_listing, methods=["POST"], name="shop_buy_listing")
+        app.add_api_route("/api/shop/quick-sell", self.shop_quick_sell, methods=["POST"], name="shop_quick_sell")
+        app.add_api_route("/api/shop/description", self.shop_description, methods=["POST"], name="shop_description")
+        app.add_api_route("/api/shop/history", self.shop_history, methods=["GET"], name="shop_history_api")
+        app.add_api_route("/api/shop/fee", self.shop_fee_update, methods=["POST"], name="shop_fee_update")
         app.add_api_websocket_route("/ws/auction", self.auction_socket, name="auction_socket")
         return app
 
@@ -533,6 +571,392 @@ class WebPanel:
         await self.auction_hub.broadcast()
         return JSONResponse({"ok": True, "grants": grants})
 
+    async def shop_page(self, request: Request):
+        """
+        商店頁。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: 商店、拒絕頁或導向登入
+        """
+        reject, context = await self.load_panel_context(request, "/shop")
+        if reject is not None:
+            return reject
+        if not context["permissions"].get(self.permission_shop_visit):
+            return RedirectResponse(url="/panel", status_code=302)
+        context["title"] = "商店"
+        context["active_nav"] = "shop"
+        context["fee_percent_text"] = await self.shop_fee_percent_text()
+        return self.templates.TemplateResponse(request, "shop.html", context)
+
+    async def shop_history_page(self, request: Request):
+        """
+        商店交易歷史頁。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: 歷史、拒絕頁或導向登入
+        """
+        reject, context = await self.load_panel_context(request, "/shop/history")
+        if reject is not None:
+            return reject
+        if not context["permissions"].get(self.permission_shop_visit):
+            return RedirectResponse(url="/panel", status_code=302)
+        context["title"] = "商店交易歷史"
+        context["active_nav"] = "shop"
+        return self.templates.TemplateResponse(request, "shop_history.html", context)
+
+    async def shop_admin_page(self, request: Request):
+        """
+        商店後台管理頁。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: 後台、拒絕頁或導向登入
+        """
+        reject, context = await self.load_panel_context(request, "/shop/admin")
+        if reject is not None:
+            return reject
+        if not context["permissions"].get(self.permission_shop_visit):
+            return RedirectResponse(url="/panel", status_code=302)
+        if not context["permissions"].get(self.permission_shop_admin):
+            return RedirectResponse(url="/shop", status_code=302)
+        context["title"] = "商店後台管理"
+        context["active_nav"] = "shop"
+        context["fee_percent_text"] = await self.shop_fee_percent_text()
+        return self.templates.TemplateResponse(request, "shop_admin.html", context)
+
+    async def shop_fee_percent_text(self) -> str:
+        """
+        目前商店手續費顯示文字。
+
+        Returns:
+            text (str): "5"
+        """
+        house = getattr(self.bot, "shop_house", None)
+        if house is None:
+            return "0"
+        return house.format_fee_percent(await house.get_fee_percent())
+
+    async def shop_api_context(self, request: Request, next_path: str = "/shop"):
+        """
+        商店 API 共用登入／群籍檢查。
+
+        Args:
+            request (Request): FastAPI request
+            next_path (str): "/shop"
+
+        Returns:
+            result (tuple): "(None, {'user_id': '4108'}, shop_house)"
+        """
+        reject, context = await self.load_panel_context(request, next_path)
+        if reject is not None:
+            if isinstance(reject, RedirectResponse):
+                return JSONResponse({"ok": False, "error": "請先登入"}, status_code=401), None, None
+            return JSONResponse({"ok": False, "error": "你不在偽造妹妹伺服器中"}, status_code=403), None, None
+        if not context["permissions"].get(self.permission_shop_visit):
+            return JSONResponse({"ok": False, "error": "你沒有造訪商店的權限"}, status_code=403), None, None
+        house = getattr(self.bot, "shop_house", None)
+        if house is None:
+            return JSONResponse({"ok": False, "error": "商店尚未就緒"}, status_code=503), None, None
+        return None, context, house
+
+    async def shop_action_payload(self, house, context: dict, product_id: str | None = None) -> dict:
+        """
+        動作後回傳蛋糕與（可選）商品最新狀態。
+
+        Args:
+            house: ShopHouse
+            context (dict): "{'user_id': '4108'}"
+            product_id (str | None): "mining_collection:昆蟲化石"
+
+        Returns:
+            payload (dict): "{'cake': 0}"
+        """
+        user_data = await common.mongo_storage.ensure_user_document(context["user_id"])
+        payload = {"cake": user_data.get("cake", 0)}
+        if product_id:
+            detail = await house.product_detail(product_id, context["user_id"], context["permissions"])
+            if detail is not None:
+                payload.update(detail)
+        return payload
+
+    async def shop_catalog(self, request: Request, category: str = "server"):
+        """
+        回傳分類商品列表。
+
+        Args:
+            request (Request): FastAPI request
+            category (str): "mining"
+
+        Returns:
+            response (JSONResponse): "{'ok': True, 'products': []}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        chosen = category if category in house.category_labels else house.category_server
+        products = await house.list_products(chosen)
+        if not products:
+            await house.ensure_catalog()
+            products = await house.list_products(chosen)
+        return JSONResponse(
+            {
+                "ok": True,
+                "cake": context["cake"],
+                "category": chosen,
+                "categories": await house.list_categories(),
+                "products": products,
+            },
+            headers={"Cache-Control": "no-store"},
+        )
+
+    async def shop_product(self, request: Request, product_id: str = ""):
+        """
+        回傳商品詳細與掛單。
+
+        Args:
+            request (Request): FastAPI request
+            product_id (str): "mining_collection:昆蟲化石"
+
+        Returns:
+            response (JSONResponse): "{'ok': True, 'product': {}}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        if not product_id:
+            return JSONResponse({"ok": False, "error": "缺少商品"}, status_code=400)
+        detail = await house.product_detail(product_id, context["user_id"], context["permissions"])
+        if detail is None:
+            return JSONResponse({"ok": False, "error": "找不到這個商品"}, status_code=404)
+        return JSONResponse({"ok": True, "cake": context["cake"], **detail})
+
+    async def shop_buy_order(self, request: Request):
+        """
+        建立求購單。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            product_id = str(body.get("product_id") or "")
+            price = body.get("price")
+            quantity = body.get("quantity")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "求購資料格式錯誤"}, status_code=400)
+        if not product_id:
+            return JSONResponse({"ok": False, "error": "缺少商品"}, status_code=400)
+        result = await house.create_buy_order(product_id, context["user_id"], price, quantity, context["username"])
+        result.update(await self.shop_action_payload(house, context, product_id))
+        return JSONResponse(result)
+
+    async def shop_buy_order_cancel(self, request: Request):
+        """
+        取消求購單。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            order_id = int(body.get("order_id"))
+            product_id = str(body.get("product_id") or "")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "取消資料格式錯誤"}, status_code=400)
+        result = await house.cancel_buy_order(order_id, context["user_id"])
+        result.update(await self.shop_action_payload(house, context, product_id or None))
+        return JSONResponse(result)
+
+    async def shop_sell_order(self, request: Request):
+        """
+        建立賣單。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            product_id = str(body.get("product_id") or "")
+            price = body.get("price")
+            quantity = body.get("quantity")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "販賣資料格式錯誤"}, status_code=400)
+        if not product_id:
+            return JSONResponse({"ok": False, "error": "缺少商品"}, status_code=400)
+        result = await house.create_sell_order(product_id, context["user_id"], price, quantity, context["username"])
+        result.update(await self.shop_action_payload(house, context, product_id))
+        return JSONResponse(result)
+
+    async def shop_sell_order_cancel(self, request: Request):
+        """
+        下架賣單。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            order_id = int(body.get("order_id"))
+            product_id = str(body.get("product_id") or "")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "下架資料格式錯誤"}, status_code=400)
+        result = await house.cancel_sell_order(order_id, context["user_id"])
+        result.update(await self.shop_action_payload(house, context, product_id or None))
+        return JSONResponse(result)
+
+    async def shop_buy_listing(self, request: Request):
+        """
+        購買賣單。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            order_id = int(body.get("order_id"))
+            quantity = body.get("quantity")
+            product_id = str(body.get("product_id") or "")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "購買資料格式錯誤"}, status_code=400)
+        result = await house.buy_listing(order_id, context["user_id"], quantity, context["username"])
+        result.update(await self.shop_action_payload(house, context, product_id or None))
+        return JSONResponse(result)
+
+    async def shop_quick_sell(self, request: Request):
+        """
+        以最高求購價快速販賣。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            product_id = str(body.get("product_id") or "")
+            quantity = body.get("quantity")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "快速販賣資料格式錯誤"}, status_code=400)
+        if not product_id:
+            return JSONResponse({"ok": False, "error": "缺少商品"}, status_code=400)
+        result = await house.quick_sell(product_id, context["user_id"], quantity, context["username"])
+        result.update(await self.shop_action_payload(house, context, product_id))
+        return JSONResponse(result)
+
+    async def shop_description(self, request: Request):
+        """
+        修改商品描述。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        if not context["permissions"].get(self.permission_shop_edit_description):
+            return JSONResponse({"ok": False, "error": "你沒有編輯商品描述的權限"}, status_code=403)
+        try:
+            body = await request.json()
+            product_id = str(body.get("product_id") or "")
+            description = str(body.get("description") or "")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "描述資料格式錯誤"}, status_code=400)
+        if not product_id:
+            return JSONResponse({"ok": False, "error": "缺少商品"}, status_code=400)
+        result = await house.update_description(product_id, description)
+        result.update(await self.shop_action_payload(house, context, product_id))
+        return JSONResponse(result)
+
+    async def shop_history(self, request: Request):
+        """
+        回傳自己的商店成交紀錄。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True, 'items': []}"
+        """
+        reject, context, house = await self.shop_api_context(request, "/shop/history")
+        if reject is not None:
+            return reject
+        return JSONResponse(
+            {
+                "ok": True,
+                "cake": context["cake"],
+                "user_id": context["user_id"],
+                "items": await house.list_my_history(context["user_id"]),
+            }
+        )
+
+    async def shop_fee_update(self, request: Request):
+        """
+        更新商店手續費百分比。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True, 'fee_percent': 5.0}"
+        """
+        reject, context, house = await self.shop_api_context(request, "/shop/admin")
+        if reject is not None:
+            return reject
+        if not context["permissions"].get(self.permission_shop_admin):
+            return JSONResponse({"ok": False, "error": "你沒有商店後台管理的權限"}, status_code=403)
+        try:
+            body = await request.json()
+            value = body.get("fee_percent")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "手續費資料格式錯誤"}, status_code=400)
+        result = await house.set_fee_percent(value)
+        return JSONResponse(result)
+
     async def auction_socket(self, websocket: WebSocket):
         """
         拍賣所即時更新通道：連上後立刻推一次，之後每秒與出價時再推。
@@ -608,6 +1032,8 @@ class WebPanel:
             "show_permission_nav": identity_key == self.permission_role_owner,
             "permissions": await self.permissions_for_role(identity_key),
         }
+        context["show_shop_nav"] = bool(context["permissions"].get(self.permission_shop_visit))
+        context["show_shop_admin"] = bool(context["permissions"].get(self.permission_shop_admin))
         return None, context
 
     def safe_next_path(self, path: str | None, default: str = "/panel") -> str:
