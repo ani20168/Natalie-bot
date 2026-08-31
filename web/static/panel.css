@@ -423,60 +423,58 @@ a {
 }
 
 .permission-board {
-  overflow: hidden;
+  overflow-x: auto;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 12px;
 }
 
-.permission-grid-head,
-.permission-grid-row {
-  display: grid;
-  grid-template-columns: minmax(240px, 1.6fr) repeat(3, minmax(110px, 1fr));
-  align-items: center;
+.permission-table {
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
 }
 
-.permission-grid-head {
-  background: rgba(0, 223, 235, 0.08);
-  border-bottom: 1px solid var(--border);
+.permission-col-name {
+  width: 40%;
 }
 
-.permission-grid-head > div {
+.permission-col-role {
+  width: 20%;
+}
+
+.permission-table th,
+.permission-table td {
   padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.permission-table thead th {
   color: var(--accent);
   font-size: 0.9rem;
   font-weight: 700;
-}
-
-.permission-grid-head > div:not(:first-child),
-.permission-switch {
-  display: flex;
-  justify-content: center;
-  align-items: center;
   text-align: center;
+  background: rgba(0, 223, 235, 0.08);
 }
 
-.permission-category {
-  padding: 10px 16px;
+.permission-table thead th:first-child,
+.permission-info {
+  text-align: left;
+}
+
+.permission-category th {
   background: #1c2633;
   color: var(--text);
   font-size: 0.9rem;
   font-weight: 700;
   letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--border);
+  text-align: left;
 }
 
-.permission-grid-row {
-  border-bottom: 1px solid var(--border);
-}
-
-.permission-grid-row:last-child {
+.permission-table tbody tr:last-child th,
+.permission-table tbody tr:last-child td {
   border-bottom: none;
-}
-
-.permission-info {
-  padding: 16px;
-  min-width: 0;
 }
 
 .permission-info strong {
@@ -491,17 +489,25 @@ a {
   line-height: 1.55;
 }
 
+.permission-check {
+  text-align: center;
+}
+
 .permission-switch {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  width: 28px;
+  height: 28px;
   position: relative;
-  min-height: 64px;
   cursor: pointer;
+  vertical-align: middle;
 }
 
 .permission-switch input {
   position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+  width: 28px;
+  height: 28px;
   margin: 0;
   opacity: 0;
   cursor: pointer;
@@ -547,17 +553,6 @@ a {
 
 .permission-switch input:disabled + .permission-box {
   opacity: 0.55;
-}
-
-@media (max-width: 800px) {
-  .permission-board {
-    overflow-x: auto;
-  }
-
-  .permission-grid-head,
-  .permission-grid-row {
-    min-width: 640px;
-  }
 }
 
 .auction-toast {

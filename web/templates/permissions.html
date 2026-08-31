@@ -4,34 +4,50 @@
 <p class="permission-lead">有勾選的身分才會看到對應功能。預設皆未開放（包含總管理員）。勾選後會立即儲存。</p>
 
 <div class="permission-board" id="permission-board">
-  <div class="permission-grid-head">
-    <div>權限</div>
-    {% for role_key in permission_role_keys %}
-    <div>{{ permission_role_labels[role_key] }}</div>
-    {% endfor %}
-  </div>
-  {% for category in permission_catalog %}
-  <div class="permission-category">{{ category.label }}</div>
-  {% for permission in category.permissions %}
-  <div class="permission-grid-row">
-    <div class="permission-info">
-      <strong>{{ permission.label }}</strong>
-      {% if permission.description %}
-      <p>{{ permission.description }}</p>
-      {% endif %}
-    </div>
-    {% for role_key in permission_role_keys %}
-    <label class="permission-switch">
-      <input type="checkbox"
-             data-permission="{{ permission.key }}"
-             data-role="{{ role_key }}"
-             {% if permission_grants[permission.key][role_key] %}checked{% endif %}>
-      <span class="permission-box"></span>
-    </label>
-    {% endfor %}
-  </div>
-  {% endfor %}
-  {% endfor %}
+  <table class="permission-table">
+    <colgroup>
+      <col class="permission-col-name">
+      {% for role_key in permission_role_keys %}
+      <col class="permission-col-role">
+      {% endfor %}
+    </colgroup>
+    <thead>
+      <tr>
+        <th>權限</th>
+        {% for role_key in permission_role_keys %}
+        <th>{{ permission_role_labels[role_key] }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for category in permission_catalog %}
+      <tr class="permission-category">
+        <th colspan="{{ 1 + permission_role_keys|length }}">{{ category.label }}</th>
+      </tr>
+      {% for permission in category.permissions %}
+      <tr>
+        <td class="permission-info">
+          <strong>{{ permission.label }}</strong>
+          {% if permission.description %}
+          <p>{{ permission.description }}</p>
+          {% endif %}
+        </td>
+        {% for role_key in permission_role_keys %}
+        <td class="permission-check">
+          <label class="permission-switch">
+            <input type="checkbox"
+                   data-permission="{{ permission.key }}"
+                   data-role="{{ role_key }}"
+                   {% if permission_grants[permission.key][role_key] %}checked{% endif %}>
+            <span class="permission-box"></span>
+          </label>
+        </td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+      {% endfor %}
+    </tbody>
+  </table>
 </div>
 {% endblock %}
 {% block extra_script %}
