@@ -2,60 +2,75 @@
 {% block main %}
 <h2>權限控制</h2>
 <p class="permission-lead">有勾選的身分才會看到對應功能。預設皆未開放（包含總管理員）。勾選後會立即儲存。</p>
-<p class="permission-status" id="permission-status" aria-live="polite"></p>
 
-<div class="permission-table-wrap">
-  <table class="permission-table">
-    <thead>
-      <tr>
-        <th>權限</th>
-        {% for role_key in permission_role_keys %}
-        <th>{{ permission_role_labels[role_key] }}</th>
-        {% endfor %}
-      </tr>
-    </thead>
-    <tbody>
-      {% for category in permission_catalog %}
-      <tr class="permission-category">
-        <th colspan="{{ 1 + permission_role_keys|length }}">{{ category.label }}</th>
-      </tr>
-      {% for permission in category.permissions %}
-      <tr>
-        <td>
-          <strong>{{ permission.label }}</strong>
-          {% if permission.description %}
-          <p>{{ permission.description }}</p>
-          {% endif %}
-        </td>
-        {% for role_key in permission_role_keys %}
-        <td class="permission-check">
-          <input type="checkbox"
-                 data-permission="{{ permission.key }}"
-                 data-role="{{ role_key }}"
-                 {% if permission_grants[permission.key][role_key] %}checked{% endif %}>
-        </td>
-        {% endfor %}
-      </tr>
-      {% endfor %}
-      {% endfor %}
-    </tbody>
-  </table>
+<div class="permission-board" id="permission-board">
+  <div class="permission-grid-head">
+    <div>權限</div>
+    {% for role_key in permission_role_keys %}
+    <div>{{ permission_role_labels[role_key] }}</div>
+    {% endfor %}
+  </div>
+  {% for category in permission_catalog %}
+  <div class="permission-category">{{ category.label }}</div>
+  {% for permission in category.permissions %}
+  <div class="permission-grid-row">
+    <div class="permission-info">
+      <strong>{{ permission.label }}</strong>
+      {% if permission.description %}
+      <p>{{ permission.description }}</p>
+      {% endif %}
+    </div>
+    {% for role_key in permission_role_keys %}
+    <label class="permission-switch">
+      <input type="checkbox"
+             data-permission="{{ permission.key }}"
+             data-role="{{ role_key }}"
+             {% if permission_grants[permission.key][role_key] %}checked{% endif %}>
+      <span class="permission-box"></span>
+    </label>
+    {% endfor %}
+  </div>
+  {% endfor %}
+  {% endfor %}
 </div>
 {% endblock %}
 {% block extra_script %}
+<div id="permission-toast" class="auction-toast" role="status"></div>
 <script>
   (function () {
-    var statusBox = document.getElementById("permission-status");
-    var table = document.querySelector(".permission-table");
-    if (!table) return;
+    var toastBox = document.getElementById("permission-toast");
+    var board = document.getElementById("permission-board");
+    var toastHideTimer = null;
+    var toastOutTimer = null;
+    if (!board) return;
 
-    function setStatus(message, ok) {
-      if (!statusBox) return;
-      statusBox.textContent = message;
-      statusBox.className = "permission-status " + (ok ? "is-ok" : "is-error");
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
     }
 
-    table.addEventListener("change", async function (event) {
+    function showToast(ok, messageHtml) {
+      if (!toastBox) return;
+      if (toastHideTimer) clearTimeout(toastHideTimer);
+      if (toastOutTimer) clearTimeout(toastOutTimer);
+      toastBox.innerHTML = messageHtml;
+      toastBox.className = "auction-toast " + (ok ? "is-ok" : "is-error");
+      void toastBox.offsetWidth;
+      toastBox.classList.add("is-in");
+      toastHideTimer = setTimeout(function () {
+        toastBox.classList.remove("is-in");
+        toastBox.classList.add("is-out");
+        toastOutTimer = setTimeout(function () {
+          toastBox.className = "auction-toast";
+          toastBox.innerHTML = "";
+        }, 400);
+      }, 2400);
+    }
+
+    board.addEventListener("change", async function (event) {
       var checkbox = event.target.closest("input[type='checkbox'][data-permission]");
       if (!checkbox) return;
       checkbox.disabled = true;
@@ -73,13 +88,13 @@
         var data = await response.json();
         if (!data.ok) {
           checkbox.checked = !checkbox.checked;
-          setStatus(data.error || "儲存失敗", false);
+          showToast(false, escapeHtml(data.error || "儲存失敗"));
         } else {
-          setStatus("已儲存", true);
+          showToast(true, "已儲存");
         }
       } catch (error) {
         checkbox.checked = !checkbox.checked;
-        setStatus("儲存失敗，請稍後再試", false);
+        showToast(false, "儲存失敗，請稍後再試");
       }
       checkbox.disabled = false;
     });
