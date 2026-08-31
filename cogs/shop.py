@@ -1099,9 +1099,17 @@ class ShopHouse:
                 raise ValueError("數量必須為正整數")
         except Exception:
             return {"ok": False, "error": "數量必須為正整數"}
+        try:
+            parsed_order_id = int(order_id)
+            if parsed_order_id < 1:
+                raise ValueError("賣單編號無效")
+        except Exception:
+            return {"ok": False, "error": "找不到這筆賣單"}
         async with self.lock:
             collection = common.mongo_storage.get_collection("shop_order")
-            order = await collection.find_one({"_id": str(order_id)})
+            order = await collection.find_one({"order_id": parsed_order_id})
+            if order is None:
+                order = await collection.find_one({"_id": str(parsed_order_id)})
             if order is None or order.get("side") != self.side_sell or order.get("status") != self.order_status_open:
                 return {"ok": False, "error": "找不到這筆賣單"}
             if str(order.get("user_id")) == str(buyer_id):

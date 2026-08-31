@@ -513,9 +513,10 @@
         return;
       }
       if (formMode === "buy-listing") {
+        var orderId = formOrderId;
         closeForm();
         postAction("/api/shop/buy-listing", {
-          order_id: formOrderId,
+          order_id: orderId,
           product_id: productId,
           quantity: quantity
         }, "購買成功");
