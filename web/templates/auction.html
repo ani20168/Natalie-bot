@@ -29,6 +29,16 @@
     </div>
   </div>
 </div>
+<div class="dialog-backdrop" id="delete-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title">
+  <div class="dialog-card">
+    <h3 id="delete-dialog-title">確認刪除紀錄</h3>
+    <p>確定要刪除這筆競標紀錄嗎？網頁上將不再顯示，Discord 訊息不會更動，且無法復原。</p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="delete-dialog-close">取消</button>
+      <button type="button" class="btn btn-danger btn-sm" id="delete-dialog-confirm">確認刪除</button>
+    </div>
+  </div>
+</div>
 <script>
   (function () {
     var activeBox = document.getElementById("auction-active");
@@ -38,9 +48,14 @@
     var cancelDialog = document.getElementById("cancel-dialog");
     var cancelDialogClose = document.getElementById("cancel-dialog-close");
     var cancelDialogConfirm = document.getElementById("cancel-dialog-confirm");
+    var deleteDialog = document.getElementById("delete-dialog");
+    var deleteDialogClose = document.getElementById("delete-dialog-close");
+    var deleteDialogConfirm = document.getElementById("delete-dialog-confirm");
     var biddingIds = {};
     var cancellingIds = {};
+    var deletingIds = {};
     var pendingCancelId = 0;
+    var pendingDeleteId = 0;
     var lastSnapshot = { cake: 0, active: [], ended: [], permissions: {} };
     var toastHideTimer = null;
     var toastOutTimer = null;
@@ -140,7 +155,10 @@
           '<article class="auction-card" data-id="' + item.id + '">' +
             '<div class="auction-card-head">' +
               '<h4>' + escapeHtml(item.item) + '</h4>' +
-              '<span class="auction-id">ID:' + item.id + '</span>' +
+              '<div class="auction-card-head-meta">' +
+                cancelButton +
+                '<span class="auction-id">ID:' + item.id + '</span>' +
+              '</div>' +
             '</div>' +
             '<p class="auction-time">' + timeLabel + ' <strong>' + formatSpan(remaining) + '</strong></p>' +
             '<dl class="auction-meta">' +
@@ -153,7 +171,6 @@
             '<div class="auction-card-foot">' +
               '<button type="button" class="btn btn-bid" data-id="' + item.id + '" data-price="' + item.next_price + '"' +
                 (canBid ? "" : " disabled") + '>' + bidInner + '</button>' +
-              cancelButton +
             '</div>' +
           '</article>'
         );
@@ -166,6 +183,12 @@
         return;
       }
       endedBox.innerHTML = items.map(function (item) {
+        var canDelete = !!(lastSnapshot.permissions && lastSnapshot.permissions.auction_delete);
+        var deleteInner = deletingIds[item.id] ? "處理中…" : "刪除紀錄";
+        var deleteButton = canDelete
+          ? '<button type="button" class="btn btn-danger btn-sm btn-delete-auction" data-id="' + item.id + '"' +
+            (deletingIds[item.id] ? " disabled" : "") + '>' + deleteInner + '</button>'
+          : "";
         var result = item.cancelled
           ? "競標已取消"
           : item.highest_bidder_name
@@ -175,7 +198,10 @@
           '<article class="auction-card is-ended">' +
             '<div class="auction-card-head">' +
               '<h4>' + escapeHtml(item.item) + '</h4>' +
-              '<span class="auction-id">ID:' + item.id + '</span>' +
+              '<div class="auction-card-head-meta">' +
+                deleteButton +
+                '<span class="auction-id">ID:' + item.id + '</span>' +
+              '</div>' +
             '</div>' +
             '<dl class="auction-meta">' +
               '<div><dt>發起人</dt><dd>' + escapeHtml(item.author_name) + '</dd></div>' +
@@ -195,6 +221,39 @@
     function closeCancelDialog() {
       pendingCancelId = 0;
       if (cancelDialog) cancelDialog.classList.remove("is-open");
+    }
+
+    function openDeleteDialog(auctionId) {
+      pendingDeleteId = auctionId;
+      if (deleteDialog) deleteDialog.classList.add("is-open");
+    }
+
+    function closeDeleteDialog() {
+      pendingDeleteId = 0;
+      if (deleteDialog) deleteDialog.classList.remove("is-open");
+    }
+
+    async function deleteAuction(auctionId) {
+      deletingIds[auctionId] = true;
+      applySnapshot(lastSnapshot);
+      try {
+        var response = await fetch("/api/auction/delete", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ auction_id: auctionId })
+        });
+        var data = await response.json();
+        if (data.ok) {
+          showToast(true, "已刪除競標紀錄");
+        } else {
+          showToast(false, "刪除失敗:" + formatServerText(data.error || "未知錯誤"));
+        }
+      } catch (error) {
+        showToast(false, "刪除失敗:系統忙碌，請稍後再試");
+      }
+      delete deletingIds[auctionId];
+      applySnapshot(lastSnapshot);
     }
 
     async function cancelAuction(auctionId) {
@@ -285,6 +344,14 @@
       placeBid(auctionId, expectedPrice);
     });
 
+    endedBox.addEventListener("click", function (event) {
+      var deleteButton = event.target.closest(".btn-delete-auction");
+      if (!deleteButton || deleteButton.disabled) return;
+      var deleteId = parseInt(deleteButton.getAttribute("data-id"), 10);
+      if (!deleteId) return;
+      openDeleteDialog(deleteId);
+    });
+
     if (cancelDialog && cancelDialogClose && cancelDialogConfirm) {
       cancelDialogClose.addEventListener("click", closeCancelDialog);
       cancelDialog.addEventListener("click", function (event) {
@@ -295,12 +362,25 @@
         closeCancelDialog();
         if (auctionId) cancelAuction(auctionId);
       });
-      document.addEventListener("keydown", function (event) {
-        if (event.key === "Escape" && cancelDialog.classList.contains("is-open")) {
-          closeCancelDialog();
-        }
+    }
+
+    if (deleteDialog && deleteDialogClose && deleteDialogConfirm) {
+      deleteDialogClose.addEventListener("click", closeDeleteDialog);
+      deleteDialog.addEventListener("click", function (event) {
+        if (event.target === deleteDialog) closeDeleteDialog();
+      });
+      deleteDialogConfirm.addEventListener("click", function () {
+        var auctionId = pendingDeleteId;
+        closeDeleteDialog();
+        if (auctionId) deleteAuction(auctionId);
       });
     }
+
+    document.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape") return;
+      if (cancelDialog && cancelDialog.classList.contains("is-open")) closeCancelDialog();
+      if (deleteDialog && deleteDialog.classList.contains("is-open")) closeDeleteDialog();
+    });
 
     connectSocket();
   })();

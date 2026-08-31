@@ -353,7 +353,7 @@ a {
 
 .auction-card-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
@@ -361,6 +361,14 @@ a {
 .auction-card-head h4 {
   margin: 0;
   font-size: 1.05rem;
+  min-width: 0;
+}
+
+.auction-card-head-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .auction-id {
@@ -406,10 +414,10 @@ a {
   width: auto;
 }
 
-.btn-cancel-auction {
+.btn-cancel-auction,
+.btn-delete-auction {
   flex-shrink: 0;
   white-space: nowrap;
-  align-self: flex-end;
 }
 
 .auction-empty {

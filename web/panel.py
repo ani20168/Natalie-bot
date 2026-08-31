@@ -148,6 +148,7 @@ class WebPanel:
             self.permission_role_member: self.identity_member,
         }
         self.permission_auction_cancel = "auction_cancel"
+        self.permission_auction_delete = "auction_delete"
         self.permission_catalog = [
             {
                 "key": "auction",
@@ -157,7 +158,12 @@ class WebPanel:
                         "key": self.permission_auction_cancel,
                         "label": "撤銷競標",
                         "description": "結束這個競標，會變成已結束，但是全部人的蛋糕會歸還",
-                    }
+                    },
+                    {
+                        "key": self.permission_auction_delete,
+                        "label": "刪除紀錄",
+                        "description": "從網頁已結束列表移除這筆競標，Discord 訊息不會更動，競標 ID 照常往上累計",
+                    },
                 ],
             }
         ]
@@ -201,6 +207,7 @@ class WebPanel:
         app.add_api_route("/api/auction/list", self.auction_list, methods=["GET"], name="auction_list")
         app.add_api_route("/api/auction/bid", self.auction_bid, methods=["POST"], name="auction_bid")
         app.add_api_route("/api/auction/cancel", self.auction_cancel, methods=["POST"], name="auction_cancel")
+        app.add_api_route("/api/auction/delete", self.auction_delete, methods=["POST"], name="auction_delete")
         app.add_api_route("/permissions", self.permissions_page, methods=["GET"], response_class=HTMLResponse, name="permissions")
         app.add_api_route("/api/permissions", self.permissions_update, methods=["POST"], name="permissions_update")
         app.add_api_websocket_route("/ws/auction", self.auction_socket, name="auction_socket")
@@ -441,6 +448,36 @@ class WebPanel:
         result["cake"] = user_data.get("cake", 0)
         return JSONResponse(result)
 
+    async def auction_delete(self, request: Request):
+        """
+        刪除已結束競標的網頁紀錄，不更動 Discord 訊息與競標 ID 計數。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context = await self.load_panel_context(request, "/auction")
+        if reject is not None:
+            if isinstance(reject, RedirectResponse):
+                return JSONResponse({"ok": False, "error": "請先登入"}, status_code=401)
+            return JSONResponse({"ok": False, "error": "你不在偽造妹妹伺服器中"}, status_code=403)
+        if not context["permissions"].get(self.permission_auction_delete):
+            return JSONResponse({"ok": False, "error": "你沒有刪除紀錄的權限"}, status_code=403)
+        house = getattr(self.bot, "auction_house", None)
+        if house is None:
+            return JSONResponse({"ok": False, "error": "拍賣所尚未就緒"}, status_code=503)
+        try:
+            body = await request.json()
+            auction_id = int(body.get("auction_id"))
+        except Exception:
+            return JSONResponse({"ok": False, "error": "刪除資料格式錯誤"}, status_code=400)
+        if auction_id < 1:
+            return JSONResponse({"ok": False, "error": "刪除資料格式錯誤"}, status_code=400)
+        result = await house.delete_record(auction_id)
+        return JSONResponse(result)
+
     async def permissions_page(self, request: Request):
         """
         權限控制頁，僅總管理員可進入。
@@ -659,18 +696,18 @@ class WebPanel:
         Returns:
             grants (dict): "{'auction_cancel': {'owner': False, 'mod': False, 'member': False}}"
         """
-        if self.permission_grants_cache is not None:
-            return self.permission_grants_cache
         grants = self.empty_permission_grants()
-        collection = common.mongo_storage.get_collection("web_permission")
-        document = await collection.find_one({"_id": self.permission_document_id})
-        if isinstance(document, dict):
-            for permission_key in grants:
-                stored = document.get(permission_key)
-                if not isinstance(stored, dict):
-                    continue
-                for role_key in self.permission_role_keys:
-                    grants[permission_key][role_key] = bool(stored.get(role_key, False))
+        stored = self.permission_grants_cache
+        if stored is None:
+            collection = common.mongo_storage.get_collection("web_permission")
+            document = await collection.find_one({"_id": self.permission_document_id})
+            stored = document if isinstance(document, dict) else {}
+        for permission_key in grants:
+            role_grants = stored.get(permission_key) if isinstance(stored, dict) else None
+            if not isinstance(role_grants, dict):
+                continue
+            for role_key in self.permission_role_keys:
+                grants[permission_key][role_key] = bool(role_grants.get(role_key, False))
         self.permission_grants_cache = grants
         return grants
 

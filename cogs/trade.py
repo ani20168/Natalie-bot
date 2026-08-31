@@ -645,6 +645,28 @@ class AuctionHouse:
         await self.notify_web_clients()
         return {"ok": True}
 
+    async def delete_record(self, auction_id: int) -> dict:
+        """
+        刪除已結束競標的網頁紀錄。不改 Discord 訊息，也不重用競標 ID。
+
+        Args:
+            auction_id (int): "8"
+
+        Returns:
+            result (dict): "{'ok': True}"
+        """
+        if self.get_active(auction_id) is not None:
+            return {"ok": False, "error": "進行中的競標無法刪除紀錄"}
+        collection = common.mongo_storage.get_collection("auction")
+        document = await collection.find_one({"_id": str(auction_id)})
+        if document is None:
+            return {"ok": False, "error": "找不到這筆競標紀錄"}
+        if str(document.get("status")) != "ended":
+            return {"ok": False, "error": "只能刪除已結束的競標紀錄"}
+        await collection.delete_one({"_id": str(auction_id)})
+        await self.notify_web_clients()
+        return {"ok": True}
+
     async def notify_web_clients(self):
         """立刻把最新拍賣所狀態推給所有網頁連線。"""
         panel = getattr(self.bot, "web_panel", None)
