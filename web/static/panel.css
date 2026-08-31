@@ -752,6 +752,7 @@ a {
   min-height: 0;
   overflow: auto;
   padding-right: 4px;
+  font-family: "Microsoft JhengHei", "微軟正黑體", sans-serif;
 }
 
 .shop-products.is-grid {

@@ -393,7 +393,7 @@
             "</div>" +
             '<div class="shop-hero-actions">' +
               sellButton +
-              '<button type="button" class="btn btn-outline btn-sm" data-action="buy-order">我要求購</button>' +
+              '<button type="button" class="btn btn-outline btn-sm" data-action="buy-order">購買請求</button>' +
               editButton +
             "</div>" +
           "</div>" +
@@ -582,7 +582,7 @@
           : "目前沒有賣單，求購價只要大於 0 即可。";
         var animationOnlyOne = product.kind === "animation_color_pass";
         openForm("buy-order", {
-          title: "我要求購",
+          title: "購買請求",
           lead: "求購會預扣 單價 × 數量 的蛋糕，取消後會退回。<br>" + buyHint +
             (animationOnlyOne ? "<br>這個商品一次只能求購 1 個。" : ""),
           extra: renderMyBuyOrders(detailData.my_buy_orders),
