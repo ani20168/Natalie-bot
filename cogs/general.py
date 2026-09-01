@@ -1026,7 +1026,11 @@ class BagPageView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id == self.owner_id:
             return True
-        await interaction.response.send_message(embed=Embed(title="Natalie 背包", description="只能翻自己的背包頁面。", color=common.bot_error_color), ephemeral=True)
+        await interaction.response.send_message(embed=Embed(title="Natalie 背包", description=random.choice([
+            "你不要亂翻別人的背包!!",
+            "把手拿開，這不是你的!!",
+            "偷看別人包包是很沒品的!!",
+        ]), color=common.bot_error_color), ephemeral=True)
         return False
 
     async def show_page(self, interaction: discord.Interaction, page: int) -> None:
@@ -1228,7 +1232,7 @@ class General(commands.Cog):
             return_document=common.ReturnDocument.AFTER,
         )
         if consume_result is None:
-            await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:蛋糕不足",color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="你自己都沒蛋糕了還想餵我??",color=common.bot_error_color))
             return
 
         # 計算距離等級上限還能吸收多少經驗，超過的部分改為退還蛋糕
@@ -1796,10 +1800,10 @@ class General(commands.Cog):
                 await interaction.response.send_message(embed=Embed(title="搶紅包", description="不能領取自己發的紅包。", color=common.bot_error_color), ephemeral=True)
                 return
             if uid in session.claimed_user_ids:
-                await interaction.response.send_message(embed=Embed(title="搶紅包", description="你已經領過這個紅包了。", color=common.bot_error_color), ephemeral=True)
+                await interaction.response.send_message(embed=Embed(title="搶紅包", description="你剛剛不是才拿過嗎，手別伸第二次。", color=common.bot_error_color), ephemeral=True)
                 return
             if not session.remaining_amounts:
-                await interaction.response.send_message(embed=Embed(title="搶紅包", description="紅包已經被搶完了。", color=common.bot_error_color), ephemeral=True)
+                await interaction.response.send_message(embed=Embed(title="搶紅包", description="晚了一步，紅包已經空了。", color=common.bot_error_color), ephemeral=True)
                 return
             amount = session.remaining_amounts.popleft()
             display_name = interaction.user.display_name

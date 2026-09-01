@@ -1752,7 +1752,7 @@ class BlackJackButton(discord.ui.View):
     async def interaction_check(self, interaction) -> bool:
         #如果非本人遊玩
         if interaction.user != self.command_interaction.user:
-            await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="你不能遊玩別人建立的遊戲。\n(請使用/blackjack遊玩21點)",color=common.bot_error_color), ephemeral=True)
+            await interaction.response.send_message(embed=Embed(title="Natalie 21點",description="這桌不是你的，去自己開一場!!\n(請使用/blackjack遊玩21點)",color=common.bot_error_color), ephemeral=True)
             return False
 
         return True
@@ -2423,7 +2423,7 @@ class PokerButton(discord.ui.View):
 
     async def interaction_check(self, interaction) -> bool:
         if interaction.user != self.command_interaction.user:
-            await interaction.response.send_message(embed=Embed(title="撲克牌比大小", description="你不能遊玩別人建立的遊戲。", color=common.bot_error_color), ephemeral=True)
+            await interaction.response.send_message(embed=Embed(title="撲克牌比大小", description="這桌不是你的，去自己開一場!!", color=common.bot_error_color), ephemeral=True)
             return False
         return True
 
@@ -3086,7 +3086,7 @@ class SquidRPSView(discord.ui.View):
     async def interaction_check(self, interaction) -> bool:
         if interaction.user != self.command_interaction.user:
             await interaction.response.send_message(
-                embed=Embed(title="魷魚猜拳", description="你不能遊玩別人建立的遊戲。", color=common.bot_error_color),
+                embed=Embed(title="魷魚猜拳", description="這桌不是你的，去自己開一場!!", color=common.bot_error_color),
                 ephemeral=True,
             )
             return False
