@@ -58,10 +58,14 @@
       dialog.classList.remove("is-open");
     }
 
+    var downOnBackdrop = false;
     openButton.addEventListener("click", openDialog);
     cancelButton.addEventListener("click", closeDialog);
+    dialog.addEventListener("pointerdown", function (event) {
+      downOnBackdrop = event.target === dialog;
+    });
     dialog.addEventListener("click", function (event) {
-      if (event.target === dialog) closeDialog();
+      if (downOnBackdrop && event.target === dialog) closeDialog();
     });
     document.addEventListener("keydown", function (event) {
       if (event.key === "Escape") closeDialog();

@@ -249,6 +249,16 @@
       confirmDialog.classList.remove("is-open");
     }
 
+    function bindBackdropClose(dialog, closeFn) {
+      var downOnBackdrop = false;
+      dialog.addEventListener("pointerdown", function (event) {
+        downOnBackdrop = event.target === dialog;
+      });
+      dialog.addEventListener("click", function (event) {
+        if (downOnBackdrop && event.target === dialog) closeFn();
+      });
+    }
+
     function openForm(mode, options) {
       options = options || {};
       formMode = mode;
@@ -784,9 +794,7 @@
     });
 
     formCancel.addEventListener("click", closeForm);
-    formDialog.addEventListener("click", function (event) {
-      if (event.target === formDialog) closeForm();
-    });
+    bindBackdropClose(formDialog, closeForm);
     formConfirm.addEventListener("click", submitForm);
     formExtra.addEventListener("click", function (event) {
       var button = event.target.closest("[data-action='ask-cancel-buy']");
@@ -803,9 +811,7 @@
     });
 
     confirmCancel.addEventListener("click", closeConfirm);
-    confirmDialog.addEventListener("click", function (event) {
-      if (event.target === confirmDialog) closeConfirm();
-    });
+    bindBackdropClose(confirmDialog, closeConfirm);
     confirmOk.addEventListener("click", function () {
       var action = confirmAction;
       closeConfirm();

@@ -355,9 +355,13 @@
     });
 
     if (cancelDialog && cancelDialogClose && cancelDialogConfirm) {
+      var cancelDownOnBackdrop = false;
       cancelDialogClose.addEventListener("click", closeCancelDialog);
+      cancelDialog.addEventListener("pointerdown", function (event) {
+        cancelDownOnBackdrop = event.target === cancelDialog;
+      });
       cancelDialog.addEventListener("click", function (event) {
-        if (event.target === cancelDialog) closeCancelDialog();
+        if (cancelDownOnBackdrop && event.target === cancelDialog) closeCancelDialog();
       });
       cancelDialogConfirm.addEventListener("click", function () {
         var auctionId = pendingCancelId;
@@ -367,9 +371,13 @@
     }
 
     if (deleteDialog && deleteDialogClose && deleteDialogConfirm) {
+      var deleteDownOnBackdrop = false;
       deleteDialogClose.addEventListener("click", closeDeleteDialog);
+      deleteDialog.addEventListener("pointerdown", function (event) {
+        deleteDownOnBackdrop = event.target === deleteDialog;
+      });
       deleteDialog.addEventListener("click", function (event) {
-        if (event.target === deleteDialog) closeDeleteDialog();
+        if (deleteDownOnBackdrop && event.target === deleteDialog) closeDeleteDialog();
       });
       deleteDialogConfirm.addEventListener("click", function () {
         var auctionId = pendingDeleteId;
