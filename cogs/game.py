@@ -63,6 +63,7 @@ class MiningGame(commands.Cog):
             "災禍鎬": {"需求等級": 50, "價格": 10000},
             "附魔迷你船錨": {"需求等級": 64, "價格": 20000},
         }
+        self.skill_pickaxe_discard_timeout = 60
 
 
     async def miningdata_read(self,userid: str):
@@ -332,6 +333,58 @@ class MiningGame(commands.Cog):
             if entry is None:
                 return index
         return None
+
+
+    def is_same_bought_skill_pickaxe(self, entry, template: str, max_health: int, skills: dict) -> bool:
+        """
+        該格是否仍是購買當下那把技能鎬。
+
+        Args:
+            entry: "{'template': '災禍鎬'}"
+            template (str): "災禍鎬"
+            max_health (int): "420"
+            skills (dict): "{'durability_half_skip': True}"
+
+        Returns:
+            same (bool): "True"
+        """
+        if not self.is_skill_pickaxe_entry(entry):
+            return False
+        if entry.get("template") != template:
+            return False
+        if entry.get("max_health") != max_health:
+            return False
+        return (entry.get("skills") or {}) == skills
+
+
+    async def discard_bought_skill_pickaxe(self, userid: str, slot: int, template: str, max_health: int, skills: dict) -> str:
+        """
+        丟棄購買當下那把技能鎬。呼叫端須已持有 jsonio_lock。
+
+        Args:
+            userid (str): "123"
+            slot (int): "0"
+            template (str): "災禍鎬"
+            max_health (int): "420"
+            skills (dict): "{'durability_half_skip': True}"
+
+        Returns:
+            result (str): "ok"
+        """
+        mining_data = await self.miningdata_read(userid)
+        bag = mining_data[userid]["pickaxe_bag"]
+        if slot < 0 or slot >= len(bag):
+            return "missing"
+        entry = bag[slot]
+        if self.is_pickaxe_bag_lock(entry):
+            return "locked"
+        if not self.is_same_bought_skill_pickaxe(entry, template, max_health, skills):
+            return "missing"
+        if mining_data[userid].get("equipped_bag_slot") == slot:
+            return "equipped"
+        bag[slot] = None
+        await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
+        return "ok"
 
 
     def restore_legacy_pickaxe_to_top(self, mining_data: dict, userid: str) -> None:
@@ -757,7 +810,20 @@ class MiningGame(commands.Cog):
                 instance = self.roll_skill_pickaxe_instance(value)
                 mining_data[userid]["pickaxe_bag"][free_index] = instance
                 skill_text = self.skill_pickaxe_lines_for_embed(instance["skills"])
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功！**{value}**已放入裝備背包第 **{free_index + 1}** 格。\n耐久 **{instance['current_health']}/{instance['max_health']}**\n\n{skill_text}",color=common.bot_color))
+                discard_view = SkillPickaxeDiscardView(
+                    timeout=self.skill_pickaxe_discard_timeout,
+                    cog=self,
+                    userid=userid,
+                    slot=free_index,
+                    template=value,
+                    max_health=instance["max_health"],
+                    skills=dict(instance["skills"]),
+                )
+                await interaction.response.send_message(
+                    embed=Embed(title="Natalie 挖礦",description=f"購買成功！**{value}**已放入裝備背包第 **{free_index + 1}** 格。\n耐久 **{instance['current_health']}/{instance['max_health']}**\n\n{skill_text}\n\n技能不滿意可在 **{self.skill_pickaxe_discard_timeout}** 秒內丟掉（蛋糕不退還）。",color=common.bot_color),
+                    view=discard_view,
+                )
+                discard_view.message = await interaction.original_response()
                 await common.mongo_storage.replace_user(userid, user_data)
                 await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
                 return
@@ -2953,6 +3019,68 @@ class SquidRPSView(discord.ui.View):
 
 
         
+
+
+class SkillPickaxeDiscardView(discord.ui.View):
+    """技能鎬購買後限時丟掉按鈕。"""
+
+    def __init__(self, *, timeout, cog, userid: str, slot: int, template: str, max_health: int, skills: dict):
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.userid = userid
+        self.slot = slot
+        self.template = template
+        self.max_health = max_health
+        self.skills = skills
+        self.message = None
+
+    def disable_buttons(self) -> None:
+        """停用畫面上所有按鈕。"""
+        for child in self.children:
+            child.disabled = True
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """只允許購買者按下丟掉按鈕。"""
+        if str(interaction.user.id) == self.userid:
+            return True
+        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="只有購買者可以丟掉這把礦鎬。",color=common.bot_error_color), ephemeral=True)
+        return False
+
+    @discord.ui.button(label="太爛了，丟掉!", style=discord.ButtonStyle.danger)
+    async def discard_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """把剛買的技能鎬從裝備背包丟掉，蛋糕不退還。"""
+        async with common.jsonio_lock:
+            result = await self.cog.discard_bought_skill_pickaxe(
+                self.userid, self.slot, self.template, self.max_health, self.skills
+            )
+        if result == "ok":
+            self.disable_buttons()
+            self.stop()
+            await interaction.response.edit_message(
+                embed=Embed(title="Natalie 挖礦",description=f"已丟掉剛買的**{self.template}**（原裝備背包第 **{self.slot + 1}** 格）。蛋糕不退還。",color=common.bot_color),
+                view=self,
+            )
+            return
+        if result == "equipped":
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="這把礦鎬正在裝備中，請先 `/mining_bag_unequip` 再丟掉。",color=common.bot_error_color), ephemeral=True)
+            return
+        if result == "locked":
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=self.cog.pickaxe_bag_lock_message,color=common.bot_error_color), ephemeral=True)
+            return
+        self.disable_buttons()
+        self.stop()
+        await interaction.response.edit_message(view=self)
+        await interaction.followup.send(embed=Embed(title="Natalie 挖礦",description="這把礦鎬已經不在該格了。",color=common.bot_error_color), ephemeral=True)
+
+    async def on_timeout(self) -> None:
+        """逾時後停用丟掉按鈕。"""
+        self.disable_buttons()
+        if self.message is None:
+            return
+        try:
+            await self.message.edit(view=self)
+        except discord.HTTPException:
+            pass
 
 
 class CollectionTradeButton(discord.ui.View):
