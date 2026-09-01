@@ -1248,8 +1248,20 @@ class Trade(commands.Cog):
 
         userdata_collection = common.mongo_storage.get_collection("userdata")
         defaults = common.mongo_storage.get_user_defaults()
-        robber_data = await common.mongo_storage.ensure_user_document(userid)
-        victim_data = await common.mongo_storage.ensure_user_document(str(member.id))
+        item_house = getattr(self.bot, "server_item_house", None)
+        if item_house is not None:
+            robber_data = await item_house.load_user(userid)
+            victim_data = await item_house.load_user(str(member.id))
+        else:
+            robber_data = await common.mongo_storage.ensure_user_document(userid)
+            victim_data = await common.mongo_storage.ensure_user_document(str(member.id))
+        if item_house is not None and item_house.has_status_in_data(victim_data, item_house.status_anti_theft):
+            await interaction.response.send_message(embed=Embed(
+                title=title,
+                description="對方身上有防盜卡，這次下手失敗了。",
+                color=common.bot_error_color,
+            ))
+            return
         robber_cake = int(robber_data.get("cake", 0))
         victim_cake = int(victim_data.get("cake", 0))
 
@@ -1269,14 +1281,17 @@ class Trade(commands.Cog):
             return
 
         now = datetime.now()
+        robbery_cooldown = self.robbery_cooldown
+        if item_house is not None and item_house.has_status_in_data(robber_data, item_house.status_speed_boots):
+            robbery_cooldown = item_house.speed_boots_cooldown
         last_robbery_raw = robber_data.get(self.robbery_interval_key)
         if last_robbery_raw:
             try:
                 last_robbery = datetime.strptime(last_robbery_raw, "%Y-%m-%d %H:%M:%S")
             except ValueError:
                 last_robbery = datetime.strptime(last_robbery_raw, "%Y-%m-%d %H:%M")
-            if now - last_robbery < self.robbery_cooldown:
-                remaining_time = last_robbery + self.robbery_cooldown - now
+            if now - last_robbery < robbery_cooldown:
+                remaining_time = last_robbery + robbery_cooldown - now
                 remaining_seconds = int(remaining_time.total_seconds())
                 remaining_hours, rem = divmod(remaining_seconds, 3600)
                 remaining_minutes, remaining_secs = divmod(rem, 60)
@@ -1293,6 +1308,14 @@ class Trade(commands.Cog):
         robber_level = int(robber_data.get("level", 1))
         victim_level = int(victim_data.get("level", 1))
         success_rate = self.robbery_success_rate(robber_level, victim_level)
+        if item_house is not None:
+            if item_house.has_status_in_data(robber_data, item_house.status_lucky_glove):
+                success_rate += item_house.robbery_success_bonus
+            if item_house.has_status_in_data(victim_data, item_house.status_slow):
+                success_rate += item_house.robbery_success_bonus
+            if item_house.has_status_in_data(robber_data, item_house.status_slow):
+                success_rate -= item_house.robbery_success_bonus
+            success_rate = max(0.0, min(100.0, success_rate))
         success = random.random() * 100 < success_rate
         rate_text = f"{success_rate:.1f}".rstrip("0").rstrip(".")
 
@@ -1307,7 +1330,10 @@ class Trade(commands.Cog):
             return
 
         steal_max = max(1, robber_level * self.robbery_cake_per_level)
-        steal_amount = random.randint(1, steal_max)
+        if item_house is not None and item_house.has_status_in_data(robber_data, item_house.status_master_thief):
+            steal_amount = steal_max
+        else:
+            steal_amount = random.randint(1, steal_max)
         steal_result = await userdata_collection.find_one_and_update(
             {"_id": str(member.id), "cake": {"$gte": steal_amount}},
             {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -steal_amount}},

@@ -58,6 +58,971 @@ class RedPacketGrabButton(discord.ui.Button):
         await view.cog.handle_red_packet_claim(interaction, view.session, view)
 
 
+class ServerItemHouse:
+    """伺服器道具背包、狀態與使用效果。"""
+
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.lock = asyncio.Lock()
+        self.bag_key = "item_bag"
+        self.status_key = "item_status"
+        self.bag_size = 99
+        self.bag_page_size = 10
+        self.win_cake_bonus_rate = 0.2
+        self.robbery_success_bonus = 20.0
+        self.speed_boots_cooldown = timedelta(minutes=5)
+        self.blackjack_cheat_games = 20
+        self.jade_bracelet_games = 50
+        self.magnet_steal_range = (500, 1000)
+        self.strong_magnet_steal_range = (5000, 10000)
+        self.status_anti_theft = "anti_theft"
+        self.status_lucky_glove = "lucky_glove"
+        self.status_master_thief = "master_thief"
+        self.status_slow = "slow"
+        self.status_speed_boots = "speed_boots"
+        self.status_camo_bag = "camo_bag"
+        self.status_lightning_rod = "lightning_rod"
+        self.status_amethyst = "amethyst_necklace"
+        self.status_blackjack_cheat = "blackjack_cheat"
+        self.status_jade_bracelet = "jade_bracelet"
+        self.charge_effect_keys = {self.status_blackjack_cheat, self.status_jade_bracelet}
+        self.status_labels = {
+            self.status_anti_theft: "防盜卡",
+            self.status_lucky_glove: "妙妙手套",
+            self.status_master_thief: "神偷手套",
+            self.status_slow: "遲緩",
+            self.status_speed_boots: "神速靴",
+            self.status_camo_bag: "迷彩包包",
+            self.status_lightning_rod: "避雷針",
+            self.status_amethyst: "紫水晶項鍊",
+            self.status_blackjack_cheat: "21點作弊卡",
+            self.status_jade_bracelet: "玉手鐲",
+        }
+        self.items = {
+            "anti_theft_3": {
+                "name": "防盜卡(3天)",
+                "description": "一段時間內無法被其他玩家搶劫",
+                "duration_days": 3,
+                "use_kind": "self_status",
+                "status_key": self.status_anti_theft,
+            },
+            "milk": {
+                "name": "牛奶",
+                "description": "清除自己或一位玩家的所有狀態",
+                "duration_days": 0,
+                "use_kind": "milk",
+                "need_target": True,
+                "target_optional": True,
+            },
+            "blackjack_cheat": {
+                "name": "21點作弊卡",
+                "description": "在接下來的20場blackjack小遊戲，可以偷看第五張牌",
+                "duration_days": 0,
+                "use_kind": "self_charge",
+                "status_key": self.status_blackjack_cheat,
+                "charge_amount": self.blackjack_cheat_games,
+            },
+            "lucky_glove_7": {
+                "name": "妙妙手套(7天)",
+                "description": "搶劫時，成功率提高20%",
+                "duration_days": 7,
+                "use_kind": "self_status",
+                "status_key": self.status_lucky_glove,
+            },
+            "master_thief_3": {
+                "name": "神偷手套(3天)",
+                "description": "搶劫成功後，偷竊數量範圍取最大值",
+                "duration_days": 3,
+                "use_kind": "self_status",
+                "status_key": self.status_master_thief,
+            },
+            "slow_potion_3": {
+                "name": "遲緩藥水(3天)",
+                "description": "賦予一位玩家遲緩效果，對有遲緩效果的人搶劫時，成功率提升20%，同時對方搶劫別人的成功率下降20%",
+                "duration_days": 3,
+                "use_kind": "target_status",
+                "status_key": self.status_slow,
+                "need_target": True,
+            },
+            "slow_spray_1": {
+                "name": "遲緩噴霧(1天)",
+                "description": "賦予一位玩家遲緩效果；對象如果在語音房內，語音房的所有玩家都會獲得效果",
+                "duration_days": 1,
+                "use_kind": "slow_spray",
+                "status_key": self.status_slow,
+                "need_target": True,
+            },
+            "speed_boots_3": {
+                "name": "神速靴(3天)",
+                "description": "搶劫冷卻時間變為5分鐘",
+                "duration_days": 3,
+                "use_kind": "self_status",
+                "status_key": self.status_speed_boots,
+            },
+            "jade_bracelet": {
+                "name": "玉手鐲",
+                "description": "在接下來的50場遊戲，獲勝時，蛋糕+20%",
+                "duration_days": 0,
+                "use_kind": "self_charge",
+                "status_key": self.status_jade_bracelet,
+                "charge_amount": self.jade_bracelet_games,
+            },
+            "amethyst_necklace_7": {
+                "name": "紫水晶項鍊(7天)",
+                "description": "在接下來的遊戲，獲勝時，蛋糕+20%",
+                "duration_days": 7,
+                "use_kind": "self_status",
+                "status_key": self.status_amethyst,
+            },
+            "camo_bag_30": {
+                "name": "迷彩包包(30天)",
+                "description": "使用/bag指令時，其他人無法看到你的背包物品",
+                "duration_days": 30,
+                "use_kind": "self_status",
+                "status_key": self.status_camo_bag,
+            },
+            "magnet": {
+                "name": "磁鐵",
+                "description": "只能在語音房使用，可以把語音房內其他人的蛋糕吸過來(500~1000)",
+                "duration_days": 0,
+                "use_kind": "magnet",
+                "steal_range": self.magnet_steal_range,
+                "voice_only": True,
+            },
+            "strong_magnet": {
+                "name": "強力磁鐵",
+                "description": "只能在語音房使用，可以把語音房內其他人的蛋糕吸過來(5000~10000)",
+                "duration_days": 0,
+                "use_kind": "magnet",
+                "steal_range": self.strong_magnet_steal_range,
+                "voice_only": True,
+            },
+            "heaven_punish": {
+                "name": "天罰",
+                "description": "摧毀一位玩家背包內的隨機一個道具(如果道具已疊加則為全部銷毀)",
+                "duration_days": 0,
+                "use_kind": "heaven_punish",
+                "need_target": True,
+            },
+            "lightning_rod_30": {
+                "name": "避雷針(30天)",
+                "description": "反彈天罰給道具使用者",
+                "duration_days": 30,
+                "use_kind": "self_status",
+                "status_key": self.status_lightning_rod,
+            },
+        }
+
+    def parse_time(self, raw) -> datetime | None:
+        """
+        解析狀態到期時間。
+
+        Args:
+            raw: "2026-09-04 15:00:00"
+
+        Returns:
+            parsed (datetime | None): "2026-09-04 15:00:00"
+        """
+        if isinstance(raw, datetime):
+            return raw.replace(tzinfo=None)
+        if not raw:
+            return None
+        try:
+            return datetime.strptime(str(raw), "%Y-%m-%d %H:%M:%S")
+        except ValueError:
+            try:
+                return parse(str(raw)).replace(tzinfo=None)
+            except (ValueError, TypeError):
+                return None
+
+    def remaining_hours_text(self, expires_at: datetime, now: datetime) -> str:
+        """
+        狀態剩餘時間文字。
+
+        Args:
+            expires_at (datetime): "2026-09-04 15:00:00"
+            now (datetime): "2026-09-01 15:00:00"
+
+        Returns:
+            text (str): "剩餘 **72** 小時"
+        """
+        seconds = (expires_at - now).total_seconds()
+        if seconds <= 0:
+            return "剩餘 **0** 小時"
+        hours = max(1, int((seconds + 3599) // 3600))
+        return f"剩餘 **{hours}** 小時"
+
+    def normalize_bag(self, user_data: dict) -> list:
+        """
+        把背包補齊成固定 99 格。
+
+        Args:
+            user_data (dict): "{'item_bag': []}"
+
+        Returns:
+            bag (list): "[{'item_id': 'milk', 'count': 1}, None]"
+        """
+        raw = user_data.get(self.bag_key)
+        bag = [None] * self.bag_size
+        if not isinstance(raw, list):
+            user_data[self.bag_key] = bag
+            return bag
+        for index in range(min(len(raw), self.bag_size)):
+            entry = raw[index]
+            if isinstance(entry, dict) and entry.get("item_id") and int(entry.get("count") or 0) > 0:
+                bag[index] = {"item_id": str(entry["item_id"]), "count": int(entry["count"])}
+        user_data[self.bag_key] = bag
+        return bag
+
+    def first_empty_index(self, bag: list) -> Optional[int]:
+        """
+        第一個空格。
+
+        Args:
+            bag (list): "[None, {'item_id': 'milk', 'count': 1}]"
+
+        Returns:
+            index (int | None): "0"
+        """
+        for index, entry in enumerate(bag):
+            if entry is None:
+                return index
+        return None
+
+    def can_receive_on_bag(self, bag: list, item_id: str) -> bool:
+        """
+        此背包能否再收下此道具（可疊加或有空格）。
+
+        Args:
+            bag (list): "[{'item_id': 'milk', 'count': 1}]"
+            item_id (str): "milk"
+
+        Returns:
+            ok (bool): "True"
+        """
+        for entry in bag:
+            if isinstance(entry, dict) and entry.get("item_id") == item_id:
+                return True
+        return self.first_empty_index(bag) is not None
+
+    def count_item_on_bag(self, bag: list, item_id: str) -> int:
+        """
+        統計某道具數量。
+
+        Args:
+            bag (list): "[{'item_id': 'milk', 'count': 2}]"
+            item_id (str): "milk"
+
+        Returns:
+            count (int): "2"
+        """
+        total = 0
+        for entry in bag:
+            if isinstance(entry, dict) and entry.get("item_id") == item_id:
+                total += int(entry.get("count") or 0)
+        return total
+
+    def occupied_indexes(self, bag: list) -> list[int]:
+        """
+        有道具的格子。
+
+        Args:
+            bag (list): "[{'item_id': 'milk', 'count': 1}, None]"
+
+        Returns:
+            indexes (list): "[0]"
+        """
+        return [index for index, entry in enumerate(bag) if isinstance(entry, dict)]
+
+    def item_display_name(self, item_id: str) -> str:
+        """
+        道具顯示名稱。
+
+        Args:
+            item_id (str): "anti_theft_3"
+
+        Returns:
+            name (str): "防盜卡(3天)"
+        """
+        item = self.items.get(item_id) or {}
+        return str(item.get("name") or item_id)
+
+    def item_description(self, item_id: str) -> str:
+        """
+        道具效果說明。
+
+        Args:
+            item_id (str): "milk"
+
+        Returns:
+            text (str): "清除自己或一位玩家的所有狀態"
+        """
+        item = self.items.get(item_id) or {}
+        return str(item.get("description") or "未知道具")
+
+    def prune_status_in_data(self, user_data: dict) -> bool:
+        """
+        清掉過期或用盡的狀態。
+
+        Args:
+            user_data (dict): "{'item_status': {}}"
+
+        Returns:
+            changed (bool): "True"
+        """
+        status = user_data.get(self.status_key)
+        if not isinstance(status, dict):
+            user_data[self.status_key] = {}
+            return False
+        now = datetime.now()
+        changed = False
+        for key in list(status.keys()):
+            entry = status[key]
+            if not isinstance(entry, dict):
+                del status[key]
+                changed = True
+                continue
+            if "expires_at" in entry:
+                expires = self.parse_time(entry.get("expires_at"))
+                if expires is None or expires <= now:
+                    del status[key]
+                    changed = True
+                continue
+            if int(entry.get("remaining") or 0) <= 0:
+                del status[key]
+                changed = True
+        return changed
+
+    def has_status_in_data(self, user_data: dict, status_key: str) -> bool:
+        """
+        文件上是否仍有此狀態。
+
+        Args:
+            user_data (dict): "{'item_status': {'anti_theft': {}}}"
+            status_key (str): "anti_theft"
+
+        Returns:
+            active (bool): "True"
+        """
+        self.prune_status_in_data(user_data)
+        status = user_data.get(self.status_key)
+        return isinstance(status, dict) and status_key in status
+
+    def charge_remaining_in_data(self, user_data: dict, status_key: str) -> int:
+        """
+        剩餘場數。
+
+        Args:
+            user_data (dict): "{'item_status': {'jade_bracelet': {'remaining': 50}}}"
+            status_key (str): "jade_bracelet"
+
+        Returns:
+            remaining (int): "50"
+        """
+        self.prune_status_in_data(user_data)
+        status = user_data.get(self.status_key)
+        if not isinstance(status, dict):
+            return 0
+        entry = status.get(status_key)
+        if not isinstance(entry, dict):
+            return 0
+        return max(0, int(entry.get("remaining") or 0))
+
+    def add_timed_status(self, user_data: dict, status_key: str, days: int) -> None:
+        """
+        疊加持續狀態時數。
+
+        Args:
+            user_data (dict): "{'item_status': {}}"
+            status_key (str): "anti_theft"
+            days (int): "3"
+        """
+        self.prune_status_in_data(user_data)
+        status = user_data.setdefault(self.status_key, {})
+        now = datetime.now()
+        extra = timedelta(days=days)
+        current = status.get(status_key) if isinstance(status.get(status_key), dict) else None
+        base = now
+        if current is not None:
+            expires = self.parse_time(current.get("expires_at"))
+            if expires is not None and expires > now:
+                base = expires
+        status[status_key] = {"expires_at": (base + extra).strftime("%Y-%m-%d %H:%M:%S")}
+
+    def add_charge_status(self, user_data: dict, status_key: str, amount: int) -> None:
+        """
+        疊加場數型效果。
+
+        Args:
+            user_data (dict): "{'item_status': {}}"
+            status_key (str): "blackjack_cheat"
+            amount (int): "20"
+        """
+        self.prune_status_in_data(user_data)
+        status = user_data.setdefault(self.status_key, {})
+        current = status.get(status_key) if isinstance(status.get(status_key), dict) else {}
+        remaining = int(current.get("remaining") or 0)
+        status[status_key] = {"remaining": remaining + amount}
+
+    def consume_charge_in_data(self, user_data: dict, status_key: str, amount: int = 1) -> bool:
+        """
+        消耗場數型效果。
+
+        Args:
+            user_data (dict): "{'item_status': {'blackjack_cheat': {'remaining': 20}}}"
+            status_key (str): "blackjack_cheat"
+            amount (int): "1"
+
+        Returns:
+            consumed (bool): "True"
+        """
+        remaining = self.charge_remaining_in_data(user_data, status_key)
+        if remaining <= 0:
+            return False
+        status = user_data.setdefault(self.status_key, {})
+        leftover = remaining - amount
+        if leftover <= 0:
+            status.pop(status_key, None)
+        else:
+            status[status_key] = {"remaining": leftover}
+        return True
+
+    def apply_win_cake_bonus(self, user_data: dict, profit: int) -> int:
+        """
+        依玉手鐲／紫水晶項鍊計算獲勝蛋糕加成。
+
+        Args:
+            user_data (dict): "{'item_status': {}}"
+            profit (int): "100"
+
+        Returns:
+            bonus (int): "20"
+        """
+        if profit <= 0:
+            return 0
+        stacks = 0
+        if self.has_status_in_data(user_data, self.status_amethyst):
+            stacks += 1
+        if self.charge_remaining_in_data(user_data, self.status_jade_bracelet) > 0:
+            stacks += 1
+        if stacks <= 0:
+            return 0
+        return int(profit * self.win_cake_bonus_rate * stacks)
+
+    def format_status_text(self, user_data: dict) -> str:
+        """
+        /info 狀態欄文字。
+
+        Args:
+            user_data (dict): "{'item_status': {}}"
+
+        Returns:
+            text (str): "防盜卡:剩餘 **72** 小時"
+        """
+        self.prune_status_in_data(user_data)
+        status = user_data.get(self.status_key)
+        if not isinstance(status, dict) or not status:
+            return ""
+        now = datetime.now()
+        lines = []
+        for key, entry in status.items():
+            if not isinstance(entry, dict):
+                continue
+            label = self.status_labels.get(key, key)
+            if "expires_at" in entry:
+                expires = self.parse_time(entry.get("expires_at"))
+                if expires is None:
+                    continue
+                lines.append(f"{label}:{self.remaining_hours_text(expires, now)}")
+                continue
+            remaining = int(entry.get("remaining") or 0)
+            if remaining > 0:
+                lines.append(f"{label}:剩餘 **{remaining}** 場")
+        return "\n".join(lines)
+
+    def format_win_bonus_line(self, bonus: int) -> str:
+        """
+        獲勝加成顯示。
+
+        Args:
+            bonus (int): "20"
+
+        Returns:
+            text (str): "\\n道具加成：**+20**塊<:cake:1>"
+        """
+        if bonus <= 0:
+            return ""
+        return f"\n道具加成：**+{bonus}**塊{common.cake_emoji}"
+
+    async def load_user(self, user_id: str) -> dict:
+        """
+        讀取使用者並清掉過期狀態。
+
+        Args:
+            user_id (str): "410847926236086272"
+
+        Returns:
+            user_data (dict): "{'cake': 0, 'item_bag': []}"
+        """
+        user_data = await common.mongo_storage.ensure_user_document(str(user_id))
+        self.normalize_bag(user_data)
+        if self.prune_status_in_data(user_data):
+            await common.mongo_storage.update_user_fields(str(user_id), {self.status_key: user_data.get(self.status_key, {})})
+        return user_data
+
+    async def save_bag_and_status(self, user_id: str, user_data: dict) -> None:
+        """
+        寫回背包與狀態。
+
+        Args:
+            user_id (str): "410847926236086272"
+            user_data (dict): "{'item_bag': [], 'item_status': {}}"
+        """
+        await common.mongo_storage.update_user_fields(
+            str(user_id),
+            {
+                self.bag_key: user_data.get(self.bag_key) or [None] * self.bag_size,
+                self.status_key: user_data.get(self.status_key) or {},
+            },
+        )
+
+    async def can_receive(self, user_id: str, item_id: str) -> bool:
+        """
+        此玩家背包能否再收下此道具。
+
+        Args:
+            user_id (str): "410847926236086272"
+            item_id (str): "milk"
+
+        Returns:
+            ok (bool): "True"
+        """
+        if item_id not in self.items:
+            return False
+        user_data = await self.load_user(user_id)
+        return self.can_receive_on_bag(self.normalize_bag(user_data), item_id)
+
+    async def count_item(self, user_id: str, item_id: str) -> int:
+        """
+        讀取持有數量。
+
+        Args:
+            user_id (str): "410847926236086272"
+            item_id (str): "milk"
+
+        Returns:
+            count (int): "2"
+        """
+        user_data = await self.load_user(user_id)
+        return self.count_item_on_bag(self.normalize_bag(user_data), item_id)
+
+    def put_items_on_bag(self, bag: list, item_id: str, quantity: int) -> bool:
+        """
+        把道具疊進背包。
+
+        Args:
+            bag (list): "[None]"
+            item_id (str): "milk"
+            quantity (int): "2"
+
+        Returns:
+            ok (bool): "True"
+        """
+        if quantity <= 0 or item_id not in self.items:
+            return False
+        for entry in bag:
+            if isinstance(entry, dict) and entry.get("item_id") == item_id:
+                entry["count"] = int(entry.get("count") or 0) + quantity
+                return True
+        empty_index = self.first_empty_index(bag)
+        if empty_index is None:
+            return False
+        bag[empty_index] = {"item_id": item_id, "count": quantity}
+        return True
+
+    def take_items_from_bag(self, bag: list, item_id: str, quantity: int) -> bool:
+        """
+        從背包扣掉道具。
+
+        Args:
+            bag (list): "[{'item_id': 'milk', 'count': 2}]"
+            item_id (str): "milk"
+            quantity (int): "1"
+
+        Returns:
+            ok (bool): "True"
+        """
+        if quantity <= 0:
+            return False
+        leftover = quantity
+        for index, entry in enumerate(bag):
+            if not isinstance(entry, dict) or entry.get("item_id") != item_id:
+                continue
+            have = int(entry.get("count") or 0)
+            if have <= leftover:
+                leftover -= have
+                bag[index] = None
+            else:
+                entry["count"] = have - leftover
+                leftover = 0
+            if leftover <= 0:
+                return True
+        return False
+
+    async def add_items(self, user_id: str, item_id: str, quantity: int) -> bool:
+        """
+        發放道具到背包。
+
+        Args:
+            user_id (str): "410847926236086272"
+            item_id (str): "milk"
+            quantity (int): "2"
+
+        Returns:
+            ok (bool): "True"
+        """
+        if item_id not in self.items or quantity <= 0:
+            return False
+        async with self.lock:
+            user_data = await self.load_user(user_id)
+            bag = self.normalize_bag(user_data)
+            if not self.put_items_on_bag(bag, item_id, quantity):
+                return False
+            await self.save_bag_and_status(user_id, user_data)
+            return True
+
+    async def remove_items(self, user_id: str, item_id: str, quantity: int) -> bool:
+        """
+        從背包移除道具。
+
+        Args:
+            user_id (str): "410847926236086272"
+            item_id (str): "milk"
+            quantity (int): "1"
+
+        Returns:
+            ok (bool): "True"
+        """
+        if item_id not in self.items or quantity <= 0:
+            return False
+        async with self.lock:
+            user_data = await self.load_user(user_id)
+            bag = self.normalize_bag(user_data)
+            if self.count_item_on_bag(bag, item_id) < quantity:
+                return False
+            if not self.take_items_from_bag(bag, item_id, quantity):
+                return False
+            await self.save_bag_and_status(user_id, user_data)
+            return True
+
+    async def build_bag_embed(self, user_id: str, page: int) -> Embed:
+        """
+        組出背包某一頁。
+
+        Args:
+            user_id (str): "410847926236086272"
+            page (int): "0"
+
+        Returns:
+            embed (Embed): Embed(...)
+        """
+        user_data = await self.load_user(user_id)
+        bag = self.normalize_bag(user_data)
+        max_page = (self.bag_size - 1) // self.bag_page_size
+        page = max(0, min(page, max_page))
+        start = page * self.bag_page_size
+        end = min(start + self.bag_page_size, self.bag_size)
+        used = len(self.occupied_indexes(bag))
+        embed = Embed(
+            title="Natalie 背包",
+            description=f"共 {self.bag_size} 格，已使用 **{used}** 格。第 **{page + 1}**／**{max_page + 1}** 頁。\n使用 `/bag 編號` 使用道具；需要對象時加上 `/bag 編號:@玩家`。",
+            color=common.bot_color,
+        )
+        for index in range(start, end):
+            entry = bag[index]
+            slot_label = index + 1
+            if not isinstance(entry, dict):
+                embed.add_field(name=f"[{slot_label}] （空）", value="—", inline=False)
+                continue
+            item_id = str(entry.get("item_id") or "")
+            count = int(entry.get("count") or 0)
+            embed.add_field(
+                name=f"[{slot_label}] {self.item_display_name(item_id)}  x{count}",
+                value=self.item_description(item_id),
+                inline=False,
+            )
+        return embed
+
+    def voice_members(self, member: discord.Member | None) -> list[discord.Member]:
+        """
+        語音房內的非機器人成員。
+
+        Args:
+            member (discord.Member | None): "某位玩家"
+
+        Returns:
+            members (list): "[Member(...)]"
+        """
+        if member is None:
+            return []
+        voice = getattr(member, "voice", None)
+        if voice is None or voice.channel is None:
+            return []
+        return [person for person in voice.channel.members if not person.bot]
+
+    async def transfer_cake(self, from_id: str, to_id: str, amount: int) -> int:
+        """
+        把蛋糕從一人轉到另一人，實際數量可能較少。
+
+        Args:
+            from_id (str): "1234"
+            to_id (str): "4108"
+            amount (int): "800"
+
+        Returns:
+            moved (int): "800"
+        """
+        if amount <= 0 or from_id == to_id:
+            return 0
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        victim = await common.mongo_storage.ensure_user_document(from_id)
+        take = min(amount, int(victim.get("cake", 0) or 0))
+        if take <= 0:
+            return 0
+        steal_result = await userdata_collection.find_one_and_update(
+            {"_id": from_id, "cake": {"$gte": take}},
+            {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -take}},
+            upsert=False,
+            return_document=common.ReturnDocument.AFTER,
+        )
+        if steal_result is None:
+            return 0
+        try:
+            await userdata_collection.update_one(
+                {"_id": to_id},
+                {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": take}},
+                upsert=True,
+            )
+        except Exception:
+            await userdata_collection.update_one(
+                {"_id": from_id},
+                {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": take}},
+                upsert=True,
+            )
+            raise
+        return take
+
+    def take_random_stack(self, bag: list) -> str | None:
+        """
+        從背包摧毀一個隨機堆疊。
+
+        Args:
+            bag (list): "[{'item_id': 'milk', 'count': 2}]"
+
+        Returns:
+            item_name (str | None): "牛奶 x2"
+        """
+        indexes = self.occupied_indexes(bag)
+        if not indexes:
+            return None
+        index = random.choice(indexes)
+        entry = bag[index]
+        item_id = str(entry.get("item_id") or "")
+        count = int(entry.get("count") or 0)
+        bag[index] = None
+        name = self.item_display_name(item_id)
+        return f"{name} x{count}" if count > 1 else name
+
+    async def use_slot(self, user_id: str, slot: int, target: discord.Member | None, actor: discord.Member) -> tuple[bool, str]:
+        """
+        使用背包某一格。
+
+        Args:
+            user_id (str): "410847926236086272"
+            slot (int): "1"
+            target (discord.Member | None): "要作用的玩家"
+            actor (discord.Member): "指令使用者"
+
+        Returns:
+            result (tuple): "(True, '使用成功')"
+        """
+        if slot < 1 or slot > self.bag_size:
+            return False, f"格子編號須為 **1**～**{self.bag_size}**。"
+        async with self.lock:
+            user_data = await self.load_user(user_id)
+            bag = self.normalize_bag(user_data)
+            entry = bag[slot - 1]
+            if not isinstance(entry, dict):
+                return False, "該格沒有物品。"
+            item_id = str(entry.get("item_id") or "")
+            item = self.items.get(item_id)
+            if item is None:
+                return False, "未知的道具，無法使用。"
+            need_target = bool(item.get("need_target"))
+            target_optional = bool(item.get("target_optional"))
+            if need_target and target is None and not target_optional:
+                return False, f"使用 **{item['name']}** 需要指定對象：`/bag {slot}:@玩家`"
+            if target is not None and target.bot:
+                return False, "不能對機器人使用道具。"
+            if item.get("voice_only"):
+                voice_people = self.voice_members(actor)
+                if actor not in voice_people:
+                    return False, f"**{item['name']}** 只能在語音房內使用。"
+            if int(entry.get("count") or 0) <= 0:
+                return False, "該格沒有物品。"
+            bag[slot - 1]["count"] = int(entry["count"]) - 1
+            if bag[slot - 1]["count"] <= 0:
+                bag[slot - 1] = None
+            ok, message = await self.apply_item_effect(item_id, item, user_id, user_data, target, actor)
+            if not ok:
+                return False, message
+            await self.save_bag_and_status(user_id, user_data)
+            return True, message
+
+    async def apply_item_effect(self, item_id: str, item: dict, user_id: str, user_data: dict, target: discord.Member | None, actor: discord.Member) -> tuple[bool, str]:
+        """
+        套用道具效果。呼叫端已預扣 1 個。
+
+        Args:
+            item_id (str): "milk"
+            item (dict): "{'use_kind': 'milk'}"
+            user_id (str): "410847926236086272"
+            user_data (dict): "{'item_status': {}}"
+            target (discord.Member | None): "對象"
+            actor (discord.Member): "使用者"
+
+        Returns:
+            result (tuple): "(True, '使用成功')"
+        """
+        use_kind = item.get("use_kind")
+        name = item["name"]
+        if use_kind == "self_status":
+            self.add_timed_status(user_data, item["status_key"], int(item["duration_days"]))
+            return True, f"使用了 **{name}**，效果已套用到自己身上。"
+        if use_kind == "self_charge":
+            self.add_charge_status(user_data, item["status_key"], int(item["charge_amount"]))
+            remaining = self.charge_remaining_in_data(user_data, item["status_key"])
+            return True, f"使用了 **{name}**，目前剩餘 **{remaining}** 場。"
+        if use_kind == "target_status":
+            target_member = target or actor
+            target_data = user_data if str(target_member.id) == user_id else await self.load_user(str(target_member.id))
+            self.add_timed_status(target_data, item["status_key"], int(item["duration_days"]))
+            if str(target_member.id) != user_id:
+                await self.save_bag_and_status(str(target_member.id), target_data)
+            who = "自己" if target_member.id == actor.id else f"<@{target_member.id}>"
+            return True, f"使用了 **{name}**，已賦予 {who} 遲緩效果。"
+        if use_kind == "slow_spray":
+            target_member = target or actor
+            affected = [target_member]
+            for person in self.voice_members(target_member):
+                if person.id not in {member.id for member in affected}:
+                    affected.append(person)
+            for person in affected:
+                person_data = user_data if str(person.id) == user_id else await self.load_user(str(person.id))
+                self.add_timed_status(person_data, self.status_slow, int(item["duration_days"]))
+                if str(person.id) != user_id:
+                    await self.save_bag_and_status(str(person.id), person_data)
+            mentions = "、".join(f"<@{person.id}>" for person in affected)
+            return True, f"使用了 **{name}**，已賦予 {mentions} 遲緩效果。"
+        if use_kind == "milk":
+            target_member = target or actor
+            target_data = user_data if str(target_member.id) == user_id else await self.load_user(str(target_member.id))
+            status = target_data.get(self.status_key) if isinstance(target_data.get(self.status_key), dict) else {}
+            kept = {}
+            for key in self.charge_effect_keys:
+                entry = status.get(key)
+                if isinstance(entry, dict):
+                    kept[key] = entry
+            target_data[self.status_key] = kept
+            if str(target_member.id) != user_id:
+                await self.save_bag_and_status(str(target_member.id), target_data)
+            who = "自己" if target_member.id == actor.id else f"<@{target_member.id}>"
+            return True, f"使用了 **{name}**，已清除 {who} 的所有狀態。"
+        if use_kind == "magnet":
+            low, high = item["steal_range"]
+            others = [person for person in self.voice_members(actor) if person.id != actor.id]
+            if not others:
+                self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
+                return False, f"**{name}** 需要語音房裡還有其他玩家。"
+            lines = []
+            total = 0
+            for person in others:
+                taken = await self.transfer_cake(str(person.id), user_id, random.randint(low, high))
+                if taken <= 0:
+                    continue
+                total += taken
+                lines.append(f"<@{person.id}> **{taken}**塊{common.cake_emoji}")
+            if total <= 0:
+                return True, f"使用了 **{name}**，但語音房裡的人身上都沒有蛋糕。"
+            detail = "\n".join(lines)
+            return True, f"使用了 **{name}**，從語音房吸來 **{total}**塊{common.cake_emoji}：\n{detail}"
+        if use_kind == "heaven_punish":
+            if target is None:
+                self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
+                return False, f"使用 **{name}** 需要指定對象：`/bag 編號:@玩家`"
+            if str(target.id) == user_id:
+                destroyed = self.take_random_stack(self.normalize_bag(user_data))
+                if destroyed is None:
+                    return True, f"使用了 **{name}**，但你的背包已經沒有其他道具。"
+                return True, f"使用了 **{name}**，摧毀了自己的 **{destroyed}**。"
+            victim_data = await self.load_user(str(target.id))
+            if self.has_status_in_data(victim_data, self.status_lightning_rod):
+                destroyed = self.take_random_stack(self.normalize_bag(user_data))
+                if destroyed is None:
+                    return True, f"使用了 **{name}**，被 <@{target.id}> 的避雷針反彈，但你的背包是空的。"
+                return True, f"使用了 **{name}**，被 <@{target.id}> 的避雷針反彈，摧毀了你的 **{destroyed}**。"
+            destroyed = self.take_random_stack(self.normalize_bag(victim_data))
+            if destroyed is None:
+                self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
+                return False, f"<@{target.id}> 的背包是空的，天罰沒有東西可以摧毀。"
+            await self.save_bag_and_status(str(target.id), victim_data)
+            return True, f"使用了 **{name}**，摧毀了 <@{target.id}> 的 **{destroyed}**。"
+        self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
+        return False, "這個道具目前無法使用。"
+
+
+class BagPageView(discord.ui.View):
+    """背包上一頁／下一頁。"""
+
+    def __init__(self, house: ServerItemHouse, owner_id: int, page: int):
+        super().__init__(timeout=180.0)
+        self.house = house
+        self.owner_id = owner_id
+        self.page = page
+        self.max_page = (house.bag_size - 1) // house.bag_page_size
+        self.prev_button.disabled = page <= 0
+        self.next_button.disabled = page >= self.max_page
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        if interaction.user.id == self.owner_id:
+            return True
+        await interaction.response.send_message(embed=Embed(title="Natalie 背包", description="只能翻自己的背包頁面。", color=common.bot_error_color), ephemeral=True)
+        return False
+
+    async def show_page(self, interaction: discord.Interaction, page: int) -> None:
+        """
+        切換背包頁並更新按鈕。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+            page (int): "1"
+        """
+        self.page = max(0, min(page, self.max_page))
+        self.prev_button.disabled = self.page <= 0
+        self.next_button.disabled = self.page >= self.max_page
+        embed = await self.house.build_bag_embed(str(self.owner_id), self.page)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+    @discord.ui.button(label="上一頁", style=discord.ButtonStyle.secondary)
+    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.show_page(interaction, self.page - 1)
+
+    @discord.ui.button(label="下一頁", style=discord.ButtonStyle.secondary)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.show_page(interaction, self.page + 1)
+
+
 class General(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
@@ -137,6 +1102,8 @@ class General(commands.Cog):
             "可以選擇是否隱藏自己的語音頻道足跡（`/hide_voice_trace`）",
             "別人無法掠奪你的蛋糕"
         ]
+        self.server_item_house = ServerItemHouse(client)
+        client.server_item_house = self.server_item_house
 
     @staticmethod
     def compute_red_packet_amounts(total: int, people: int) -> list[int]:
@@ -156,7 +1123,7 @@ class General(commands.Cog):
     @app_commands.command(name = "info", description = "關於Natalie...")
     async def info(self,interaction):
         userid = str(interaction.user.id)
-        user_data = await common.mongo_storage.ensure_user_document(userid)
+        user_data = await self.server_item_house.load_user(userid)
         cake = int(user_data.get("cake", 0))
 
         userlevel = await common.LevelSystem().read_info(userid)
@@ -167,7 +1134,8 @@ class General(commands.Cog):
             f"/cake_give 給予他人{cake_emoji}",
             "/red_packet 發紅包(蛋糕)",
             "/robbery 掠奪別人的蛋糕",
-            "/shop 商店"
+            "/shop 商店",
+            "/bag 查看或使用背包道具",
         ]
         game_commands_list = [
             "/mining_info 挖礦小遊戲資訊",
@@ -201,6 +1169,9 @@ class General(commands.Cog):
         ]
 
         message.add_field(name="個人資料",value=f"等級:**{userlevel.level}**  經驗值:**{userlevel.level_exp}**/**{userlevel.level_next_exp}**\n你有**{cake}**塊{cake_emoji}",inline=False)
+        status_text = self.server_item_house.format_status_text(user_data)
+        if status_text:
+            message.add_field(name="狀態", value=status_text, inline=False)
         message.add_field(name="蛋糕", value="\n".join(cake_commands_list), inline=False)
         message.add_field(name="遊戲", value="\n".join(game_commands_list), inline=False)
         message.add_field(name="外觀", value="\n".join(appearance_commands_list), inline=False)
@@ -442,6 +1413,84 @@ class General(commands.Cog):
         cake_emoji = common.cake_emoji
         await interaction.response.send_message(embed=Embed(title="為用戶增加蛋糕",description=f"<@{member.id}>資料變更...\n原始{cake_emoji}:**{cake_before}**\n增加了**{amount}**塊{cake_emoji}\n現在有**{cake_after}**塊{cake_emoji}",color=common.bot_color))
 
+    async def serveritem_autocomplete(self, interaction: discord.Interaction, current: str):
+        """
+        伺服器道具名稱選單。
+
+        Args:
+            interaction (discord.Interaction): "指令互動"
+            current (str): "防"
+
+        Returns:
+            choices (list): "[Choice(name='防盜卡(3天)', value='anti_theft_3')]"
+        """
+        keyword = current.lower()
+        choices = []
+        for item_id, item in self.server_item_house.items.items():
+            name = item["name"]
+            if keyword and keyword not in name.lower() and keyword not in item_id.lower():
+                continue
+            choices.append(app_commands.Choice(name=name, value=item_id))
+            if len(choices) >= 25:
+                break
+        return choices
+
+    @app_commands.command(name="bag", description="查看或使用背包道具")
+    @app_commands.describe(index="要使用的欄位編號（1～99），留空則只查看", member="需要指定對象的道具")
+    @app_commands.rename(index="編號", member="對象")
+    async def bag(self, interaction: discord.Interaction, index: Optional[int] = None, member: Optional[discord.Member] = None):
+        """
+        查看背包或使用指定格子的道具。
+
+        Args:
+            interaction (discord.Interaction): "指令互動"
+            index (int | None): "1"
+            member (discord.Member | None): "要作用的玩家"
+        """
+        userid = str(interaction.user.id)
+        house = self.server_item_house
+        if index is not None:
+            ok, description = await house.use_slot(userid, index, member, interaction.user)
+            color = common.bot_color if ok else common.bot_error_color
+            await interaction.response.send_message(embed=Embed(title="Natalie 背包", description=description, color=color))
+            return
+        user_data = await house.load_user(userid)
+        hidden = house.has_status_in_data(user_data, house.status_camo_bag)
+        embed = await house.build_bag_embed(userid, 0)
+        await interaction.response.send_message(embed=embed, view=BagPageView(house, interaction.user.id, 0), ephemeral=hidden)
+
+    @app_commands.command(name="serveritem_add", description="給予玩家伺服器道具（僅擁有者）")
+    @app_commands.describe(member="要給予的玩家", item="要加入的道具", quantity="數量")
+    @app_commands.rename(member="用戶", item="東西", quantity="數量")
+    @app_commands.autocomplete(item=serveritem_autocomplete)
+    async def serveritem_add(self, interaction: discord.Interaction, member: discord.Member, item: str, quantity: int):
+        """
+        把伺服器道具放入指定玩家背包。
+
+        Args:
+            interaction (discord.Interaction): "指令互動"
+            member (discord.Member): "要給予的玩家"
+            item (str): "anti_theft_3"
+            quantity (int): "1"
+        """
+        if interaction.user.id != common.bot_owner_id:
+            await interaction.response.send_message(embed=Embed(title="給予伺服器道具", description="權限不足。", color=common.bot_error_color))
+            return
+        house = self.server_item_house
+        if item not in house.items:
+            await interaction.response.send_message(embed=Embed(title="給予伺服器道具", description="找不到這個道具。", color=common.bot_error_color))
+            return
+        if quantity <= 0:
+            await interaction.response.send_message(embed=Embed(title="給予伺服器道具", description="數量必須為正整數。", color=common.bot_error_color))
+            return
+        if not await house.add_items(str(member.id), item, quantity):
+            await interaction.response.send_message(embed=Embed(title="給予伺服器道具", description=f"<@{member.id}> 的背包已滿，無法放入 **{house.item_display_name(item)}**。", color=common.bot_error_color))
+            return
+        await interaction.response.send_message(embed=Embed(
+            title="給予伺服器道具",
+            description=f"已把 **{house.item_display_name(item)} x{quantity}** 放入 <@{member.id}> 的背包。",
+            color=common.bot_color,
+        ))
 
     @app_commands.command(name = "giveaway_join", description = "加入抽獎頻道")
     async def giveaway_join(self,interaction):

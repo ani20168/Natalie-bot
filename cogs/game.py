@@ -1153,7 +1153,69 @@ class BlackJack(commands.Cog):
             win_rate = (data[userid]['blackjack_win_rate'] + data[userid]['blackjack_tie'] * 0.5)/data[userid]['blackjack_round']
             return f"你的勝率:{win_rate:.1%} 總場數:{data[userid]['blackjack_round']}"
 
+    def apply_item_win_bonus(self, data: dict, userid: str, profit: int) -> str:
+        """
+        套用玉手鐲／紫水晶項鍊的獲勝蛋糕加成。
 
+        Args:
+            data (dict): "{'4108': {'cake': 100}}"
+            userid (str): "4108"
+            profit (int): "100"
+
+        Returns:
+            text (str): "\\n道具加成：**+20**塊<:cake:1>"
+        """
+        house = getattr(self.bot, "server_item_house", None)
+        if house is None or profit <= 0:
+            return ""
+        bonus = house.apply_win_cake_bonus(data[userid], profit)
+        data[userid]["cake"] += bonus
+        return house.format_win_bonus_line(bonus)
+
+    def consume_game_item_charges(self, user_data: dict) -> None:
+        """
+        一場遊戲結束時消耗玉手鐲次數。
+
+        Args:
+            user_data (dict): "{'item_status': {}}"
+        """
+        house = getattr(self.bot, "server_item_house", None)
+        if house is None:
+            return
+        house.consume_charge_in_data(user_data, house.status_jade_bracelet)
+
+    def consume_blackjack_cheat_peek(self, user_data: dict, playing_deck: list) -> str | None:
+        """
+        若有21點作弊卡，偷看牌堆下一張並消耗一次。
+
+        Args:
+            user_data (dict): "{'item_status': {}}"
+            playing_deck (list): "[{'7': 7}]"
+
+        Returns:
+            peek_text (str | None): "下一張牌：**7**"
+        """
+        house = getattr(self.bot, "server_item_house", None)
+        if house is None or not playing_deck:
+            return None
+        if house.charge_remaining_in_data(user_data, house.status_blackjack_cheat) <= 0:
+            return None
+        peek_card = playing_deck[-1]
+        house.consume_charge_in_data(user_data, house.status_blackjack_cheat)
+        leftover = house.charge_remaining_in_data(user_data, house.status_blackjack_cheat)
+        return f"下一張牌：**{self.show_cards([peek_card])}**（作弊卡剩餘 **{leftover}** 場）"
+
+    async def send_blackjack_peek(self, interaction, peek_text: str | None) -> None:
+        """
+        用只有自己看得到的訊息顯示第五張牌。
+
+        Args:
+            interaction (discord.Interaction): "指令互動"
+            peek_text (str | None): "下一張牌：**7**"
+        """
+        if not peek_text:
+            return
+        await interaction.followup.send(embed=Embed(title="21點作弊卡", description=peek_text, color=common.bot_color), ephemeral=True)
 
     @app_commands.command(name = "blackjack", description = "21點!")
     @app_commands.describe(
@@ -1249,6 +1311,7 @@ class BlackJack(commands.Cog):
             self.deal_card(self, playing_deck, bot_cards)
             self.deal_card(self, playing_deck, player_cards)
             self.deal_card(self, playing_deck, bot_cards)
+            peek_text = self.consume_blackjack_cheat_peek(data[userid], playing_deck)
             #隱藏莊家的第二張牌(蓋牌)
             display_bot_cards = f"{list(bot_cards[0].keys())[0]}、?"
             display_bot_points = f"{sum(bot_cards[0].values())} + ?"
@@ -1263,8 +1326,10 @@ class BlackJack(commands.Cog):
                     label = self.side_bet_labels[pattern]
                     side_return = side_bet_amount * (1 + mult)
                     data[userid]["cake"] += bet * 2 + side_return
+                    bonus_text = self.apply_item_win_bonus(data, userid, bet + side_bet_amount * mult)
                     data[userid]["blackjack_win_rate"] += 1
                     data[userid]["blackjack_round"] += 1
+                    self.consume_game_item_charges(data[userid])
                     await common.mongo_storage.replace_user(userid, data[userid])
                     if len(player_cards) == 2 and self.calculate_point(player_cards) == 21:
                         await report_quest_event(self.bot, userid, "blackjack")
@@ -1274,24 +1339,28 @@ class BlackJack(commands.Cog):
                             f"**例牌邊注命中！**\n"
                             f"牌型: **{label}**\n"
                             f"你獲得了**{bet * 2}**塊{cake_emoji}(主注)\n"
-                            f"你獲得了**{side_return}**塊{cake_emoji}（邊注×{mult}）\n"
+                            f"你獲得了**{side_return}**塊{cake_emoji}（邊注×{mult}）{bonus_text}\n"
                             f"你現在有**{data[userid]['cake']}**塊{cake_emoji}"
                         ),
                         inline=False,
                     )
                     message.set_footer(text=await self.win_rate_show(userid))
                     await interaction.followup.send(embed=message)
+                    await self.send_blackjack_peek(interaction, peek_text)
                     return
             #玩家如果是blackjack(持有兩張牌且點數剛好為21)
             if self.calculate_point(player_cards) == 21:
                 data[userid]['cake'] += int(bet + (bet*1.5))
-                message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{int(bet*1.5)}**塊{cake_emoji}(blackjack! x 1.5){BlackJack.side_bet_loss_line(side_bet_amount, cake_emoji)}\n你現在有**{data[userid]['cake']}**塊{cake_emoji}",inline=False)
+                bonus_text = self.apply_item_win_bonus(data, userid, int(bet * 1.5))
+                message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{int(bet*1.5)}**塊{cake_emoji}(blackjack! x 1.5){BlackJack.side_bet_loss_line(side_bet_amount, cake_emoji)}{bonus_text}\n你現在有**{data[userid]['cake']}**塊{cake_emoji}",inline=False)
                 data[userid]["blackjack_win_rate"] += 1
                 data[userid]["blackjack_round"] += 1
+                self.consume_game_item_charges(data[userid])
                 await common.mongo_storage.replace_user(userid, data[userid])
                 await report_quest_event(self.bot, userid, "blackjack")
                 message.set_footer(text=await self.win_rate_show(userid))
                 await interaction.followup.send(embed=message)
+                await self.send_blackjack_peek(interaction, peek_text)
                 return
             
             data[userid]["blackjack_playing"] = True
@@ -1302,6 +1371,7 @@ class BlackJack(commands.Cog):
         message.set_footer(text=await self.win_rate_show(userid))
         cake_after_bet = data[userid]['cake']
         await interaction.followup.send(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards,cake_after_bet=cake_after_bet,side_bet_amount=side_bet_amount,cake_emoji=cake_emoji))
+        await self.send_blackjack_peek(interaction, peek_text)
 
 
     @app_commands.command(name = "blackjack_leaderboard", description = "21點勝率排行榜")
@@ -1497,13 +1567,15 @@ class BlackJackButton(discord.ui.View):
                 self.insurance_button.disabled = True
                 data[userid]["blackjack_playing"] = False
                 data[userid]["blackjack_round"] += 1
+                BlackJack(self.bot).consume_game_item_charges(data[userid])
                 self.stop()
             #過五關
             elif len(self.player_cards) >= 5:
                 data[userid]['cake'] += int(self.bet + (self.bet*3))
+                bonus_text = BlackJack(self.bot).apply_item_win_bonus(data, userid, int(self.bet * 3))
                 data[userid]["blackjack_win_rate"] += 1
                 insurance_text = self.resolve_insurance_payout(data, userid, BlackJack(self.bot).dealer_natural_blackjack(self.bot_cards))
-                message.add_field(name="結果",value=f"**過五關!**\n你獲得了**{int(self.bet*3)}**塊{self.cake_emoji}(過五關 x 3.0){BlackJack.side_bet_loss_line(self.side_bet_amount, self.cake_emoji)}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+                message.add_field(name="結果",value=f"**過五關!**\n你獲得了**{int(self.bet*3)}**塊{self.cake_emoji}(過五關 x 3.0){BlackJack.side_bet_loss_line(self.side_bet_amount, self.cake_emoji)}{bonus_text}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
                 if insurance_text is not None:
                     message.add_field(name="保險", value=insurance_text, inline=False)
                 self.hit_button.disabled = True
@@ -1511,6 +1583,7 @@ class BlackJackButton(discord.ui.View):
                 self.insurance_button.disabled = True
                 data[userid]["blackjack_playing"] = False
                 data[userid]["blackjack_round"] += 1
+                BlackJack(self.bot).consume_game_item_charges(data[userid])
                 self.stop()
 
 
@@ -1549,8 +1622,10 @@ class BlackJackButton(discord.ui.View):
             bot_pts = BlackJack(self.bot).calculate_point(self.bot_cards)
             player_pts = BlackJack(self.bot).calculate_point(self.player_cards)
             #莊家爆牌或者莊家點數比玩家小
+            bonus_text = ""
             if bot_pts > 21 or (bot_pts < player_pts):
                 data[userid]['cake'] += self.bet * 2
+                bonus_text = BlackJack(self.bot).apply_item_win_bonus(data, userid, self.bet)
                 data[userid]["blackjack_win_rate"] += 1
             #莊家的牌比玩家大
             elif (bot_pts > player_pts) and bot_pts <= 21:
@@ -1563,7 +1638,7 @@ class BlackJackButton(discord.ui.View):
             insurance_text = self.resolve_insurance_payout(data, userid, dealer_natural)
 
             if bot_pts > 21 or (bot_pts < player_pts):
-                message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}{BlackJack.side_bet_loss_line(self.side_bet_amount, self.cake_emoji)}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+                message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}{BlackJack.side_bet_loss_line(self.side_bet_amount, self.cake_emoji)}{bonus_text}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
             elif (bot_pts > player_pts) and bot_pts <= 21:
                 message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet}**塊{self.cake_emoji}{BlackJack.side_bet_loss_line(self.side_bet_amount, self.cake_emoji)}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
             elif (bot_pts == player_pts) and bot_pts <= 21:
@@ -1572,6 +1647,7 @@ class BlackJackButton(discord.ui.View):
             if insurance_text is not None:
                 message.add_field(name="保險", value=insurance_text, inline=False)
             data[userid]["blackjack_playing"] = False
+            BlackJack(self.bot).consume_game_item_charges(data[userid])
             await common.mongo_storage.replace_user(userid, data[userid])
         message.set_footer(text=await BlackJack(self.bot).win_rate_show(userid, data))
         await interaction.response.edit_message(embed=message,view=self)
@@ -1625,6 +1701,7 @@ class BlackJackButton(discord.ui.View):
                         message.add_field(name="保險", value=insurance_text, inline=False)
                     self.insurance_button.disabled = True
                     data[userid]["blackjack_playing"] = False
+                    BlackJack(self.bot).consume_game_item_charges(data[userid])
                     await common.mongo_storage.replace_user(userid, data[userid])
                 else:
                     #莊家點數未達17點的話，則加牌直到點數>=17點
@@ -1637,8 +1714,10 @@ class BlackJackButton(discord.ui.View):
                     bot_pts = BlackJack(self.bot).calculate_point(self.bot_cards)
                     player_pts = BlackJack(self.bot).calculate_point(self.player_cards)
                     #莊家爆牌或者莊家點數比玩家小
+                    bonus_text = ""
                     if bot_pts > 21 or (bot_pts < player_pts):
                         data[userid]['cake'] += self.bet * 4
+                        bonus_text = BlackJack(self.bot).apply_item_win_bonus(data, userid, self.bet * 2)
                         data[userid]["blackjack_win_rate"] += 1
                     #莊家的牌比玩家大
                     elif (bot_pts > player_pts) and bot_pts <= 21:
@@ -1651,7 +1730,7 @@ class BlackJackButton(discord.ui.View):
                     insurance_text = self.resolve_insurance_payout(data, userid, dealer_natural)
 
                     if bot_pts > 21 or (bot_pts < player_pts):
-                        message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}{BlackJack.side_bet_loss_line(self.side_bet_amount, self.cake_emoji)}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
+                        message.add_field(name="結果",value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}{BlackJack.side_bet_loss_line(self.side_bet_amount, self.cake_emoji)}{bonus_text}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
                     elif (bot_pts > player_pts) and bot_pts <= 21:
                         message.add_field(name="結果",value=f"你輸了!\n你失去了**{self.bet*2}**塊{self.cake_emoji}{BlackJack.side_bet_loss_line(self.side_bet_amount, self.cake_emoji)}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",inline=False)
                     elif (bot_pts == player_pts) and bot_pts <= 21:
@@ -1661,6 +1740,7 @@ class BlackJackButton(discord.ui.View):
                         message.add_field(name="保險", value=insurance_text, inline=False)
                     self.insurance_button.disabled = True
                     data[userid]["blackjack_playing"] = False
+                    BlackJack(self.bot).consume_game_item_charges(data[userid])
                     await common.mongo_storage.replace_user(userid, data[userid])
         if cake_insufficient:
             await interaction.response.edit_message(view=self)
@@ -1948,6 +2028,37 @@ class PokerGame(commands.Cog):
         ) / data["poker_round"]
         return f"你的勝率:{win_rate:.1%} 總場數:{data['poker_round']}"
 
+    def apply_item_win_bonus(self, data: dict, userid: str, profit: int) -> str:
+        """
+        套用玉手鐲／紫水晶項鍊的獲勝蛋糕加成。
+
+        Args:
+            data (dict): "{'4108': {'cake': 100}}"
+            userid (str): "4108"
+            profit (int): "100"
+
+        Returns:
+            text (str): "\\n道具加成：**+20**塊<:cake:1>"
+        """
+        house = getattr(self.bot, "server_item_house", None)
+        if house is None or profit <= 0:
+            return ""
+        bonus = house.apply_win_cake_bonus(data[userid], profit)
+        data[userid]["cake"] += bonus
+        return house.format_win_bonus_line(bonus)
+
+    def consume_game_item_charges(self, user_data: dict) -> None:
+        """
+        一場遊戲結束時消耗玉手鐲次數。
+
+        Args:
+            user_data (dict): "{'item_status': {}}"
+        """
+        house = getattr(self.bot, "server_item_house", None)
+        if house is None:
+            return
+        house.consume_charge_in_data(user_data, house.status_jade_bracelet)
+
     @app_commands.command(name="poker", description="撲克牌比大小")
     @app_commands.describe(bet="要下多少賭注?(支援all、half以及輸入蛋糕數量，最多下注100000)")
     @app_commands.rename(bet="賭注")
@@ -2204,16 +2315,18 @@ class PokerButton(discord.ui.View):
             data[userid]["poker_win_rate"] += 1
             if double:
                 data[userid]["cake"] += self.bet * 4
+                bonus_text = PokerGame(self.bot).apply_item_win_bonus(data, userid, self.bet * 2)
                 message.add_field(
                     name="結果",
-                    value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
+                    value=f"你贏了!\n你獲得了**{self.bet*2}**塊{self.cake_emoji}{bonus_text}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
                     inline=False,
                 )
             else:
                 data[userid]["cake"] += self.bet * 2
+                bonus_text = PokerGame(self.bot).apply_item_win_bonus(data, userid, self.bet)
                 message.add_field(
                     name="結果",
-                    value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
+                    value=f"你贏了!\n你獲得了**{self.bet}**塊{self.cake_emoji}{bonus_text}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
                     inline=False,
                 )
         elif player_order < bot_order or (
@@ -2238,6 +2351,7 @@ class PokerButton(discord.ui.View):
             )
 
         data[userid]["poker_playing"] = False
+        PokerGame(self.bot).consume_game_item_charges(data[userid])
         await common.mongo_storage.replace_user(userid, data[userid])
         message.set_footer(text=await PokerGame(self.bot).win_rate_show(userid))
         return message
@@ -2297,6 +2411,7 @@ class PokerButton(discord.ui.View):
                 data[userid]["poker_fold"] = 0
             data[userid]["poker_fold"] += 1
             data[userid]["poker_playing"] = False
+            PokerGame(self.bot).consume_game_item_charges(data[userid])
             await common.mongo_storage.replace_user(userid, data[userid])
         self.double_button.disabled = True
         self.reveal_button.disabled = True
@@ -2371,6 +2486,37 @@ class SquidRPS(commands.Cog):
             return f"你的勝率:未知 總場數:{round_count}"
         win_rate = win / round_count
         return f"你的勝率:{win_rate:.1%} 總場數:{round_count}"
+
+    def apply_item_win_bonus(self, data: dict, userid: str, profit: int) -> str:
+        """
+        套用玉手鐲／紫水晶項鍊的獲勝蛋糕加成。
+
+        Args:
+            data (dict): "{'4108': {'cake': 100}}"
+            userid (str): "4108"
+            profit (int): "100"
+
+        Returns:
+            text (str): "\\n道具加成：**+20**塊<:cake:1>"
+        """
+        house = getattr(self.bot, "server_item_house", None)
+        if house is None or profit <= 0:
+            return ""
+        bonus = house.apply_win_cake_bonus(data[userid], profit)
+        data[userid]["cake"] += bonus
+        return house.format_win_bonus_line(bonus)
+
+    def consume_game_item_charges(self, user_data: dict) -> None:
+        """
+        一場遊戲結束時消耗玉手鐲次數。
+
+        Args:
+            user_data (dict): "{'item_status': {}}"
+        """
+        house = getattr(self.bot, "server_item_house", None)
+        if house is None:
+            return
+        house.consume_charge_in_data(user_data, house.status_jade_bracelet)
 
     def rps_result(self, a: str, b: str) -> int:
         if a == b:
@@ -2828,19 +2974,21 @@ class SquidRPSView(discord.ui.View):
                         reward = self.bet * (4 if self.difficulty == "hard" else 2)
                         gain = reward - self.bet
                         data[userid]["cake"] += reward
+                        bonus_text = SquidRPS(self.bot).apply_item_win_bonus(data, userid, gain)
                         data[userid]["squid_playing"] = False
                         stats = await SquidRPS(self.bot)._ensure_stats(data, userid)
                         stats[self.difficulty]["win"] += 1
                         stats[self.difficulty]["round"] += 1
+                        SquidRPS(self.bot).consume_game_item_charges(data[userid])
                         embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                         embed.add_field(name="難度", value=self.difficulty, inline=False)
                         if self.difficulty == "hard":
                             embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
                         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
                         if self.difficulty == "normal":
-                            result_message = f"你獲得了**{gain}**塊{self.cake_emoji}\n"
+                            result_message = f"你獲得了**{gain}**塊{self.cake_emoji}{bonus_text}\n"
                         elif self.difficulty == "hard":
-                            result_message = f"你獲得了**{gain}**塊{self.cake_emoji} (hard * 3)\n"
+                            result_message = f"你獲得了**{gain}**塊{self.cake_emoji} (hard * 3){bonus_text}\n"
                         result_message += f"你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}"
                         embed.add_field(
                             name="結果",
@@ -2898,6 +3046,7 @@ class SquidRPSView(discord.ui.View):
                     data[userid]["squid_playing"] = False
                     stats = await SquidRPS(self.bot)._ensure_stats(data, userid)
                     stats[self.difficulty]["round"] += 1
+                    SquidRPS(self.bot).consume_game_item_charges(data[userid])
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                     embed.add_field(name="難度", value=self.difficulty, inline=False)
                     if self.difficulty == "hard":

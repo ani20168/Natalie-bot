@@ -31,6 +31,7 @@ class ShopHouse:
         self.kind_mining_collection = "mining_collection"
         self.kind_animation_color = "animation_color_pass"
         self.kind_skill_pickaxe = "skill_pickaxe"
+        self.kind_server_item = "server_item"
         self.product_animation_color_id = "server_item:animation_color"
         self.product_animation_color_name = "動態顏色身份組使用權"
         self.grant_animation_color_id = "animation_color"
@@ -389,13 +390,75 @@ class ShopHouse:
             },
         }
 
+    def build_server_item_product(self, item_id: str, item: dict, sort_order: int) -> dict:
+        """
+        組出伺服器道具商品文件。
+
+        Args:
+            item_id (str): "anti_theft_3"
+            item (dict): "{'name': '防盜卡(3天)'}"
+            sort_order (int): "1"
+
+        Returns:
+            product (dict): "{'product_id': 'server_item:anti_theft_3'}"
+        """
+        product_id = f"{self.kind_server_item}:{item_id}"
+        return {
+            "_id": product_id,
+            "product_id": product_id,
+            "category": self.category_server,
+            "name": item.get("name") or item_id,
+            "description": item.get("description") or "",
+            "kind": self.kind_server_item,
+            "payload": {"item_id": item_id},
+            "sort_order": sort_order,
+            "flags": {
+                "sell_owner_only": False,
+                "unlimited_stock": False,
+            },
+        }
+
+    def server_item_id_of(self, product: dict) -> str:
+        """
+        取出伺服器道具 ID。
+
+        Args:
+            product (dict): "{'payload': {'item_id': 'milk'}}"
+
+        Returns:
+            item_id (str): "milk"
+        """
+        payload = product.get("payload") if isinstance(product.get("payload"), dict) else {}
+        item_id = payload.get("item_id")
+        if item_id:
+            return str(item_id)
+        product_id = str(product.get("product_id") or "")
+        prefix = f"{self.kind_server_item}:"
+        if product_id.startswith(prefix):
+            return product_id[len(prefix):]
+        return ""
+
+    def server_item_house(self):
+        """
+        取得背包系統。
+
+        Returns:
+            house (ServerItemHouse | None): "ServerItemHouse(...)"
+        """
+        return getattr(self.bot, "server_item_house", None)
+
     async def ensure_catalog(self):
         """補齊初版商品，既有描述不覆蓋。"""
         collection = common.mongo_storage.get_collection("shop_product")
         seeds = [self.build_animation_color_product()]
+        item_house = self.server_item_house()
+        sort_order = 1
+        if item_house is not None:
+            for item_id, item in item_house.items.items():
+                seeds.append(self.build_server_item_product(item_id, item, sort_order))
+                sort_order += 1
         mining_cog = self.bot.get_cog("MiningGame")
         if mining_cog is not None:
-            sort_order = 1
             for item_list in mining_cog.collection_list.values():
                 for collection_name in item_list:
                     seeds.append(self.build_mining_product(collection_name, sort_order))
@@ -900,6 +963,11 @@ class ShopHouse:
             return await self.get_collection_count(user_id, self.collection_name_of(product))
         if product.get("kind") == self.kind_skill_pickaxe:
             return await self.count_skill_pickaxes(user_id, self.skill_pickaxe_template_of(product))
+        if product.get("kind") == self.kind_server_item:
+            item_house = self.server_item_house()
+            if item_house is None:
+                return 0
+            return await item_house.count_item(user_id, self.server_item_id_of(product))
         return 0
 
     async def reserve_item(self, user_id: str, product: dict, quantity: int) -> bool:
@@ -919,6 +987,11 @@ class ShopHouse:
             return True
         if product.get("kind") == self.kind_mining_collection:
             return await self.change_collection(user_id, self.collection_name_of(product), -quantity)
+        if product.get("kind") == self.kind_server_item:
+            item_house = self.server_item_house()
+            if item_house is None:
+                return False
+            return await item_house.remove_items(user_id, self.server_item_id_of(product), quantity)
         return False
 
     async def release_item(self, user_id: str, product: dict, quantity: int) -> bool:
@@ -938,6 +1011,11 @@ class ShopHouse:
             return True
         if product.get("kind") == self.kind_mining_collection:
             return await self.change_collection(user_id, self.collection_name_of(product), quantity)
+        if product.get("kind") == self.kind_server_item:
+            item_house = self.server_item_house()
+            if item_house is None:
+                return False
+            return await item_house.add_items(user_id, self.server_item_id_of(product), quantity)
         return False
 
     async def deliver_item(self, user_id: str, product: dict, quantity: int) -> bool:
@@ -957,6 +1035,11 @@ class ShopHouse:
         if product.get("kind") == self.kind_animation_color:
             await self.grant_animation_color(user_id)
             return True
+        if product.get("kind") == self.kind_server_item:
+            item_house = self.server_item_house()
+            if item_house is None:
+                return False
+            return await item_house.add_items(user_id, self.server_item_id_of(product), quantity)
         return False
 
     async def spend_cake(self, user_id: str, amount: int) -> bool:
@@ -1096,12 +1179,15 @@ class ShopHouse:
         """
         need_mining = False
         need_animation = False
+        need_server_item = False
         for product in products:
             kind = product.get("kind")
             if kind in (self.kind_mining_collection, self.kind_skill_pickaxe):
                 need_mining = True
             if kind == self.kind_animation_color:
                 need_animation = True
+            if kind == self.kind_server_item:
+                need_server_item = True
         mining_cog = None
         user_mining = None
         if need_mining:
@@ -1112,6 +1198,11 @@ class ShopHouse:
                 mining_cog = None
                 user_mining = None
         owns_animation = await self.already_owns_animation_color(user_id) if need_animation else False
+        item_house = self.server_item_house() if need_server_item else None
+        server_bag = None
+        if item_house is not None:
+            server_user = await item_house.load_user(user_id)
+            server_bag = item_house.normalize_bag(server_user)
         owned_map = {}
         for product in products:
             product_id = product["product_id"]
@@ -1133,6 +1224,9 @@ class ShopHouse:
                     if mining_cog.is_skill_pickaxe_entry(entry) and str(entry.get("template") or "") == template:
                         count += 1
                 owned_map[product_id] = count
+                continue
+            if product.get("kind") == self.kind_server_item and item_house is not None:
+                owned_map[product_id] = item_house.count_item_on_bag(server_bag or [], self.server_item_id_of(product))
                 continue
             owned_map[product_id] = 0
         return owned_map
@@ -1320,6 +1414,10 @@ class ShopHouse:
                 reserved_cake = parsed_price * parsed_quantity
                 if not await self.has_empty_pickaxe_slot(user_id):
                     return {"ok": False, "error": "挖礦背包沒有空位，無法求購"}
+            if product.get("kind") == self.kind_server_item:
+                item_house = self.server_item_house()
+                if item_house is None or not await item_house.can_receive(user_id, self.server_item_id_of(product)):
+                    return {"ok": False, "error": "背包已滿，無法求購"}
             stats = await self.market_stats(product_id)
             if stats["lowest_sell_price"] is not None and parsed_price >= stats["lowest_sell_price"]:
                 return {"ok": False, "error": "求購價必須低於目前最便宜的賣單，不然直接購買即可"}
@@ -1590,6 +1688,8 @@ class ShopHouse:
                 buyer_extra.append("已放入挖礦背包。")
             elif product.get("kind") == self.kind_animation_color:
                 buyer_extra.append("已獲得動態顏色身份組使用權。")
+            elif product.get("kind") == self.kind_server_item:
+                buyer_extra.append("已放入背包。")
             buyer_text = (
                 f"{buyer_lead}\n\n"
                 f"商品：**{product_name}**\n"
@@ -1732,6 +1832,10 @@ class ShopHouse:
                     return {"ok": False, "error": "這筆賣單缺少礦鎬資料"}
                 if not await self.has_empty_pickaxe_slot(buyer_id):
                     return {"ok": False, "error": "挖礦背包沒有空位，無法購買"}
+            if product.get("kind") == self.kind_server_item:
+                item_house = self.server_item_house()
+                if item_house is None or not await item_house.can_receive(buyer_id, self.server_item_id_of(product)):
+                    return {"ok": False, "error": "背包已滿，無法購買"}
             unit_price = int(order.get("price") or 0)
             total = unit_price * fill_quantity
             if not await self.spend_cake(buyer_id, total):
@@ -1744,7 +1848,13 @@ class ShopHouse:
                     delivered = await self.deliver_item(buyer_id, product, fill_quantity)
                 if not delivered:
                     await self.add_cake(buyer_id, total)
-                    return {"ok": False, "error": "發放商品失敗" if product.get("kind") != self.kind_skill_pickaxe else "挖礦背包沒有空位，無法購買"}
+                    if product.get("kind") == self.kind_skill_pickaxe:
+                        deliver_error = "挖礦背包沒有空位，無法購買"
+                    elif product.get("kind") == self.kind_server_item:
+                        deliver_error = "背包已滿，無法購買"
+                    else:
+                        deliver_error = "發放商品失敗"
+                    return {"ok": False, "error": deliver_error}
                 seller_gain, fee, fee_percent = await self.settle_trade_cake(seller_id, total)
                 await self.close_or_reduce_order(order, fill_quantity)
                 await self.write_history(
@@ -1859,7 +1969,7 @@ class ShopHouse:
                     await self.return_skill_pickaxe(seller_id, item_instance)
                     return {"ok": False, "error": "對方挖礦背包沒有空位，無法成交"}
                 await self.release_item(seller_id, product, fill_quantity)
-                return {"ok": False, "error": "發放商品失敗"}
+                return {"ok": False, "error": "對方背包已滿，無法成交" if product.get("kind") == self.kind_server_item else "發放商品失敗"}
             seller_gain, fee, fee_percent = await self.settle_trade_cake(seller_id, total)
             await self.close_or_reduce_order(target, fill_quantity, {"reserved_cake": reserved_cake - total})
             await self.write_history(
