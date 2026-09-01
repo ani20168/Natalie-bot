@@ -166,7 +166,8 @@ class General(commands.Cog):
             f"/eat 餵食Natalie一些{cake_emoji} (1 cake = 1 exp)",
             f"/cake_give 給予他人{cake_emoji}",
             "/red_packet 發紅包(蛋糕)",
-            "/robbery 掠奪別人的蛋糕"
+            "/robbery 掠奪別人的蛋糕",
+            "/shop 商店"
         ]
         game_commands_list = [
             "/mining_info 挖礦小遊戲資訊",
