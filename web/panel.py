@@ -588,7 +588,11 @@ class WebPanel:
             return RedirectResponse(url="/panel", status_code=302)
         context["title"] = "商店"
         context["active_nav"] = "shop"
-        context["fee_percent_text"] = await self.shop_fee_percent_text()
+        house = getattr(self.bot, "shop_house", None)
+        if house is None:
+            context["fee_percent_text"] = "0"
+        else:
+            context["fee_percent_text"] = house.format_fee_percent(await house.fee_percent_for_user(context["user_id"]))
         return self.templates.TemplateResponse(request, "shop.html", context)
 
     async def shop_history_page(self, request: Request):
@@ -629,20 +633,16 @@ class WebPanel:
             return RedirectResponse(url="/shop", status_code=302)
         context["title"] = "商店後台管理"
         context["active_nav"] = "shop"
-        context["fee_percent_text"] = await self.shop_fee_percent_text()
-        return self.templates.TemplateResponse(request, "shop_admin.html", context)
-
-    async def shop_fee_percent_text(self) -> str:
-        """
-        目前商店手續費顯示文字。
-
-        Returns:
-            text (str): "5"
-        """
         house = getattr(self.bot, "shop_house", None)
         if house is None:
-            return "0"
-        return house.format_fee_percent(await house.get_fee_percent())
+            context.update({
+                "fee_percent_text": "0",
+                "vip_fee_percent_text": "0",
+                "svip_fee_percent_text": "0",
+            })
+        else:
+            context.update(house.fee_settings_public(await house.get_fee_settings()))
+        return self.templates.TemplateResponse(request, "shop_admin.html", context)
 
     async def shop_api_context(self, request: Request, next_path: str = "/shop"):
         """
@@ -936,7 +936,7 @@ class WebPanel:
 
     async def shop_fee_update(self, request: Request):
         """
-        更新商店手續費百分比。
+        更新一般／VIP／至寶商店手續費百分比。
 
         Args:
             request (Request): FastAPI request
@@ -951,10 +951,12 @@ class WebPanel:
             return JSONResponse({"ok": False, "error": "你沒有商店後台管理的權限"}, status_code=403)
         try:
             body = await request.json()
-            value = body.get("fee_percent")
+            fee_percent = body.get("fee_percent")
+            vip_fee_percent = body.get("vip_fee_percent")
+            svip_fee_percent = body.get("svip_fee_percent")
         except Exception:
             return JSONResponse({"ok": False, "error": "手續費資料格式錯誤"}, status_code=400)
-        result = await house.set_fee_percent(value)
+        result = await house.set_fee_settings(fee_percent, vip_fee_percent, svip_fee_percent)
         return JSONResponse(result)
 
     async def auction_socket(self, websocket: WebSocket):

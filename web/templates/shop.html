@@ -123,6 +123,14 @@
       return '<img class="cake-icon" src="/static/cake.png" alt="蛋糕">';
     }
 
+    function formatTime(isoText) {
+      var date = new Date(isoText);
+      if (isNaN(date.getTime())) return "";
+      var pad = function (value) { return String(value).padStart(2, "0"); };
+      return date.getFullYear() + "/" + pad(date.getMonth() + 1) + "/" + pad(date.getDate()) +
+        " " + pad(date.getHours()) + ":" + pad(date.getMinutes());
+    }
+
     function formatServerText(value) {
       return String(value).split(/<:cake:\d+>/).map(escapeHtml).join(cakeIcon());
     }
@@ -356,6 +364,7 @@
         return (
           '<div class="shop-row shop-row-history">' +
             "<div>" + escapeHtml(item.seller_name) + " → " + escapeHtml(item.buyer_name) + "</div>" +
+            '<div class="shop-row-time">' + formatTime(item.created_at) + "</div>" +
             "<div>" + item.price + cakeIcon() + " × " + item.quantity + "</div>" +
           "</div>"
         );

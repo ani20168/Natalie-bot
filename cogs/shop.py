@@ -45,7 +45,7 @@ class ShopHouse:
         self.default_fee_percent = 0.0
         self.fee_percent_min = 0.0
         self.fee_percent_max = 100.0
-        self.fee_percent_cache = None
+        self.fee_settings_cache = None
         self.history_limit = 80
         self.product_history_limit = 20
 
@@ -133,6 +133,64 @@ class ShopHouse:
             raise ValueError("手續費超出範圍")
         return percent
 
+    def clamp_fee_percent(self, value, fallback: float) -> float:
+        """
+        把讀到的手續費限制在合法範圍。
+
+        Args:
+            value: "5"
+            fallback (float): "0.0"
+
+        Returns:
+            percent (float): "5.0"
+        """
+        try:
+            percent = round(float(value), 1)
+        except (TypeError, ValueError):
+            percent = fallback
+        return max(self.fee_percent_min, min(self.fee_percent_max, percent))
+
+    def fee_settings_public(self, settings: dict) -> dict:
+        """
+        後台手續費顯示資料。
+
+        Args:
+            settings (dict): "{'fee_percent': 5.0}"
+
+        Returns:
+            payload (dict): "{'fee_percent_text': '5'}"
+        """
+        return {
+            "fee_percent": settings["fee_percent"],
+            "vip_fee_percent": settings["vip_fee_percent"],
+            "svip_fee_percent": settings["svip_fee_percent"],
+            "fee_percent_text": self.format_fee_percent(settings["fee_percent"]),
+            "vip_fee_percent_text": self.format_fee_percent(settings["vip_fee_percent"]),
+            "svip_fee_percent_text": self.format_fee_percent(settings["svip_fee_percent"]),
+        }
+
+    def fee_percent_for_member(self, settings: dict, user_id: int | str) -> float:
+        """
+        依使用者身分組套用最低手續費。
+
+        Args:
+            settings (dict): "{'fee_percent': 5.0}"
+            user_id (int | str): "410847926236086272"
+
+        Returns:
+            percent (float): "3.0"
+        """
+        percents = [settings["fee_percent"]]
+        guild = self.bot.get_guild(common.fake_sister_server_id)
+        member = guild.get_member(int(user_id)) if guild is not None else None
+        if member is not None:
+            role_ids = {role.id for role in member.roles}
+            if common.vip_role_id in role_ids:
+                percents.append(settings["vip_fee_percent"])
+            if common.super_vip_id in role_ids:
+                percents.append(settings["svip_fee_percent"])
+        return min(percents)
+
     def fee_amount(self, total: int, fee_percent: float) -> int:
         """
         依成交總額計算手續費蛋糕。
@@ -153,55 +211,78 @@ class ShopHouse:
             return total
         return fee
 
-    async def get_fee_percent(self) -> float:
+    async def get_fee_settings(self) -> dict:
         """
-        讀取目前商店手續費百分比。
+        讀取一般／VIP／至寶手續費百分比。
 
         Returns:
-            percent (float): "5.0"
+            settings (dict): "{'fee_percent': 5.0, 'vip_fee_percent': 3.0, 'svip_fee_percent': 1.0}"
         """
-        if self.fee_percent_cache is not None:
-            return self.fee_percent_cache
+        if self.fee_settings_cache is not None:
+            return self.fee_settings_cache
         collection = common.mongo_storage.get_collection("shop_settings")
-        document = await collection.find_one({"_id": self.settings_document_id})
-        percent = self.default_fee_percent
-        if document is not None:
-            try:
-                percent = float(document.get("fee_percent", self.default_fee_percent))
-            except (TypeError, ValueError):
-                percent = self.default_fee_percent
-        percent = max(self.fee_percent_min, min(self.fee_percent_max, percent))
-        self.fee_percent_cache = percent
-        return percent
+        document = await collection.find_one({"_id": self.settings_document_id}) or {}
+        general = self.clamp_fee_percent(document.get("fee_percent"), self.default_fee_percent)
+        settings = {
+            "fee_percent": general,
+            "vip_fee_percent": self.clamp_fee_percent(document["vip_fee_percent"], general) if "vip_fee_percent" in document else general,
+            "svip_fee_percent": self.clamp_fee_percent(document["svip_fee_percent"], general) if "svip_fee_percent" in document else general,
+        }
+        self.fee_settings_cache = settings
+        return settings
 
-    async def set_fee_percent(self, value) -> dict:
+    async def fee_percent_for_user(self, user_id: int | str) -> float:
         """
-        儲存商店手續費百分比。
+        讀取該使用者目前套用的手續費百分比。
 
         Args:
-            value: "5"
+            user_id (int | str): "410847926236086272"
+
+        Returns:
+            percent (float): "3.0"
+        """
+        settings = await self.get_fee_settings()
+        return self.fee_percent_for_member(settings, user_id)
+
+    async def set_fee_settings(self, fee_percent, vip_fee_percent, svip_fee_percent) -> dict:
+        """
+        儲存一般／VIP／至寶手續費百分比。
+
+        Args:
+            fee_percent: "5"
+            vip_fee_percent: "3"
+            svip_fee_percent: "1"
 
         Returns:
             result (dict): "{'ok': True, 'fee_percent': 5.0}"
         """
         try:
-            percent = self.parse_fee_percent(value)
+            general = self.parse_fee_percent(fee_percent)
+            vip = self.parse_fee_percent(vip_fee_percent)
+            svip = self.parse_fee_percent(svip_fee_percent)
         except (TypeError, ValueError):
             min_text = self.format_fee_percent(self.fee_percent_min)
             max_text = self.format_fee_percent(self.fee_percent_max)
             return {"ok": False, "error": f"手續費必須是 {min_text}～{max_text} 之間的數字"}
+        settings = {
+            "fee_percent": general,
+            "vip_fee_percent": vip,
+            "svip_fee_percent": svip,
+        }
         collection = common.mongo_storage.get_collection("shop_settings")
         await collection.replace_one(
             {"_id": self.settings_document_id},
-            {"_id": self.settings_document_id, "fee_percent": percent},
+            {"_id": self.settings_document_id, **settings},
             upsert=True,
         )
-        self.fee_percent_cache = percent
-        return {"ok": True, "fee_percent": percent, "fee_percent_text": self.format_fee_percent(percent)}
+        self.fee_settings_cache = settings
+        result = {"ok": True}
+        result.update(self.fee_settings_public(settings))
+        return result
 
     async def settle_trade_cake(self, seller_id: str, total: int) -> tuple[int, int, float]:
         """
-        成交後把蛋糕給賣家，並依手續費抽成給機器人。
+        成交後把蛋糕給賣家，並依賣家身分手續費抽成給機器人。
 
         Args:
             seller_id (str): "4108"
@@ -210,7 +291,7 @@ class ShopHouse:
         Returns:
             result (tuple): "(950, 50, 5.0)"
         """
-        fee_percent = await self.get_fee_percent()
+        fee_percent = await self.fee_percent_for_user(seller_id)
         fee = self.fee_amount(total, fee_percent)
         seller_gain = total - fee
         if seller_gain > 0:
