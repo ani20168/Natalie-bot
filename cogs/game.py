@@ -141,20 +141,20 @@ class MiningGame(commands.Cog):
     def roll_disaster_pickaxe_skills(self) -> dict:
         """災禍鎬：各技能獨立骰是否取得，並骰出數值／旗標寫入 dict。"""
         skills = {}
-        # 增加 1%～40% 獲得額外礦物機率（30% 獨立骰是否取得）
-        if random.random() < 0.30:
-            skills["bonus_chance_add"] = random.randint(1, 40) / 100.0
-        # 觸發額外礦 bonus 時，額外數量再 +1～3（30%）
-        if random.random() < 0.30:
-            skills["bonus_extra_on_proc"] = random.randint(1, 3)
-        # 減少 1～3 秒挖掘等待（20%）
-        if random.random() < 0.2:
-            skills["dig_time_reduce_sec"] = random.randint(1, 3)
-        # 額外礦 bonus 必為該礦場最高價值礦物（20%）
+        # 增加 1%～40% 獲得額外礦物機率（20% 獨立骰是否取得）
         if random.random() < 0.20:
+            skills["bonus_chance_add"] = random.randint(1, 40) / 100.0
+        # 觸發額外礦 bonus 時，額外數量再 +1～3（20%）
+        if random.random() < 0.20:
+            skills["bonus_extra_on_proc"] = random.randint(1, 3)
+        # 減少 1～3 秒挖掘等待（15%）
+        if random.random() < 0.15:
+            skills["dig_time_reduce_sec"] = random.randint(1, 3)
+        # 額外礦 bonus 必為該礦場最高價值礦物（15%）
+        if random.random() < 0.15:
             skills["bonus_force_highest_value"] = True
-        # 每次挖礦有 50% 機率不扣耐久（40% 獨立骰是否擁有此效果）
-        if random.random() < 0.40:
+        # 每次挖礦有 50% 機率不扣耐久（30% 獨立骰是否擁有此效果）
+        if random.random() < 0.30:
             skills["durability_half_skip"] = True
         return skills
 
@@ -162,26 +162,26 @@ class MiningGame(commands.Cog):
     def roll_anchor_pickaxe_skills(self) -> dict:
         """附魔迷你船錨：各技能獨立骰是否取得，並骰出數值／旗標寫入 dict。"""
         skills = {}
-        # 增加 20%～100% 獲得額外礦物機率（40%）
-        if random.random() < 0.40:
+        # 增加 20%～100% 獲得額外礦物機率（30%）
+        if random.random() < 0.30:
             skills["bonus_chance_add"] = random.randint(20, 100) / 100.0
-        # 觸發額外礦 bonus 時額外數量（40% 取得）；內層 70% 為 +1～3、30% 為 +4～8
-        if random.random() < 0.4:
+        # 觸發額外礦 bonus 時額外數量（30% 取得）；內層 70% 為 +1～3、30% 為 +4～8
+        if random.random() < 0.30:
             if random.random() < 0.70:
                 skills["bonus_extra_on_proc"] = random.randint(1, 3)
             else:
                 skills["bonus_extra_on_proc"] = random.randint(4, 8)
-        # 減少挖掘等待（30% 取得）；內層 70% 為 1～3 秒、30% 為 4～7 秒
-        if random.random() < 0.3:
+        # 減少挖掘等待（15% 取得）；內層 70% 為 1～3 秒、30% 為 4～7 秒
+        if random.random() < 0.15:
             if random.random() < 0.70:
                 skills["dig_time_reduce_sec"] = random.randint(1, 3)
             else:
                 skills["dig_time_reduce_sec"] = random.randint(4, 7)
-        # 額外礦 bonus 必為該礦場最高價值礦物（30%）
-        if random.random() < 0.30:
+        # 額外礦 bonus 必為該礦場最高價值礦物（20%）
+        if random.random() < 0.20:
             skills["bonus_force_highest_value"] = True
         # 增加收藏品機率（10% 取得）；內層 70% 為 1%～5%、20% 為 6%～10%、10% 為 11%～15%
-        if random.random() < 0.1:
+        if random.random() < 0.10:
             tier = random.random()
             if tier < 0.70:
                 skills["collection_chance_add"] = random.randint(1, 5) / 100.0
@@ -189,8 +189,8 @@ class MiningGame(commands.Cog):
                 skills["collection_chance_add"] = random.randint(6, 10) / 100.0
             else:
                 skills["collection_chance_add"] = random.randint(11, 15) / 100.0
-        # 每次挖礦有 50% 機率不扣耐久（60%）
-        if random.random() < 0.60:
+        # 每次挖礦有 50% 機率不扣耐久（40%）
+        if random.random() < 0.40:
             skills["durability_half_skip"] = True
         return skills
 
