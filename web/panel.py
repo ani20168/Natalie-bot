@@ -376,6 +376,8 @@ class WebPanel:
             return reject
         context["title"] = "偽造妹妹伺服器互動面板"
         context["active_nav"] = "home"
+        item_house = getattr(self.bot, "server_item_house", None)
+        context["item_guides"] = item_house.panel_item_guides() if item_house is not None else []
         return self.templates.TemplateResponse(request, "panel.html", context)
 
     async def auction_page(self, request: Request):

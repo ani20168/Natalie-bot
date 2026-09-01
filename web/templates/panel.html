@@ -1,5 +1,24 @@
 {% extends "app_layout.html" %}
 {% block main %}
 <h2>歡迎回來，{{ username }}</h2>
-<p>從左側選單進入商店或拍賣所，即可買賣商品與查看競標。</p>
+<p class="home-lead">從左側選單進入商店或拍賣所，即可買賣商品與查看競標。<br>伺服器道具用 <code>/bag</code> 查看或使用；狀態可用牛奶清除，21點作弊卡與玉手鐲不是狀態。</p>
+
+<section class="home-guide">
+  <h3>伺服器道具說明</h3>
+  {% if item_guides %}
+  <div class="home-guide-grid">
+    {% for item in item_guides %}
+    <article class="home-guide-card">
+      <div class="home-guide-head">
+        <h4>{{ item.name }}</h4>
+        <span class="home-guide-kind">{{ item.kind_label }}</span>
+      </div>
+      <p>{{ item.description }}</p>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p>道具說明載入中，請稍後再重新整理頁面。</p>
+  {% endif %}
+</section>
 {% endblock %}

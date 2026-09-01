@@ -214,6 +214,29 @@ class ServerItemHouse:
             },
         }
 
+    def panel_item_guides(self) -> list[dict]:
+        """
+        互動面板首頁用的道具說明。
+
+        Returns:
+            guides (list): "[{'name': '防盜卡(3天)', 'kind_label': '狀態 3天'}]"
+        """
+        guides = []
+        for item in self.items.values():
+            duration_days = int(item.get("duration_days") or 0)
+            if duration_days > 0:
+                kind_label = f"狀態 {duration_days}天"
+            elif item.get("use_kind") == "self_charge":
+                kind_label = f"{int(item.get('charge_amount') or 0)}場"
+            else:
+                kind_label = "一次性"
+            guides.append({
+                "name": item["name"],
+                "description": item["description"],
+                "kind_label": kind_label,
+            })
+        return guides
+
     def parse_time(self, raw) -> datetime | None:
         """
         解析狀態到期時間。

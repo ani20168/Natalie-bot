@@ -267,6 +267,68 @@ a {
   color: var(--text-muted);
 }
 
+.home-lead {
+  margin-bottom: 28px;
+  line-height: 1.7;
+}
+
+.home-lead code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 0.9em;
+}
+
+.home-guide h3 {
+  margin: 0 0 14px;
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+.home-guide-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.home-guide-card {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+}
+
+.home-guide-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.home-guide-card h4 {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.home-guide-kind {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-dim);
+  color: var(--accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.home-guide-card p {
+  line-height: 1.6;
+  font-size: 0.88rem;
+}
+
 .dialog-backdrop {
   position: fixed;
   inset: 0;
@@ -1255,6 +1317,10 @@ a {
 
   .content {
     padding: 18px 14px;
+  }
+
+  .home-guide-grid {
+    grid-template-columns: 1fr;
   }
 
   .shop-page-head,
