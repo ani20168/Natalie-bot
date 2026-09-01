@@ -66,6 +66,7 @@ class ServerItemHouse:
         self.lock = asyncio.Lock()
         self.bag_key = "item_bag"
         self.status_key = "item_status"
+        self.charge_key = "item_charges"
         self.bag_size = 99
         self.bag_page_size = 10
         self.win_cake_bonus_rate = 0.2
@@ -362,7 +363,7 @@ class ServerItemHouse:
 
     def prune_status_in_data(self, user_data: dict) -> bool:
         """
-        清掉過期或用盡的狀態。
+        清掉過期狀態，並把場數效果從狀態裡搬出去。
 
         Args:
             user_data (dict): "{'item_status': {}}"
@@ -373,23 +374,32 @@ class ServerItemHouse:
         status = user_data.get(self.status_key)
         if not isinstance(status, dict):
             user_data[self.status_key] = {}
-            return False
+            status = user_data[self.status_key]
+        charges = user_data.get(self.charge_key)
+        if not isinstance(charges, dict):
+            user_data[self.charge_key] = {}
+            charges = user_data[self.charge_key]
         now = datetime.now()
         changed = False
+        for key in list(self.charge_effect_keys):
+            if key not in status:
+                continue
+            charges[key] = status.pop(key)
+            changed = True
         for key in list(status.keys()):
             entry = status[key]
             if not isinstance(entry, dict):
                 del status[key]
                 changed = True
                 continue
-            if "expires_at" in entry:
-                expires = self.parse_time(entry.get("expires_at"))
-                if expires is None or expires <= now:
-                    del status[key]
-                    changed = True
-                continue
-            if int(entry.get("remaining") or 0) <= 0:
+            expires = self.parse_time(entry.get("expires_at"))
+            if expires is None or expires <= now:
                 del status[key]
+                changed = True
+        for key in list(charges.keys()):
+            entry = charges[key]
+            if not isinstance(entry, dict) or int(entry.get("remaining") or 0) <= 0:
+                del charges[key]
                 changed = True
         return changed
 
@@ -408,22 +418,22 @@ class ServerItemHouse:
         status = user_data.get(self.status_key)
         return isinstance(status, dict) and status_key in status
 
-    def charge_remaining_in_data(self, user_data: dict, status_key: str) -> int:
+    def charge_remaining_in_data(self, user_data: dict, charge_key: str) -> int:
         """
         剩餘場數。
 
         Args:
-            user_data (dict): "{'item_status': {'jade_bracelet': {'remaining': 50}}}"
-            status_key (str): "jade_bracelet"
+            user_data (dict): "{'item_charges': {'jade_bracelet': {'remaining': 50}}}"
+            charge_key (str): "jade_bracelet"
 
         Returns:
             remaining (int): "50"
         """
         self.prune_status_in_data(user_data)
-        status = user_data.get(self.status_key)
-        if not isinstance(status, dict):
+        charges = user_data.get(self.charge_key)
+        if not isinstance(charges, dict):
             return 0
-        entry = status.get(status_key)
+        entry = charges.get(charge_key)
         if not isinstance(entry, dict):
             return 0
         return max(0, int(entry.get("remaining") or 0))
@@ -449,42 +459,42 @@ class ServerItemHouse:
                 base = expires
         status[status_key] = {"expires_at": (base + extra).strftime("%Y-%m-%d %H:%M:%S")}
 
-    def add_charge_status(self, user_data: dict, status_key: str, amount: int) -> None:
+    def add_charge_status(self, user_data: dict, charge_key: str, amount: int) -> None:
         """
-        疊加場數型效果。
+        疊加場數效果，不寫入狀態。
 
         Args:
-            user_data (dict): "{'item_status': {}}"
-            status_key (str): "blackjack_cheat"
+            user_data (dict): "{'item_charges': {}}"
+            charge_key (str): "blackjack_cheat"
             amount (int): "20"
         """
         self.prune_status_in_data(user_data)
-        status = user_data.setdefault(self.status_key, {})
-        current = status.get(status_key) if isinstance(status.get(status_key), dict) else {}
+        charges = user_data.setdefault(self.charge_key, {})
+        current = charges.get(charge_key) if isinstance(charges.get(charge_key), dict) else {}
         remaining = int(current.get("remaining") or 0)
-        status[status_key] = {"remaining": remaining + amount}
+        charges[charge_key] = {"remaining": remaining + amount}
 
-    def consume_charge_in_data(self, user_data: dict, status_key: str, amount: int = 1) -> bool:
+    def consume_charge_in_data(self, user_data: dict, charge_key: str, amount: int = 1) -> bool:
         """
-        消耗場數型效果。
+        消耗場數效果。
 
         Args:
-            user_data (dict): "{'item_status': {'blackjack_cheat': {'remaining': 20}}}"
-            status_key (str): "blackjack_cheat"
+            user_data (dict): "{'item_charges': {'blackjack_cheat': {'remaining': 20}}}"
+            charge_key (str): "blackjack_cheat"
             amount (int): "1"
 
         Returns:
             consumed (bool): "True"
         """
-        remaining = self.charge_remaining_in_data(user_data, status_key)
+        remaining = self.charge_remaining_in_data(user_data, charge_key)
         if remaining <= 0:
             return False
-        status = user_data.setdefault(self.status_key, {})
+        charges = user_data.setdefault(self.charge_key, {})
         leftover = remaining - amount
         if leftover <= 0:
-            status.pop(status_key, None)
+            charges.pop(charge_key, None)
         else:
-            status[status_key] = {"remaining": leftover}
+            charges[charge_key] = {"remaining": leftover}
         return True
 
     def apply_win_cake_bonus(self, user_data: dict, profit: int) -> int:
@@ -526,18 +536,13 @@ class ServerItemHouse:
         now = datetime.now()
         lines = []
         for key, entry in status.items():
-            if not isinstance(entry, dict):
+            if key in self.charge_effect_keys or not isinstance(entry, dict):
+                continue
+            expires = self.parse_time(entry.get("expires_at"))
+            if expires is None:
                 continue
             label = self.status_labels.get(key, key)
-            if "expires_at" in entry:
-                expires = self.parse_time(entry.get("expires_at"))
-                if expires is None:
-                    continue
-                lines.append(f"{label}:{self.remaining_hours_text(expires, now)}")
-                continue
-            remaining = int(entry.get("remaining") or 0)
-            if remaining > 0:
-                lines.append(f"{label}:剩餘 **{remaining}** 場")
+            lines.append(f"{label}:{self.remaining_hours_text(expires, now)}")
         return "\n".join(lines)
 
     def format_win_bonus_line(self, bonus: int) -> str:
@@ -567,7 +572,13 @@ class ServerItemHouse:
         user_data = await common.mongo_storage.ensure_user_document(str(user_id))
         self.normalize_bag(user_data)
         if self.prune_status_in_data(user_data):
-            await common.mongo_storage.update_user_fields(str(user_id), {self.status_key: user_data.get(self.status_key, {})})
+            await common.mongo_storage.update_user_fields(
+                str(user_id),
+                {
+                    self.status_key: user_data.get(self.status_key, {}),
+                    self.charge_key: user_data.get(self.charge_key, {}),
+                },
+            )
         return user_data
 
     async def save_bag_and_status(self, user_id: str, user_data: dict) -> None:
@@ -583,6 +594,7 @@ class ServerItemHouse:
             {
                 self.bag_key: user_data.get(self.bag_key) or [None] * self.bag_size,
                 self.status_key: user_data.get(self.status_key) or {},
+                self.charge_key: user_data.get(self.charge_key) or {},
             },
         )
 
@@ -928,13 +940,7 @@ class ServerItemHouse:
         if use_kind == "milk":
             target_member = target or actor
             target_data = user_data if str(target_member.id) == user_id else await self.load_user(str(target_member.id))
-            status = target_data.get(self.status_key) if isinstance(target_data.get(self.status_key), dict) else {}
-            kept = {}
-            for key in self.charge_effect_keys:
-                entry = status.get(key)
-                if isinstance(entry, dict):
-                    kept[key] = entry
-            target_data[self.status_key] = kept
+            target_data[self.status_key] = {}
             if str(target_member.id) != user_id:
                 await self.save_bag_and_status(str(target_member.id), target_data)
             who = "自己" if target_member.id == actor.id else f"<@{target_member.id}>"
