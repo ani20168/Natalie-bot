@@ -880,6 +880,29 @@ a {
   line-height: 1.5;
 }
 
+.shop-card-owned {
+  margin: 6px 0 0;
+  color: var(--accent);
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.shop-card-owned.is-zero {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.shop-products.is-grid .shop-card-owned {
+  margin-top: 0;
+  font-size: 0.92rem;
+}
+
+.shop-products.is-list .shop-card-owned {
+  margin: 0 0 8px;
+  font-size: 1.05rem;
+}
+
 .shop-products.is-list .shop-card-stats {
   margin-top: 10px;
   color: var(--text);
@@ -1269,6 +1292,10 @@ a {
   .shop-products.is-list .shop-card-stats {
     margin-top: 8px;
     font-size: 1rem;
+  }
+
+  .shop-products.is-list .shop-card-owned {
+    font-size: 0.98rem;
   }
 
   .shop-row-history {

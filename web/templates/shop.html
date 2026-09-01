@@ -298,6 +298,13 @@
       return '<p class="shop-card-meta">' + label + " " + value + cakeIcon() + "</p>";
     }
 
+    function ownedLine(product) {
+      var label = product && product.owned_label;
+      if (label === undefined || label === null || label === "") return "";
+      var extra = product.owned === 0 ? " is-zero" : "";
+      return '<p class="shop-card-owned' + extra + '">持有 ' + escapeHtml(String(label)) + "</p>";
+    }
+
     function applyCatalogView() {
       productBox.classList.toggle("is-list", catalogView === "list");
       productBox.classList.toggle("is-grid", catalogView !== "list");
@@ -323,11 +330,13 @@
       var isList = catalogView === "list";
       productBox.innerHTML = products.map(function (product) {
         var stats = '<p class="shop-card-stats">賣單 ' + product.sell_count + "　求購 " + product.buy_count + "</p>";
+        var owned = ownedLine(product);
         if (isList) {
           return (
             '<button type="button" class="shop-product-card" data-product="' + escapeHtml(product.product_id) + '">' +
               '<span class="shop-product-left">' +
                 "<h4>" + escapeHtml(product.name) + "</h4>" +
+                owned +
                 '<span class="shop-product-desc">' + escapeHtml(productDescription(product)) + "</span>" +
               "</span>" +
               '<span class="shop-product-right">' +
@@ -342,6 +351,7 @@
           '<button type="button" class="shop-product-card" data-product="' + escapeHtml(product.product_id) + '">' +
             '<span class="shop-product-left">' +
               "<h4>" + escapeHtml(product.name) + "</h4>" +
+              owned +
               stats +
             "</span>" +
             '<span class="shop-product-right">' +

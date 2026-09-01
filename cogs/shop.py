@@ -49,6 +49,7 @@ class ShopHouse:
         self.fee_settings_cache = None
         self.history_limit = 80
         self.product_history_limit = 20
+        self.trade_dm_title = "Natalie 商店"
 
     def page_url(self) -> str:
         """
@@ -1082,12 +1083,67 @@ class ShopHouse:
         """
         return [{"key": key, "label": label} for key, label in self.category_labels.items()]
 
-    async def list_products(self, category: str) -> list[dict]:
+    async def catalog_owned_map(self, user_id: str, products: list[dict]) -> dict:
         """
-        列出分類商品與市況摘要。
+        一次讀出檢視者對各商品的持有數。無限庫存為 None；動態顏色改為 0／1。
+
+        Args:
+            user_id (str): "410847926236086272"
+            products (list): "[{'kind': 'mining_collection'}]"
+
+        Returns:
+            owned_map (dict): "{'mining_collection:昆蟲化石': 2}"
+        """
+        need_mining = False
+        need_animation = False
+        for product in products:
+            kind = product.get("kind")
+            if kind in (self.kind_mining_collection, self.kind_skill_pickaxe):
+                need_mining = True
+            if kind == self.kind_animation_color:
+                need_animation = True
+        mining_cog = None
+        user_mining = None
+        if need_mining:
+            try:
+                mining_cog, mining_data = await self.load_mining_bag_state(user_id)
+                user_mining = mining_data[str(user_id)]
+            except ValueError:
+                mining_cog = None
+                user_mining = None
+        owns_animation = await self.already_owns_animation_color(user_id) if need_animation else False
+        owned_map = {}
+        for product in products:
+            product_id = product["product_id"]
+            flags = product.get("flags") if isinstance(product.get("flags"), dict) else {}
+            if product.get("kind") == self.kind_animation_color:
+                owned_map[product_id] = 1 if owns_animation else 0
+                continue
+            if flags.get("unlimited_stock"):
+                owned_map[product_id] = None
+                continue
+            if product.get("kind") == self.kind_mining_collection:
+                collections = (user_mining or {}).get("collections") or {}
+                owned_map[product_id] = int(collections.get(self.collection_name_of(product), 0) or 0)
+                continue
+            if product.get("kind") == self.kind_skill_pickaxe and mining_cog is not None:
+                template = self.skill_pickaxe_template_of(product)
+                count = 0
+                for entry in (user_mining or {}).get("pickaxe_bag") or []:
+                    if mining_cog.is_skill_pickaxe_entry(entry) and str(entry.get("template") or "") == template:
+                        count += 1
+                owned_map[product_id] = count
+                continue
+            owned_map[product_id] = 0
+        return owned_map
+
+    async def list_products(self, category: str, viewer_id: str) -> list[dict]:
+        """
+        列出分類商品、市況摘要與檢視者持有數。
 
         Args:
             category (str): "mining"
+            viewer_id (str): "410847926236086272"
 
         Returns:
             products (list): "[{'product_id': 'mining_collection:昆蟲化石'}]"
@@ -1120,9 +1176,11 @@ class ShopHouse:
                     stats["sell_count"] += 1
                     if stats["lowest_sell_price"] is None or price < stats["lowest_sell_price"]:
                         stats["lowest_sell_price"] = price
+        owned_map = await self.catalog_owned_map(viewer_id, products) if viewer_id else {}
         result = []
         for product in products:
             stats = stats_map.get(product["product_id"], {})
+            owned = owned_map.get(product["product_id"], 0)
             result.append(
                 {
                     "product_id": product["product_id"],
@@ -1133,6 +1191,8 @@ class ShopHouse:
                     "highest_buy_price": stats.get("highest_buy_price"),
                     "lowest_sell_price": stats.get("lowest_sell_price"),
                     "description": str(product.get("description") or ""),
+                    "owned": owned,
+                    "owned_label": self.owned_label(owned),
                 }
             )
         return result
@@ -1418,9 +1478,10 @@ class ShopHouse:
 
     async def write_history(self, *, product: dict, seller_id: str, seller_name: str, buyer_id: str,
                             buyer_name: str, price: int, quantity: int, trade_kind: str,
-                            fee: int = 0, fee_percent: float = 0, seller_gain: int | None = None):
+                            fee: int = 0, fee_percent: float = 0, seller_gain: int | None = None,
+                            item_instance=None):
         """
-        寫入成交紀錄。
+        寫入成交紀錄，並背景私訊買賣雙方。
 
         Args:
             product (dict): "{'product_id': 'mining_collection:昆蟲化石'}"
@@ -1434,9 +1495,11 @@ class ShopHouse:
             fee (int): "250"
             fee_percent (float): "5.0"
             seller_gain (int | None): "4750"
+            item_instance: "{'template': '災禍鎬'}"
         """
         history_id = await self.allocate_id("shop_history", "next_history_id")
         total = price * quantity
+        net_gain = total - fee if seller_gain is None else seller_gain
         document = {
             "_id": str(history_id),
             "history_id": history_id,
@@ -1451,11 +1514,115 @@ class ShopHouse:
             "total": total,
             "fee": fee,
             "fee_percent": fee_percent,
-            "seller_gain": total - fee if seller_gain is None else seller_gain,
+            "seller_gain": net_gain,
             "kind": trade_kind,
             "created_at": self.now_iso(),
         }
         await common.mongo_storage.get_collection("shop_history").insert_one(document)
+        asyncio.create_task(self.notify_trade_parties(
+            product=product,
+            seller_id=str(seller_id),
+            seller_name=seller_name,
+            buyer_id=str(buyer_id),
+            buyer_name=buyer_name,
+            price=price,
+            quantity=quantity,
+            trade_kind=trade_kind,
+            fee=fee,
+            fee_percent=fee_percent,
+            seller_gain=net_gain,
+            item_instance=item_instance,
+        ))
+
+    async def send_user_dm(self, user_id: str, embed: Embed) -> None:
+        """
+        私訊使用者；關閉私訊或失敗時略過。
+
+        Args:
+            user_id (str): "1234"
+            embed (Embed): Embed(...)
+        """
+        try:
+            parsed_id = int(user_id)
+        except (TypeError, ValueError):
+            return
+        user = self.bot.get_user(parsed_id)
+        if user is None:
+            try:
+                user = await self.bot.fetch_user(parsed_id)
+            except discord.HTTPException:
+                return
+        if user is None:
+            return
+        try:
+            await user.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException):
+            return
+
+    async def notify_trade_parties(self, *, product: dict, seller_id: str, seller_name: str, buyer_id: str,
+                                   buyer_name: str, price: int, quantity: int, trade_kind: str,
+                                   fee: int, fee_percent: float, seller_gain: int, item_instance=None) -> None:
+        """
+        成交後私訊買賣雙方。求購單成交時買家開頭改為「你的求購單已成交。」
+
+        Args:
+            product (dict): "{'name': '昆蟲化石'}"
+            seller_id (str): "4108"
+            seller_name (str): "ani"
+            buyer_id (str): "1234"
+            buyer_name (str): "xu6"
+            price (int): "5000"
+            quantity (int): "2"
+            trade_kind (str): "quick_sell"
+            fee (int): "0"
+            fee_percent (float): "0.0"
+            seller_gain (int): "10000"
+            item_instance: "{'skills': {}}"
+        """
+        try:
+            product_name = product.get("name") or product.get("product_id") or "商品"
+            total = price * quantity
+            cake = common.cake_emoji
+            percent_text = str(int(fee_percent)) if float(fee_percent) == int(fee_percent) else str(fee_percent)
+            buyer_lead = "你的求購單已成交。" if trade_kind == self.trade_kind_quick else "交易成功，你買到了商品。"
+            buyer_extra = ["商品已發放到你的帳戶。"]
+            if product.get("kind") == self.kind_skill_pickaxe:
+                buyer_extra.append("已放入挖礦背包。")
+            elif product.get("kind") == self.kind_animation_color:
+                buyer_extra.append("已獲得動態顏色身份組使用權。")
+            buyer_text = (
+                f"{buyer_lead}\n\n"
+                f"商品：**{product_name}**\n"
+                f"賣家：{seller_name}\n"
+                f"數量：**{quantity}**\n"
+                f"單價：**{price}** {cake}\n"
+                f"合計：**{total}** {cake}\n\n"
+                + "\n".join(buyer_extra)
+            )
+            seller_text = (
+                f"交易成功，你的商品已賣出。\n\n"
+                f"商品：**{product_name}**\n"
+                f"買家：{buyer_name}\n"
+                f"數量：**{quantity}**\n"
+                f"單價：**{price}** {cake}\n"
+                f"成交額：**{total}** {cake}\n"
+                f"手續費：**{fee}** {cake}（{percent_text}%）\n"
+                f"實收：**{seller_gain}** {cake}"
+            )
+            if product.get("kind") == self.kind_skill_pickaxe:
+                skills = {}
+                if isinstance(item_instance, dict):
+                    skills = item_instance.get("skills") or {}
+                skill_lines = self.skill_pickaxe_public_lines(skills)
+                seller_text += "\n\n技能：\n" + "\n".join(skill_lines)
+            buyer_embed = Embed(title=self.trade_dm_title, description=buyer_text, color=common.bot_color)
+            seller_embed = Embed(title=self.trade_dm_title, description=seller_text, color=common.bot_color)
+            await asyncio.gather(
+                self.send_user_dm(buyer_id, buyer_embed),
+                self.send_user_dm(seller_id, seller_embed),
+            )
+        except Exception:
+            return
 
     def history_to_public(self, document: dict) -> dict:
         """
@@ -1592,6 +1759,7 @@ class ShopHouse:
                     fee=fee,
                     fee_percent=fee_percent,
                     seller_gain=seller_gain,
+                    item_instance=item_instance,
                 )
             except Exception:
                 await self.add_cake(buyer_id, total)
@@ -1706,6 +1874,7 @@ class ShopHouse:
                 fee=fee,
                 fee_percent=fee_percent,
                 seller_gain=seller_gain,
+                item_instance=item_instance,
             )
         return {"ok": True, "price": unit_price, "quantity": fill_quantity}
 

@@ -703,10 +703,10 @@ class WebPanel:
         if reject is not None:
             return reject
         chosen = category if category in house.category_labels else house.category_server
-        products = await house.list_products(chosen)
+        products = await house.list_products(chosen, context["user_id"])
         if not products:
             await house.ensure_catalog()
-            products = await house.list_products(chosen)
+            products = await house.list_products(chosen, context["user_id"])
         return JSONResponse(
             {
                 "ok": True,
