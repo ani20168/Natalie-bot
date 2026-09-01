@@ -633,7 +633,7 @@ class MiningGame(commands.Cog):
         async with common.jsonio_lock:
             mining_data = await self.miningdata_read(userid)
 
-        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_list 各礦場收藏品清單\n/collection_trade 收藏品交易\n/collection_sell 販賣收藏品給Natalie\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_use 裝備背包內礦鎬\n/mining_bag_drop 丟棄背包內礦鎬(單格/1-3/all)\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
+        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_list 各礦場收藏品清單\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_use 裝備背包內礦鎬\n/mining_bag_drop 丟棄背包內礦鎬(單格/1-3/all)\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
         equip_slot = mining_data[userid].get("equipped_bag_slot")
         pickaxe_line = f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}"
         if equip_slot is not None:
@@ -678,68 +678,6 @@ class MiningGame(commands.Cog):
             field_value = "\n".join(lines) if lines else "—"
             message.add_field(name=mine_name, value=field_value, inline=False)
         await interaction.response.send_message(embed=message)
-
-    @app_commands.command(name = "collection_trade",description="與其他玩家交易收藏品")
-    @app_commands.describe(collection_name="要販賣的收藏品名稱",price="要販賣的價格(蛋糕)")
-    @app_commands.rename(collection_name="名稱",price="價格")
-    @app_commands.checks.cooldown(1, 60)
-    async def collection_trade(self,interaction,collection_name: str,price: int):
-        userid = str(interaction.user.id)
-        mining_data = await self.miningdata_read(userid)
-
-        if price <= 0:
-            await interaction.response.send_message(embed=Embed(title='Natalie 挖礦',description="錯誤:請輸入有效的價格",color=common.bot_error_color))
-            return
-
-        #全部的收藏品列表
-        collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
-        #如果沒有在收藏品清單
-        if collection_name not in collection_confirm_list:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="錯誤:不存在的收藏品。",color=common.bot_error_color))
-            return
-
-        #如果該收藏品不在用戶收藏品清單內或數量=0
-        if collection_name not in mining_data[userid]["collections"] or mining_data[userid]["collections"][collection_name] == 0:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"錯誤:你沒有**{collection_name}**。",color=common.bot_error_color))
-            return
-
-        #準備發送交易訊息
-        message = Embed(title="Natalie 挖礦",description=f"<@{userid}>正在販賣一項收藏品，有興趣的話請點擊下方的購買按鈕!\n交易提案有效時間為60秒。",color=common.bot_color)
-        message.add_field(name="收藏品",value=f"**{collection_name}**",inline=False)
-        message.add_field(name="價格",value=f"**{price}**塊蛋糕",inline=False)
-        await interaction.response.send_message(embed=message,view=CollectionTradeButton(selluser=interaction,collection_name=collection_name,price=price,client=self.bot))
-
-    @app_commands.command(name = "collection_sell",description="販賣收藏品給Natalie(每個1000塊蛋糕)")
-    @app_commands.describe(collection_name="要販賣的收藏品名稱")
-    @app_commands.rename(collection_name="名稱")
-    async def collection_sell(self,interaction,collection_name: str):
-        async with common.jsonio_lock:
-            userid = str(interaction.user.id)
-            mining_data = await self.miningdata_read(userid)
-            user_data = await common.mongo_storage.get_user(userid)
-            if user_data is None:
-                await common.mongo_storage.ensure_user_document(userid)
-                user_data = await common.mongo_storage.get_user(userid)
-
-            #全部的收藏品列表
-            collection_confirm_list = [item for sublist in self.collection_list.values() for item in sublist]
-            #如果沒有在收藏品清單
-            if collection_name not in collection_confirm_list:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="錯誤:不存在的收藏品。",color=common.bot_error_color))
-                return
-            
-            #如果該收藏品不在用戶收藏品清單內或數量=0
-            if collection_name not in mining_data[userid]["collections"] or mining_data[userid]["collections"][collection_name] == 0:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"錯誤:你沒有**{collection_name}**。",color=common.bot_error_color))
-                return
-            
-            mining_data[userid]["collections"][collection_name] -= 1
-            user_data["cake"] += 1000
-            await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
-            await common.mongo_storage.replace_user(userid, user_data)
-
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你賣出了**1**個**{collection_name}**。\n獲得**1000**塊{common.cake_emoji}",color=common.bot_color))
-
 
     @app_commands.command(name = "mine",description="更換礦場")
     @app_commands.describe(choices="要更換的礦場")
@@ -1103,7 +1041,6 @@ class MiningGame(commands.Cog):
 
 
     @mining.error
-    @collection_trade.error
     async def on_cooldown(self,interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.CommandOnCooldown):
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"輸入太快了，妹妹頂不住!請在{int(error.retry_after)}秒後再試一次。",color=common.bot_error_color), ephemeral=True)
@@ -3082,60 +3019,6 @@ class SkillPickaxeDiscardView(discord.ui.View):
         except discord.HTTPException:
             pass
 
-
-class CollectionTradeButton(discord.ui.View):
-    def __init__(self, *,timeout= 60,selluser,collection_name,price,client):
-        super().__init__(timeout=timeout)
-        self.bot = client
-        self.selluser = selluser
-        self.collection_name = collection_name
-        self.price = price
-
-    @discord.ui.button(label="購買!",style=discord.ButtonStyle.green)
-    async def collection_trade_button(self,interaction,button: discord.ui.Button):
-        async with common.jsonio_lock:
-            selluserid = str(self.selluser.user.id)
-            buyuserid = str(interaction.user.id)
-            sell_user_data = await common.mongo_storage.get_user(selluserid)
-            buy_user_data = await common.mongo_storage.get_user(buyuserid)
-            if sell_user_data is None:
-                await common.mongo_storage.ensure_user_document(selluserid)
-                sell_user_data = await common.mongo_storage.get_user(selluserid)
-            if buy_user_data is None:
-                await common.mongo_storage.ensure_user_document(buyuserid)
-                buy_user_data = await common.mongo_storage.get_user(buyuserid)
-            user_data = {selluserid: sell_user_data, buyuserid: buy_user_data}
-            buy_mining_data = await MiningGame(self.bot).miningdata_read(buyuserid)
-            sell_mining_data = await MiningGame(self.bot).miningdata_read(selluserid)
-
-            #買家有沒有錢?
-            if user_data[buyuserid]["cake"] < self.price:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"錯誤:你只有**{user_data[buyuserid]['cake']}**塊蛋糕。",color=common.bot_error_color),ephemeral=True)
-                return
-            if sell_mining_data[selluserid].get("collections", {}).get(self.collection_name, 0) <= 0:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"錯誤:賣家已沒有**{self.collection_name}**，交易已失效。",color=common.bot_error_color),ephemeral=True)
-                return
-
-            button.disabled = True
-            user_data[selluserid]["cake"] += self.price
-            user_data[buyuserid]["cake"] -= self.price
-            sell_mining_data[selluserid]["collections"][self.collection_name] -= 1
-            if self.collection_name not in buy_mining_data[buyuserid]["collections"]:
-                buy_mining_data[buyuserid]["collections"][self.collection_name] = 0
-            buy_mining_data[buyuserid]["collections"][self.collection_name] += 1
-
-            await common.mongo_storage.upsert_user(selluserid, user_data[selluserid])
-            await common.mongo_storage.upsert_user(buyuserid, user_data[buyuserid])
-            await common.mongo_storage.upsert_user(selluserid, sell_mining_data[selluserid], "mining")
-            await common.mongo_storage.upsert_user(buyuserid, buy_mining_data[buyuserid], "mining")
-
-            await interaction.response.edit_message(embed=Embed(title="Natalie 挖礦",description=f"此筆交易提案已完成。\n賣家:<@{selluserid}>\n買家:<@{buyuserid}>\n購買項目:**{self.collection_name}**",color=common.bot_color),view=self)
-    
-    async def interaction_check(self, interaction) -> bool:
-        if interaction.user == self.selluser.user:
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你不能向自己購買收藏品。",color=common.bot_error_color), ephemeral=True)
-            return False
-        return True
 
 class AutofixButton(discord.ui.View):
     def __init__(self, *,timeout= 30):
