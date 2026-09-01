@@ -30,6 +30,7 @@ class ShopHouse:
         }
         self.kind_mining_collection = "mining_collection"
         self.kind_animation_color = "animation_color_pass"
+        self.kind_skill_pickaxe = "skill_pickaxe"
         self.product_animation_color_id = "server_item:animation_color"
         self.product_animation_color_name = "動態顏色身份組使用權"
         self.grant_animation_color_id = "animation_color"
@@ -360,6 +361,33 @@ class ShopHouse:
             },
         }
 
+    def build_skill_pickaxe_product(self, template: str, sort_order: int) -> dict:
+        """
+        組出技能礦鎬商品文件。
+
+        Args:
+            template (str): "災禍鎬"
+            sort_order (int): "40"
+
+        Returns:
+            product (dict): "{'product_id': 'skill_pickaxe:災禍鎬'}"
+        """
+        product_id = f"{self.kind_skill_pickaxe}:{template}"
+        return {
+            "_id": product_id,
+            "product_id": product_id,
+            "category": self.category_mining,
+            "name": template,
+            "description": "",
+            "kind": self.kind_skill_pickaxe,
+            "payload": {"template": template},
+            "sort_order": sort_order,
+            "flags": {
+                "sell_owner_only": False,
+                "unlimited_stock": False,
+            },
+        }
+
     async def ensure_catalog(self):
         """補齊初版商品，既有描述不覆蓋。"""
         collection = common.mongo_storage.get_collection("shop_product")
@@ -371,6 +399,9 @@ class ShopHouse:
                 for collection_name in item_list:
                     seeds.append(self.build_mining_product(collection_name, sort_order))
                     sort_order += 1
+            for template in mining_cog.skill_pickaxe_shop:
+                seeds.append(self.build_skill_pickaxe_product(template, sort_order))
+                sort_order += 1
         for product in seeds:
             await collection.update_one(
                 {"_id": product["_id"]},
@@ -439,6 +470,284 @@ class ShopHouse:
         """
         payload = product.get("payload") if isinstance(product.get("payload"), dict) else {}
         return str(payload.get("collection_name") or product.get("name") or "")
+
+    def skill_pickaxe_template_of(self, product: dict) -> str:
+        """
+        取出技能礦鎬模板名稱。
+
+        Args:
+            product (dict): "{'payload': {'template': '災禍鎬'}}"
+
+        Returns:
+            template (str): "災禍鎬"
+        """
+        payload = product.get("payload") if isinstance(product.get("payload"), dict) else {}
+        return str(payload.get("template") or product.get("name") or "")
+
+    def copy_pickaxe_instance(self, entry: dict) -> dict:
+        """
+        複製一把技能礦鎬資料，避免後續改到背包原件。
+
+        Args:
+            entry (dict): "{'template': '災禍鎬'}"
+
+        Returns:
+            instance (dict): "{'template': '災禍鎬', 'skills': {}}"
+        """
+        skills = entry.get("skills") if isinstance(entry.get("skills"), dict) else {}
+        return {
+            "template": str(entry.get("template") or ""),
+            "max_health": int(entry.get("max_health") or 0),
+            "current_health": int(entry.get("current_health") or 0),
+            "skills": dict(skills),
+        }
+
+    def skill_pickaxe_public_lines(self, skills) -> list:
+        """
+        商店賣單用的技能文字列。沒有技能則為「無」。
+
+        Args:
+            skills: "{'dig_time_reduce_sec': 2}"
+
+        Returns:
+            lines (list): "['減少 2 秒挖掘時間']"
+        """
+        mining_cog = self.bot.get_cog("MiningGame")
+        if mining_cog is None:
+            return ["無"]
+        lines = mining_cog.skill_pickaxe_line_list(skills if isinstance(skills, dict) else {})
+        return lines if lines else ["無"]
+
+    async def load_mining_bag_state(self, user_id: str):
+        """
+        讀取挖礦背包狀態。
+
+        Args:
+            user_id (str): "410847926236086272"
+
+        Returns:
+            state (tuple): "(mining_cog, mining_data)"
+        """
+        mining_cog = self.bot.get_cog("MiningGame")
+        if mining_cog is None:
+            raise ValueError("挖礦系統尚未就緒")
+        mining_data = await mining_cog.miningdata_read(str(user_id))
+        return mining_cog, mining_data
+
+    async def save_mining_bag_state(self, user_id: str, mining_data: dict):
+        """
+        寫回挖礦背包。
+
+        Args:
+            user_id (str): "410847926236086272"
+            mining_data (dict): "{'4108': {'pickaxe_bag': []}}"
+        """
+        await common.mongo_storage.upsert_user(str(user_id), mining_data[str(user_id)], "mining")
+
+    async def list_skill_pickaxes_for_product(self, user_id: str, product: dict) -> list[dict]:
+        """
+        列出背包中符合此商品名稱的技能礦鎬。
+
+        Args:
+            user_id (str): "410847926236086272"
+            product (dict): "{'kind': 'skill_pickaxe'}"
+
+        Returns:
+            items (list): "[{'slot': 0, 'template': '災禍鎬'}]"
+        """
+        template = self.skill_pickaxe_template_of(product)
+        mining_cog, mining_data = await self.load_mining_bag_state(user_id)
+        bag = mining_data[str(user_id)].get("pickaxe_bag") or []
+        equipped = mining_data[str(user_id)].get("equipped_bag_slot")
+        items = []
+        for index, entry in enumerate(bag):
+            if not mining_cog.is_skill_pickaxe_entry(entry):
+                continue
+            if str(entry.get("template") or "") != template:
+                continue
+            items.append(
+                {
+                    "slot": index,
+                    "slot_label": index + 1,
+                    "template": template,
+                    "current_health": int(entry.get("current_health") or 0),
+                    "max_health": int(entry.get("max_health") or 0),
+                    "skill_lines": self.skill_pickaxe_public_lines(entry.get("skills") or {}),
+                    "equipped": equipped == index,
+                }
+            )
+        return items
+
+    async def count_skill_pickaxes(self, user_id: str, template: str) -> int:
+        """
+        統計背包中某模板礦鎬數量。
+
+        Args:
+            user_id (str): "410847926236086272"
+            template (str): "災禍鎬"
+
+        Returns:
+            count (int): "2"
+        """
+        mining_cog, mining_data = await self.load_mining_bag_state(user_id)
+        bag = mining_data[str(user_id)].get("pickaxe_bag") or []
+        count = 0
+        for entry in bag:
+            if mining_cog.is_skill_pickaxe_entry(entry) and str(entry.get("template") or "") == template:
+                count += 1
+        return count
+
+    async def take_skill_pickaxe(self, user_id: str, template: str, slot: int) -> dict | None:
+        """
+        從背包取出指定格子的技能礦鎬。
+
+        Args:
+            user_id (str): "410847926236086272"
+            template (str): "災禍鎬"
+            slot (int): "0"
+
+        Returns:
+            instance (dict | None): "{'template': '災禍鎬'}"
+        """
+        mining_cog, mining_data = await self.load_mining_bag_state(user_id)
+        uid = str(user_id)
+        bag = mining_data[uid].get("pickaxe_bag") or []
+        if slot < 0 or slot >= len(bag):
+            return None
+        entry = bag[slot]
+        if not mining_cog.is_skill_pickaxe_entry(entry):
+            return None
+        if str(entry.get("template") or "") != template:
+            return None
+        if mining_data[uid].get("equipped_bag_slot") == slot:
+            mining_cog.sync_equipped_pickaxe_to_bag_slot(mining_data, uid)
+            entry = bag[slot]
+            mining_cog.restore_legacy_pickaxe_to_top(mining_data, uid)
+        instance = self.copy_pickaxe_instance(entry)
+        bag[slot] = None
+        mining_data[uid]["pickaxe_bag"] = bag
+        await self.save_mining_bag_state(uid, mining_data)
+        return instance
+
+    async def return_skill_pickaxe(self, user_id: str, instance: dict) -> bool:
+        """
+        把技能礦鎬放回背包第一個空格。
+
+        Args:
+            user_id (str): "410847926236086272"
+            instance (dict): "{'template': '災禍鎬'}"
+
+        Returns:
+            ok (bool): "True"
+        """
+        mining_cog, mining_data = await self.load_mining_bag_state(user_id)
+        uid = str(user_id)
+        empty_index = mining_cog.first_empty_pickaxe_bag_index(mining_data, uid)
+        if empty_index is None:
+            return False
+        mining_data[uid]["pickaxe_bag"][empty_index] = self.copy_pickaxe_instance(instance)
+        await self.save_mining_bag_state(uid, mining_data)
+        return True
+
+    async def lock_buy_bag_slot(self, user_id: str, order_id: int) -> int | None:
+        """
+        為求購單鎖定一個挖礦背包空格。
+
+        Args:
+            user_id (str): "410847926236086272"
+            order_id (int): "12"
+
+        Returns:
+            slot (int | None): "3"
+        """
+        mining_cog, mining_data = await self.load_mining_bag_state(user_id)
+        uid = str(user_id)
+        empty_index = mining_cog.first_empty_pickaxe_bag_index(mining_data, uid)
+        if empty_index is None:
+            return None
+        mining_data[uid]["pickaxe_bag"][empty_index] = {
+            "locked": True,
+            "lock_kind": mining_cog.pickaxe_bag_lock_kind_shop_buy,
+            "order_id": int(order_id),
+        }
+        await self.save_mining_bag_state(uid, mining_data)
+        return empty_index
+
+    async def clear_buy_bag_lock(self, user_id: str, slot, order_id: int) -> None:
+        """
+        解除求購單鎖定的背包格。
+
+        Args:
+            user_id (str): "410847926236086272"
+            slot: "3"
+            order_id (int): "12"
+        """
+        if slot is None:
+            return
+        mining_cog, mining_data = await self.load_mining_bag_state(user_id)
+        uid = str(user_id)
+        bag = mining_data[uid].get("pickaxe_bag") or []
+        index = int(slot)
+        if index < 0 or index >= len(bag):
+            return
+        entry = bag[index]
+        if not mining_cog.is_pickaxe_bag_lock(entry):
+            return
+        if int(entry.get("order_id") or 0) != int(order_id):
+            return
+        bag[index] = None
+        mining_data[uid]["pickaxe_bag"] = bag
+        await self.save_mining_bag_state(uid, mining_data)
+
+    async def deliver_skill_pickaxe(self, user_id: str, instance: dict, locked_slot=None, order_id=None) -> bool:
+        """
+        把技能礦鎬交給買家，優先放進已鎖定的格子。
+
+        Args:
+            user_id (str): "410847926236086272"
+            instance (dict): "{'template': '災禍鎬'}"
+            locked_slot: "3"
+            order_id: "12"
+
+        Returns:
+            ok (bool): "True"
+        """
+        mining_cog, mining_data = await self.load_mining_bag_state(user_id)
+        uid = str(user_id)
+        bag = mining_data[uid].get("pickaxe_bag") or []
+        copied = self.copy_pickaxe_instance(instance)
+        if locked_slot is not None:
+            index = int(locked_slot)
+            if 0 <= index < len(bag):
+                entry = bag[index]
+                can_use_slot = entry is None
+                if mining_cog.is_pickaxe_bag_lock(entry):
+                    can_use_slot = order_id is None or int(entry.get("order_id") or 0) == int(order_id)
+                if can_use_slot:
+                    bag[index] = copied
+                    mining_data[uid]["pickaxe_bag"] = bag
+                    await self.save_mining_bag_state(uid, mining_data)
+                    return True
+        empty_index = mining_cog.first_empty_pickaxe_bag_index(mining_data, uid)
+        if empty_index is None:
+            return False
+        bag[empty_index] = copied
+        mining_data[uid]["pickaxe_bag"] = bag
+        await self.save_mining_bag_state(uid, mining_data)
+        return True
+
+    async def has_empty_pickaxe_slot(self, user_id: str) -> bool:
+        """
+        挖礦背包是否還有空格（鎖定格不算空）。
+
+        Args:
+            user_id (str): "410847926236086272"
+
+        Returns:
+            has_space (bool): "True"
+        """
+        mining_cog, mining_data = await self.load_mining_bag_state(user_id)
+        return mining_cog.first_empty_pickaxe_bag_index(mining_data, str(user_id)) is not None
 
     async def ensure_mining_user(self, user_id: str):
         """
@@ -588,6 +897,8 @@ class ShopHouse:
             return None
         if product.get("kind") == self.kind_mining_collection:
             return await self.get_collection_count(user_id, self.collection_name_of(product))
+        if product.get("kind") == self.kind_skill_pickaxe:
+            return await self.count_skill_pickaxes(user_id, self.skill_pickaxe_template_of(product))
         return 0
 
     async def reserve_item(self, user_id: str, product: dict, quantity: int) -> bool:
@@ -731,6 +1042,8 @@ class ShopHouse:
             payload (dict): "{'order_id': 1, 'is_mine': False}"
         """
         user_id = str(order.get("user_id") or "")
+        instance = order.get("item_instance") if isinstance(order.get("item_instance"), dict) else None
+        skill_lines = self.skill_pickaxe_public_lines(instance.get("skills")) if instance is not None else []
         return {
             "order_id": int(order.get("order_id") or 0),
             "user_id": user_id,
@@ -738,6 +1051,7 @@ class ShopHouse:
             "price": int(order.get("price") or 0),
             "quantity": int(order.get("quantity") or 0),
             "is_mine": user_id == str(viewer_id),
+            "skill_lines": skill_lines,
         }
 
     async def market_stats(self, product_id: str) -> dict:
@@ -885,6 +1199,7 @@ class ShopHouse:
                 "can_sell": self.can_create_sell(viewer_id, product),
                 "can_edit_description": bool(permissions.get("shop_edit_description")),
                 "unlimited_stock": bool((product.get("flags") or {}).get("unlimited_stock")),
+                "is_skill_pickaxe": product.get("kind") == self.kind_skill_pickaxe,
             },
             "buy_orders": [self.order_to_public(order, viewer_id) for order in buy_orders],
             "my_buy_orders": [self.order_to_public(order, viewer_id) for order in my_buy_orders],
@@ -940,12 +1255,23 @@ class ShopHouse:
                     return {"ok": False, "error": "這個商品一次只能求購 1 個"}
                 if await self.already_owns_animation_color(user_id):
                     return {"ok": False, "error": "你已經擁有動態顏色身份組使用權"}
+            if product.get("kind") == self.kind_skill_pickaxe:
+                parsed_quantity = 1
+                reserved_cake = parsed_price * parsed_quantity
+                if not await self.has_empty_pickaxe_slot(user_id):
+                    return {"ok": False, "error": "挖礦背包沒有空位，無法求購"}
             stats = await self.market_stats(product_id)
             if stats["lowest_sell_price"] is not None and parsed_price >= stats["lowest_sell_price"]:
                 return {"ok": False, "error": "求購價必須低於目前最便宜的賣單，不然直接購買即可"}
             if not await self.spend_cake(user_id, reserved_cake):
                 return {"ok": False, "error": f"{common.cake_emoji}不足，無法求購"}
             order_id = await self.allocate_id("shop_order", "next_order_id")
+            locked_slot = None
+            if product.get("kind") == self.kind_skill_pickaxe:
+                locked_slot = await self.lock_buy_bag_slot(user_id, order_id)
+                if locked_slot is None:
+                    await self.add_cake(user_id, reserved_cake)
+                    return {"ok": False, "error": "挖礦背包沒有空位，無法求購"}
             document = {
                 "_id": str(order_id),
                 "order_id": order_id,
@@ -960,6 +1286,8 @@ class ShopHouse:
                 "status": self.order_status_open,
                 "created_at": self.now_iso(),
             }
+            if locked_slot is not None:
+                document["locked_bag_slot"] = locked_slot
             await common.mongo_storage.get_collection("shop_order").insert_one(document)
         return {"ok": True, "order_id": order_id}
 
@@ -986,10 +1314,11 @@ class ShopHouse:
                 {"_id": str(order_id)},
                 {"$set": {"status": self.order_status_cancelled, "quantity": 0, "reserved_cake": 0, "closed_at": self.now_iso()}},
             )
+            await self.clear_buy_bag_lock(user_id, order.get("locked_bag_slot"), order_id)
             await self.add_cake(user_id, reserved_cake)
         return {"ok": True}
 
-    async def create_sell_order(self, product_id: str, user_id: str, price, quantity, display_name: str) -> dict:
+    async def create_sell_order(self, product_id: str, user_id: str, price, quantity, display_name: str, bag_slot=None) -> dict:
         """
         建立賣單並預扣道具。
 
@@ -999,12 +1328,13 @@ class ShopHouse:
             price: "8000"
             quantity: "1"
             display_name (str): "ani"
+            bag_slot: "0"
 
         Returns:
             result (dict): "{'ok': True}"
         """
         try:
-            parsed_price, parsed_quantity = self.parse_price_quantity(price, quantity)
+            parsed_price, parsed_quantity = self.parse_price_quantity(price, quantity if quantity is not None else 1)
         except Exception:
             return {"ok": False, "error": "價格與數量必須為正整數"}
         async with self.lock:
@@ -1016,7 +1346,17 @@ class ShopHouse:
             stats = await self.market_stats(product_id)
             if stats["highest_buy_price"] is not None and parsed_price <= stats["highest_buy_price"]:
                 return {"ok": False, "error": "售價必須高於目前最高的求購單，不然請用快速販賣"}
-            if not await self.reserve_item(user_id, product, parsed_quantity):
+            item_instance = None
+            if product.get("kind") == self.kind_skill_pickaxe:
+                parsed_quantity = 1
+                try:
+                    slot = int(bag_slot)
+                except (TypeError, ValueError):
+                    return {"ok": False, "error": "請選擇要上架的礦鎬"}
+                item_instance = await self.take_skill_pickaxe(user_id, self.skill_pickaxe_template_of(product), slot)
+                if item_instance is None:
+                    return {"ok": False, "error": "找不到這把礦鎬，或它不符合此商品"}
+            elif not await self.reserve_item(user_id, product, parsed_quantity):
                 owned = await self.get_owned_count(user_id, product)
                 owned_text = self.owned_label(owned)
                 return {"ok": False, "error": f"你沒有足夠的{product.get('name') or '商品'}（目前持有 {owned_text}）"}
@@ -1035,6 +1375,8 @@ class ShopHouse:
                 "status": self.order_status_open,
                 "created_at": self.now_iso(),
             }
+            if item_instance is not None:
+                document["item_instance"] = item_instance
             await common.mongo_storage.get_collection("shop_order").insert_one(document)
         return {"ok": True, "order_id": order_id}
 
@@ -1060,11 +1402,18 @@ class ShopHouse:
             if product is None:
                 return {"ok": False, "error": "找不到這個商品"}
             quantity = int(order.get("quantity") or 0)
+            instance = order.get("item_instance") if isinstance(order.get("item_instance"), dict) else None
+            if product.get("kind") == self.kind_skill_pickaxe:
+                if instance is None:
+                    return {"ok": False, "error": "這筆賣單缺少礦鎬資料"}
+                if not await self.return_skill_pickaxe(user_id, instance):
+                    return {"ok": False, "error": "挖礦背包已滿，請先空出一格再下架"}
             await collection.update_one(
                 {"_id": str(order_id)},
                 {"$set": {"status": self.order_status_cancelled, "quantity": 0, "closed_at": self.now_iso()}},
             )
-            await self.release_item(user_id, product, quantity)
+            if product.get("kind") != self.kind_skill_pickaxe:
+                await self.release_item(user_id, product, quantity)
         return {"ok": True}
 
     async def write_history(self, *, product: dict, seller_id: str, seller_name: str, buyer_id: str,
@@ -1206,16 +1555,29 @@ class ShopHouse:
                     return {"ok": False, "error": "這個商品一次只能購買 1 個"}
                 if await self.already_owns_animation_color(buyer_id):
                     return {"ok": False, "error": "你已經擁有動態顏色身份組使用權"}
+            item_instance = None
+            if product.get("kind") == self.kind_skill_pickaxe:
+                fill_quantity = 1
+                if fill_quantity > remaining:
+                    return {"ok": False, "error": f"這筆賣單只剩 {remaining} 個"}
+                item_instance = order.get("item_instance") if isinstance(order.get("item_instance"), dict) else None
+                if item_instance is None:
+                    return {"ok": False, "error": "這筆賣單缺少礦鎬資料"}
+                if not await self.has_empty_pickaxe_slot(buyer_id):
+                    return {"ok": False, "error": "挖礦背包沒有空位，無法購買"}
             unit_price = int(order.get("price") or 0)
             total = unit_price * fill_quantity
             if not await self.spend_cake(buyer_id, total):
                 return {"ok": False, "error": f"{common.cake_emoji}不足，無法購買"}
             seller_id = str(order.get("user_id"))
             try:
-                delivered = await self.deliver_item(buyer_id, product, fill_quantity)
+                if product.get("kind") == self.kind_skill_pickaxe:
+                    delivered = await self.deliver_skill_pickaxe(buyer_id, item_instance)
+                else:
+                    delivered = await self.deliver_item(buyer_id, product, fill_quantity)
                 if not delivered:
                     await self.add_cake(buyer_id, total)
-                    return {"ok": False, "error": "發放商品失敗"}
+                    return {"ok": False, "error": "發放商品失敗" if product.get("kind") != self.kind_skill_pickaxe else "挖礦背包沒有空位，無法購買"}
                 seller_gain, fee, fee_percent = await self.settle_trade_cake(seller_id, total)
                 await self.close_or_reduce_order(order, fill_quantity)
                 await self.write_history(
@@ -1252,7 +1614,7 @@ class ShopHouse:
                 return order
         return None
 
-    async def quick_sell(self, product_id: str, seller_id: str, quantity, display_name: str) -> dict:
+    async def quick_sell(self, product_id: str, seller_id: str, quantity, display_name: str, bag_slot=None) -> dict:
         """
         以目前最高求購價立刻賣出。
 
@@ -1261,12 +1623,13 @@ class ShopHouse:
             seller_id (str): "4108"
             quantity: "1"
             display_name (str): "ani"
+            bag_slot: "0"
 
         Returns:
             result (dict): "{'ok': True}"
         """
         try:
-            requested = int(quantity)
+            requested = int(quantity) if quantity is not None else 1
             if requested < 1:
                 raise ValueError("數量必須為正整數")
         except Exception:
@@ -1287,22 +1650,46 @@ class ShopHouse:
                 fill_quantity = min(fill_quantity, 1)
                 if await self.already_owns_animation_color(str(target.get("user_id"))):
                     return {"ok": False, "error": "對方已經擁有動態顏色身份組使用權"}
-            if fill_quantity < 1:
+            item_instance = None
+            if product.get("kind") == self.kind_skill_pickaxe:
+                if remaining < 1:
+                    return {"ok": False, "error": "這筆求購單已經沒有剩餘數量"}
+                fill_quantity = 1
+                try:
+                    slot = int(bag_slot)
+                except (TypeError, ValueError):
+                    return {"ok": False, "error": "請選擇要快速販賣的礦鎬"}
+                item_instance = await self.take_skill_pickaxe(seller_id, self.skill_pickaxe_template_of(product), slot)
+                if item_instance is None:
+                    return {"ok": False, "error": "找不到這把礦鎬，或它不符合此商品"}
+            elif fill_quantity < 1:
                 return {"ok": False, "error": "這筆求購單已經沒有剩餘數量"}
-            owned = await self.get_owned_count(seller_id, product)
-            if owned is not None and fill_quantity > owned:
-                return {"ok": False, "error": f"你只有 {owned} 個{product.get('name') or '商品'}"}
-            if not await self.reserve_item(seller_id, product, fill_quantity):
-                return {"ok": False, "error": f"你沒有足夠的{product.get('name') or '商品'}"}
+            if product.get("kind") != self.kind_skill_pickaxe:
+                owned = await self.get_owned_count(seller_id, product)
+                if owned is not None and fill_quantity > owned:
+                    return {"ok": False, "error": f"你只有 {owned} 個{product.get('name') or '商品'}"}
+                if not await self.reserve_item(seller_id, product, fill_quantity):
+                    return {"ok": False, "error": f"你沒有足夠的{product.get('name') or '商品'}"}
             buyer_id = str(target.get("user_id"))
             unit_price = int(target.get("price") or 0)
             total = unit_price * fill_quantity
             reserved_cake = int(target.get("reserved_cake") or 0)
             if reserved_cake < total:
-                await self.release_item(seller_id, product, fill_quantity)
+                if product.get("kind") == self.kind_skill_pickaxe:
+                    await self.return_skill_pickaxe(seller_id, item_instance)
+                else:
+                    await self.release_item(seller_id, product, fill_quantity)
                 return {"ok": False, "error": "求購單預扣蛋糕不足"}
-            delivered = await self.deliver_item(buyer_id, product, fill_quantity)
+            if product.get("kind") == self.kind_skill_pickaxe:
+                delivered = await self.deliver_skill_pickaxe(
+                    buyer_id, item_instance, target.get("locked_bag_slot"), target.get("order_id")
+                )
+            else:
+                delivered = await self.deliver_item(buyer_id, product, fill_quantity)
             if not delivered:
+                if product.get("kind") == self.kind_skill_pickaxe:
+                    await self.return_skill_pickaxe(seller_id, item_instance)
+                    return {"ok": False, "error": "對方挖礦背包沒有空位，無法成交"}
                 await self.release_item(seller_id, product, fill_quantity)
                 return {"ok": False, "error": "發放商品失敗"}
             seller_gain, fee, fee_percent = await self.settle_trade_cake(seller_id, total)

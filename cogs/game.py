@@ -57,6 +57,8 @@ class MiningGame(commands.Cog):
             "輝煌水晶": 120
         }
         self.pickaxe_bag_size = 7
+        self.pickaxe_bag_lock_kind_shop_buy = "shop_buy"
+        self.pickaxe_bag_lock_message = "因為你有求購單，此欄位已被鎖定"
         self.skill_pickaxe_shop = {
             "災禍鎬": {"需求等級": 50, "價格": 10000},
             "附魔迷你船錨": {"需求等級": 64, "價格": 20000},
@@ -203,6 +205,59 @@ class MiningGame(commands.Cog):
         return {"template": template, "max_health": max_health, "current_health": max_health, "skills": skills}
 
 
+    def is_pickaxe_bag_lock(self, entry) -> bool:
+        """
+        是否為商店求購鎖定的背包格。
+
+        Args:
+            entry: "{'locked': True}"
+
+        Returns:
+            locked (bool): "True"
+        """
+        return isinstance(entry, dict) and bool(entry.get("locked"))
+
+    def is_skill_pickaxe_entry(self, entry) -> bool:
+        """
+        是否為真實技能礦鎬（不是空格、也不是鎖定）。
+
+        Args:
+            entry: "{'template': '災禍鎬'}"
+
+        Returns:
+            is_pickaxe (bool): "True"
+        """
+        if not isinstance(entry, dict) or self.is_pickaxe_bag_lock(entry):
+            return False
+        return bool(entry.get("template"))
+
+    def skill_pickaxe_line_list(self, skills: dict) -> list:
+        """
+        把 skills dict 轉成中文技能列。沒有技能則空清單。
+
+        Args:
+            skills (dict): "{'dig_time_reduce_sec': 2}"
+
+        Returns:
+            lines (list): "['減少 2 秒挖掘時間']"
+        """
+        if not skills:
+            return []
+        lines = []
+        if "bonus_chance_add" in skills:
+            lines.append(f"增加 {int(round(skills['bonus_chance_add'] * 100))}% 獲得額外礦物的機率")
+        if "bonus_extra_on_proc" in skills:
+            lines.append(f"觸發額外礦物時，額外礦物再增加 {skills['bonus_extra_on_proc']} 個")
+        if "dig_time_reduce_sec" in skills:
+            lines.append(f"減少 {skills['dig_time_reduce_sec']} 秒挖掘時間")
+        if skills.get("bonus_force_highest_value"):
+            lines.append("額外礦物必為該礦場最高價值礦物")
+        if "collection_chance_add" in skills:
+            lines.append(f"增加 {int(round(skills['collection_chance_add'] * 100))}% 獲得收藏品的機率")
+        if skills.get("durability_half_skip"):
+            lines.append("每次挖礦有 50% 機率不消耗耐久")
+        return lines
+
     def skill_pickaxe_lines_for_embed(self, skills: dict) -> str:
         """把 skills dict 轉成 embed 用多行中文說明。"""
         if not skills:
@@ -229,7 +284,7 @@ class MiningGame(commands.Cog):
         if slot is None:
             return {}
         bag = mining_data[userid]["pickaxe_bag"]
-        if slot >= len(bag) or bag[slot] is None:
+        if slot >= len(bag) or not self.is_skill_pickaxe_entry(bag[slot]):
             return {}
         return bag[slot].get("skills") or {}
 
@@ -240,7 +295,7 @@ class MiningGame(commands.Cog):
         if slot is None:
             return
         bag = mining_data[userid]["pickaxe_bag"]
-        if slot >= len(bag) or bag[slot] is None:
+        if slot >= len(bag) or not self.is_skill_pickaxe_entry(bag[slot]):
             return
         bag[slot]["current_health"] = mining_data[userid]["pickaxe_health"]
         bag[slot]["max_health"] = mining_data[userid]["pickaxe_maxhealth"]
@@ -743,6 +798,9 @@ class MiningGame(commands.Cog):
             if entry is None:
                 field_name = f"[{slot_label}] （空）"
                 field_value = "—"
+            elif self.is_pickaxe_bag_lock(entry):
+                field_name = f"[{slot_label}] （鎖定）"
+                field_value = self.pickaxe_bag_lock_message
             else:
                 name = entry.get("template", "未知")
                 cur = entry.get("current_health", 0)
@@ -774,6 +832,8 @@ class MiningGame(commands.Cog):
                 for index in range(self.pickaxe_bag_size):
                     if index == equipped_idx:
                         continue
+                    if self.is_pickaxe_bag_lock(bag[index]):
+                        continue
                     if bag[index] is not None:
                         bag[index] = None
                         dropped_slots.append(str(index + 1))
@@ -794,6 +854,9 @@ class MiningGame(commands.Cog):
                 idx = slot_num - 1
                 if equipped_idx == idx:
                     await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="無法丟棄**裝備中**的礦鎬，請先 `/mining_bag_unequip` 卸下。", color=common.bot_error_color))
+                    return
+                if self.is_pickaxe_bag_lock(bag[idx]):
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=self.pickaxe_bag_lock_message, color=common.bot_error_color))
                     return
                 if bag[idx] is None:
                     await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="該格沒有物品。", color=common.bot_error_color))
@@ -816,6 +879,8 @@ class MiningGame(commands.Cog):
             dropped_slots = []
             for slot_num in range(lo, hi + 1):
                 idx = slot_num - 1
+                if self.is_pickaxe_bag_lock(bag[idx]):
+                    continue
                 if bag[idx] is not None:
                     bag[idx] = None
                     dropped_slots.append(str(slot_num))
@@ -840,6 +905,9 @@ class MiningGame(commands.Cog):
             entry = mining_data[userid]["pickaxe_bag"][idx]
             if entry is None:
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="該格沒有物品。", color=common.bot_error_color))
+                return
+            if self.is_pickaxe_bag_lock(entry):
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=self.pickaxe_bag_lock_message, color=common.bot_error_color))
                 return
             if mining_data[userid].get("equipped_bag_slot") is not None:
                 self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)

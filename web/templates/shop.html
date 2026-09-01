@@ -48,6 +48,10 @@
       <label for="shop-input-quantity">數量</label>
       <input type="number" id="shop-input-quantity" min="1" step="1" value="1">
     </div>
+    <div class="shop-field is-hidden" id="shop-field-pickaxe">
+      <label id="shop-pickaxe-label">選擇礦鎬</label>
+      <div id="shop-pickaxe-list"></div>
+    </div>
     <div class="shop-field is-hidden" id="shop-field-description">
       <label for="shop-input-description">商品描述</label>
       <textarea id="shop-input-description" rows="5"></textarea>
@@ -82,6 +86,9 @@
     var formExtra = document.getElementById("shop-form-extra");
     var fieldPrice = document.getElementById("shop-field-price");
     var fieldQuantity = document.getElementById("shop-field-quantity");
+    var fieldPickaxe = document.getElementById("shop-field-pickaxe");
+    var pickaxeLabel = document.getElementById("shop-pickaxe-label");
+    var pickaxeList = document.getElementById("shop-pickaxe-list");
     var fieldDescription = document.getElementById("shop-field-description");
     var inputPrice = document.getElementById("shop-input-price");
     var inputQuantity = document.getElementById("shop-input-quantity");
@@ -121,6 +128,54 @@
 
     function cakeIcon() {
       return '<img class="cake-icon" src="/static/cake.png" alt="蛋糕">';
+    }
+
+    function isSkillPickaxe(product) {
+      return product && product.kind === "skill_pickaxe";
+    }
+
+    function selectedPickaxeSlot() {
+      var input = document.querySelector("#shop-pickaxe-list input[name='shop-pickaxe-slot']:checked");
+      if (!input) return null;
+      return parseInt(input.value, 10);
+    }
+
+    function renderPickaxePicker(items) {
+      if (!items || !items.length) {
+        return '<p class="shop-empty">你的挖礦背包沒有符合的礦鎬</p>';
+      }
+      return items.map(function (item, index) {
+        var lines = item.skill_lines && item.skill_lines.length ? item.skill_lines : ["無"];
+        var checked = index === 0 ? " checked" : "";
+        var equipped = item.equipped ? "（裝備中）" : "";
+        return (
+          '<label class="shop-pickaxe-option">' +
+            '<input type="radio" name="shop-pickaxe-slot" value="' + item.slot + '"' + checked + ">" +
+            '<span class="shop-pickaxe-option-body">' +
+              "<strong>背包第 " + item.slot_label + " 格</strong>" + equipped +
+              "　耐久 " + item.current_health + "/" + item.max_health +
+              '<span class="shop-order-skills">技能:<br>' + lines.map(escapeHtml).join("<br>") + "</span>" +
+            "</span>" +
+          "</label>"
+        );
+      }).join("");
+    }
+
+    async function openSkillPickaxeForm(mode, options, product) {
+      var data = await fetchJson("/api/shop/skill-pickaxes?product_id=" + encodeURIComponent(product.product_id));
+      if (!data.ok) {
+        showToast(false, escapeHtml(data.error || "載入礦鎬失敗"));
+        return;
+      }
+      if (!data.items || !data.items.length) {
+        showToast(false, "你的挖礦背包沒有符合的礦鎬");
+        return;
+      }
+      options.showPickaxe = true;
+      options.showQuantity = false;
+      options.quantity = 1;
+      openForm(mode, options);
+      pickaxeList.innerHTML = renderPickaxePicker(data.items);
     }
 
     function formatTime(isoText) {
@@ -186,6 +241,7 @@
       formMode = "";
       formOrderId = 0;
       formDialog.classList.remove("is-open");
+      if (pickaxeList) pickaxeList.innerHTML = "";
     }
 
     function closeConfirm() {
@@ -202,7 +258,9 @@
       formExtra.innerHTML = options.extra || "";
       fieldPrice.classList.toggle("is-hidden", !options.showPrice);
       fieldQuantity.classList.toggle("is-hidden", !options.showQuantity);
+      fieldPickaxe.classList.toggle("is-hidden", !options.showPickaxe);
       fieldDescription.classList.toggle("is-hidden", !options.showDescription);
+      if (pickaxeLabel && options.pickaxeLabel) pickaxeLabel.textContent = options.pickaxeLabel;
       inputPrice.value = options.price || "";
       inputPrice.readOnly = !!options.priceLocked;
       inputQuantity.value = options.quantity || 1;
@@ -340,14 +398,25 @@
           ? '<button type="button" class="btn btn-danger btn-sm" data-action="ask-unlist" data-id="' + order.order_id + '">下架</button>'
           : '<button type="button" class="btn btn-bid btn-sm" data-action="ask-buy" data-id="' + order.order_id +
             '" data-price="' + order.price + '" data-qty="' + order.quantity + '">購買</button>';
+        var skillBlock = "";
+        if (order.skill_lines && order.skill_lines.length) {
+          skillBlock =
+            '<p class="shop-order-skills">技能:<br>' +
+            order.skill_lines.map(escapeHtml).join("<br>") +
+            "</p>";
+        }
+        var qtyBlock = order.skill_lines && order.skill_lines.length
+          ? ""
+          : '<div><dt>數量</dt><dd>' + order.quantity + '</dd></div>';
         return (
           '<article class="auction-card shop-order-card">' +
             '<div class="shop-order-main">' +
               '<h4>' + escapeHtml(productName) + '</h4>' +
+              skillBlock +
               '<dl class="auction-meta">' +
                 '<div><dt>賣家</dt><dd>' + escapeHtml(order.user_name) + '</dd></div>' +
                 '<div><dt>價格</dt><dd>' + order.price + cakeIcon() + '</dd></div>' +
-                '<div><dt>數量</dt><dd>' + order.quantity + '</dd></div>' +
+                qtyBlock +
               '</dl>' +
             '</div>' +
             '<div class="shop-order-action">' + action + '</div>' +
@@ -506,19 +575,42 @@
       var productId = detailData.product.product_id;
       var price = parseInt(inputPrice.value, 10);
       var quantity = parseInt(inputQuantity.value, 10);
+      var skillPickaxe = isSkillPickaxe(detailData.product);
+      var bagSlot = selectedPickaxeSlot();
       if (formMode === "sell") {
+        if (skillPickaxe && (bagSlot === null || isNaN(bagSlot))) {
+          showToast(false, "請選擇要上架的礦鎬");
+          return;
+        }
         closeForm();
-        postAction("/api/shop/sell-order", { product_id: productId, price: price, quantity: quantity }, "已上架商品");
+        postAction("/api/shop/sell-order", {
+          product_id: productId,
+          price: price,
+          quantity: skillPickaxe ? 1 : quantity,
+          bag_slot: bagSlot
+        }, "已上架商品");
         return;
       }
       if (formMode === "buy-order") {
         closeForm();
-        postAction("/api/shop/buy-order", { product_id: productId, price: price, quantity: quantity }, "已建立求購單");
+        postAction("/api/shop/buy-order", {
+          product_id: productId,
+          price: price,
+          quantity: skillPickaxe ? 1 : quantity
+        }, "已建立求購單");
         return;
       }
       if (formMode === "quick-sell") {
+        if (skillPickaxe && (bagSlot === null || isNaN(bagSlot))) {
+          showToast(false, "請選擇要快速販賣的礦鎬");
+          return;
+        }
         closeForm();
-        postAction("/api/shop/quick-sell", { product_id: productId, quantity: quantity }, "已快速販賣");
+        postAction("/api/shop/quick-sell", {
+          product_id: productId,
+          quantity: skillPickaxe ? 1 : quantity,
+          bag_slot: bagSlot
+        }, "已快速販賣");
         return;
       }
       if (formMode === "buy-listing") {
@@ -527,7 +619,7 @@
         postAction("/api/shop/buy-listing", {
           order_id: orderId,
           product_id: productId,
-          quantity: quantity
+          quantity: skillPickaxe ? 1 : quantity
         }, "購買成功");
         return;
       }
@@ -576,13 +668,19 @@
         var hint = detailData.highest_buy_price
           ? "售價必須高於目前最高求購 " + detailData.highest_buy_price + cakeIcon()
           : "目前沒有求購單，售價只要大於 0 即可。";
-        openForm("sell", {
+        var sellOptions = {
           title: "我要販賣",
           lead: "上架 <strong>" + escapeHtml(product.name) + "</strong>。你目前持有 " + escapeHtml(product.owned_label) + "。<br>" + hint,
           showPrice: true,
           showQuantity: true,
-          confirmText: "上架"
-        });
+          confirmText: "上架",
+          pickaxeLabel: "選擇要上架的礦鎬"
+        };
+        if (isSkillPickaxe(product)) {
+          openSkillPickaxeForm("sell", sellOptions, product);
+          return;
+        }
+        openForm("sell", sellOptions);
         return;
       }
       if (action === "buy-order") {
@@ -590,13 +688,15 @@
           ? "求購價必須低於目前最便宜賣單 " + detailData.lowest_sell_price + cakeIcon()
           : "目前沒有賣單，求購價只要大於 0 即可。";
         var animationOnlyOne = product.kind === "animation_color_pass";
+        var skillOnlyOne = isSkillPickaxe(product);
         openForm("buy-order", {
           title: "購買請求",
           lead: "求購會預扣 單價 × 數量 的蛋糕，取消後會退回。<br>" + buyHint +
-            (animationOnlyOne ? "<br>這個商品一次只能求購 1 個。" : ""),
+            (animationOnlyOne ? "<br>這個商品一次只能求購 1 個。" : "") +
+            (skillOnlyOne ? "<br>這個商品一次只能求購 1 個，並會鎖定挖礦背包一格。" : ""),
           extra: renderMyBuyOrders(detailData.my_buy_orders),
           showPrice: true,
-          showQuantity: true,
+          showQuantity: !skillOnlyOne,
           quantity: 1,
           confirmText: "送出求購"
         });
@@ -616,15 +716,21 @@
         var qtyHint = detailData.highest_buy_price
           ? "將以最高求購價 " + detailData.highest_buy_price + cakeIcon() + " 賣出。"
           : "目前沒有求購單。";
-        openForm("quick-sell", {
+        var quickOptions = {
           title: "快速販賣",
-          lead: qtyHint + "數量不能超過該求購單剩餘與你持有的數量。",
+          lead: qtyHint + (isSkillPickaxe(product) ? "請選擇要賣出的礦鎬。" : "數量不能超過該求購單剩餘與你持有的數量。"),
           showPrice: true,
           price: detailData.highest_buy_price || "",
           priceLocked: true,
           showQuantity: true,
-          confirmText: "賣出"
-        });
+          confirmText: "賣出",
+          pickaxeLabel: "選擇要快速販賣的礦鎬"
+        };
+        if (isSkillPickaxe(product)) {
+          openSkillPickaxeForm("quick-sell", quickOptions, product);
+          return;
+        }
+        openForm("quick-sell", quickOptions);
         return;
       }
       if (action === "ask-buy") {
@@ -634,13 +740,14 @@
         var sellerName = sellOrder ? sellOrder.user_name : "賣家";
         var unitPrice = sellOrder ? sellOrder.price : button.getAttribute("data-price");
         var maxQty = sellOrder ? sellOrder.quantity : button.getAttribute("data-qty");
-        if (product.kind === "animation_color_pass") maxQty = 1;
+        if (product.kind === "animation_color_pass" || isSkillPickaxe(product)) maxQty = 1;
         openForm("buy-listing", {
           title: "購買商品",
           lead: "向 <strong>" + escapeHtml(sellerName) + "</strong> 購買 <strong>" +
             escapeHtml(product.name) + "</strong>，單價 " + unitPrice + cakeIcon() +
-            "，最多 " + maxQty + " 個。",
-          showQuantity: true,
+            "，最多 " + maxQty + " 個。" +
+            (isSkillPickaxe(product) ? "<br>購買後會放進挖礦背包，背包需要有空位。" : ""),
+          showQuantity: !isSkillPickaxe(product),
           quantity: 1,
           confirmText: "確認購買",
           orderId: parseInt(button.getAttribute("data-id"), 10)

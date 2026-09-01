@@ -1006,7 +1006,7 @@ a {
 
 .shop-order-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
 }
@@ -1019,6 +1019,44 @@ a {
 .shop-order-card h4 {
   margin: 0;
   font-size: 1.2rem;
+}
+
+.shop-order-skills {
+  margin: 8px 0 0;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+.shop-pickaxe-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.shop-pickaxe-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.shop-pickaxe-option-body {
+  min-width: 0;
+}
+
+.shop-pickaxe-option .shop-order-skills {
+  display: block;
+  margin-top: 6px;
+}
+
+#shop-pickaxe-list {
+  max-height: 280px;
+  overflow: auto;
 }
 
 .shop-order-card .auction-meta {
@@ -1039,6 +1077,7 @@ a {
 
 .shop-order-action {
   flex: 0 0 auto;
+  align-self: center;
 }
 
 .shop-order-action .btn {
