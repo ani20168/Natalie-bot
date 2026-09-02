@@ -9,6 +9,9 @@
     <a href="/shop" class="sidebar-link{% if active_nav == 'shop' %} is-active{% endif %}">商店</a>
     {% endif %}
     <a href="/auction" class="sidebar-link{% if active_nav == 'auction' %} is-active{% endif %}">拍賣所</a>
+    {% if show_encounter_admin %}
+    <a href="/encounter/admin" class="sidebar-link{% if active_nav == 'encounter' %} is-active{% endif %}">挖礦奇遇後台</a>
+    {% endif %}
     {% if show_permission_nav %}
     <a href="/permissions" class="sidebar-link{% if active_nav == 'permissions' %} is-active{% endif %}">權限控制</a>
     {% endif %}

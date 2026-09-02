@@ -633,7 +633,7 @@ class MiningGame(commands.Cog):
         async with common.jsonio_lock:
             mining_data = await self.miningdata_read(userid)
 
-        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_list 各礦場收藏品清單\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_use 裝備背包內礦鎬\n/mining_bag_drop 丟棄背包內礦鎬(單格/1-3/all)\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
+        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/encounter 挖礦奇遇\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_list 各礦場收藏品清單\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_use 裝備背包內礦鎬\n/mining_bag_drop 丟棄背包內礦鎬(單格/1-3/all)\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
         equip_slot = mining_data[userid].get("equipped_bag_slot")
         pickaxe_line = f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}"
         if equip_slot is not None:
@@ -659,6 +659,7 @@ class MiningGame(commands.Cog):
                 collection_confirm_message += f"{item}: {mining_data[userid]['collections'][item]}個\n"
                 collection_confirm_count += 1
         message.add_field(name=f"擁有收藏品 {collection_confirm_count}/{len(collection_confirm_list)}",value=f"{collection_confirm_message}",inline=False)
+        message.add_field(name="挖礦奇遇",value="每天早上 6 點刷新，一天最多接 3 個任務。看完劇情後提交 NPC 想要的收藏品即可獲得獎勵。",inline=False)
         await interaction.response.send_message(embed=message)
         
     @app_commands.command(name = "collection_list", description = "列出收藏品清單")

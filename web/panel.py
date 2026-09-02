@@ -152,6 +152,7 @@ class WebPanel:
         self.permission_shop_visit = "shop_visit"
         self.permission_shop_edit_description = "shop_edit_description"
         self.permission_shop_admin = "shop_admin"
+        self.permission_encounter_admin = "encounter_admin"
         self.permission_catalog = [
             {
                 "key": "auction",
@@ -187,6 +188,17 @@ class WebPanel:
                         "key": self.permission_shop_admin,
                         "label": "後台管理",
                         "description": "可以進入商店後台，調整手續費等設定",
+                    },
+                ],
+            },
+            {
+                "key": "encounter",
+                "label": "挖礦奇遇",
+                "permissions": [
+                    {
+                        "key": self.permission_encounter_admin,
+                        "label": "後台管理",
+                        "description": "可以進入挖礦奇遇後台，編輯任務、劇情與獎勵機率",
                     },
                 ],
             },
@@ -249,6 +261,11 @@ class WebPanel:
         app.add_api_route("/api/shop/description", self.shop_description, methods=["POST"], name="shop_description")
         app.add_api_route("/api/shop/history", self.shop_history, methods=["GET"], name="shop_history_api")
         app.add_api_route("/api/shop/fee", self.shop_fee_update, methods=["POST"], name="shop_fee_update")
+        app.add_api_route("/encounter/admin", self.encounter_admin_page, methods=["GET"], response_class=HTMLResponse, name="encounter_admin")
+        app.add_api_route("/api/encounter/admin", self.encounter_admin_data, methods=["GET"], name="encounter_admin_data")
+        app.add_api_route("/api/encounter/settings", self.encounter_settings_update, methods=["POST"], name="encounter_settings_update")
+        app.add_api_route("/api/encounter/quest", self.encounter_quest_save, methods=["POST"], name="encounter_quest_save")
+        app.add_api_route("/api/encounter/quest/delete", self.encounter_quest_delete, methods=["POST"], name="encounter_quest_delete")
         app.add_api_websocket_route("/ws/auction", self.auction_socket, name="auction_socket")
         return app
 
@@ -991,6 +1008,121 @@ class WebPanel:
         result = await house.set_fee_settings(fee_percent, vip_fee_percent, svip_fee_percent)
         return JSONResponse(result)
 
+    async def encounter_admin_page(self, request: Request):
+        """
+        挖礦奇遇後台頁。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: 後台、拒絕頁或導向登入
+        """
+        reject, context = await self.load_panel_context(request, "/encounter/admin")
+        if reject is not None:
+            return reject
+        if not context["permissions"].get(self.permission_encounter_admin):
+            return RedirectResponse(url="/panel", status_code=302)
+        context["title"] = "挖礦奇遇後台"
+        context["active_nav"] = "encounter"
+        return self.templates.TemplateResponse(request, "encounter_admin.html", context)
+
+    async def encounter_api_context(self, request: Request):
+        """
+        挖礦奇遇後台 API 共用登入與權限檢查。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            result (tuple): "(None, {'user_id': '4108'}, encounter_house)"
+        """
+        reject, context = await self.load_panel_context(request, "/encounter/admin")
+        if reject is not None:
+            if isinstance(reject, RedirectResponse):
+                return JSONResponse({"ok": False, "error": "請先登入"}, status_code=401), None, None
+            return JSONResponse({"ok": False, "error": "你不在偽造妹妹伺服器中"}, status_code=403), None, None
+        if not context["permissions"].get(self.permission_encounter_admin):
+            return JSONResponse({"ok": False, "error": "你沒有挖礦奇遇後台的權限"}, status_code=403), None, None
+        house = getattr(self.bot, "encounter_house", None)
+        if house is None:
+            return JSONResponse({"ok": False, "error": "挖礦奇遇尚未就緒"}, status_code=503), None, None
+        return None, context, house
+
+    async def encounter_admin_data(self, request: Request):
+        """
+        讀取挖礦奇遇後台資料。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True, 'quests': []}"
+        """
+        reject, context, house = await self.encounter_api_context(request)
+        if reject is not None:
+            return reject
+        return JSONResponse(await house.admin_payload())
+
+    async def encounter_settings_update(self, request: Request):
+        """
+        更新奇遇難度機率。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context, house = await self.encounter_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            weights = body.get("difficulty_weights")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "難度機率資料格式錯誤"}, status_code=400)
+        return JSONResponse(await house.save_settings(weights))
+
+    async def encounter_quest_save(self, request: Request):
+        """
+        新增或更新一個奇遇任務。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True, 'quest': {'id': 'ab12'}}"
+        """
+        reject, context, house = await self.encounter_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"ok": False, "error": "任務資料格式錯誤"}, status_code=400)
+        return JSONResponse(await house.save_quest(body))
+
+    async def encounter_quest_delete(self, request: Request):
+        """
+        刪除一個奇遇任務。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context, house = await self.encounter_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            quest_id = body.get("id")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "任務資料格式錯誤"}, status_code=400)
+        return JSONResponse(await house.delete_quest(quest_id))
+
     async def auction_socket(self, websocket: WebSocket):
         """
         拍賣所即時更新通道：連上後立刻推一次，之後每秒與出價時再推。
@@ -1068,6 +1200,7 @@ class WebPanel:
         }
         context["show_shop_nav"] = bool(context["permissions"].get(self.permission_shop_visit))
         context["show_shop_admin"] = bool(context["permissions"].get(self.permission_shop_admin))
+        context["show_encounter_admin"] = bool(context["permissions"].get(self.permission_encounter_admin))
         return None, context
 
     def safe_next_path(self, path: str | None, default: str = "/panel") -> str:

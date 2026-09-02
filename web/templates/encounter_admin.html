@@ -1,0 +1,568 @@
+{% extends "app_layout.html" %}
+{% block main %}
+<div class="shop-page-head">
+  <div>
+    <h2>挖礦奇遇後台</h2>
+    <p class="shop-lead">從左到右編輯收藏品需求、劇情段落與獎勵機率。拉桿是相對權重，實際掉落率看全部拉桿的比例。</p>
+  </div>
+</div>
+
+<section class="encounter-card">
+  <div class="encounter-card-head">
+    <h3>難度機率</h3>
+    <button type="button" class="btn btn-bid btn-sm" id="encounter-settings-save">儲存難度機率</button>
+  </div>
+  <p class="encounter-hint">玩家使用 <code>/encounter</code> 時會依這裡的權重抽難度；該難度沒有可接任務時，會改抽其他難度。</p>
+  <div id="encounter-difficulty-sliders" class="encounter-slider-list"></div>
+</section>
+
+<section class="encounter-workspace">
+  <aside class="encounter-quest-nav">
+    <div class="encounter-card-head">
+      <h3>任務列表</h3>
+      <button type="button" class="btn btn-outline btn-sm" id="encounter-quest-new">新增任務</button>
+    </div>
+    <div id="encounter-quest-list" class="encounter-quest-list"></div>
+  </aside>
+  <div class="encounter-editor" id="encounter-editor">
+    <p class="encounter-empty" id="encounter-editor-empty">請選擇左側任務，或新增任務。</p>
+    <div id="encounter-editor-body" class="is-hidden">
+      <div class="encounter-editor-meta">
+        <div class="shop-field">
+          <label for="encounter-quest-name">任務名稱</label>
+          <input type="text" id="encounter-quest-name" maxlength="40" placeholder="後台辨識用，玩家看不到">
+        </div>
+        <div class="shop-field">
+          <label for="encounter-quest-difficulty">難度</label>
+          <select id="encounter-quest-difficulty"></select>
+        </div>
+        <div class="encounter-editor-actions">
+          <button type="button" class="btn btn-bid btn-sm" id="encounter-quest-save">儲存任務</button>
+          <button type="button" class="btn btn-danger btn-sm" id="encounter-quest-delete">刪除任務</button>
+        </div>
+      </div>
+      <div class="encounter-editor-columns">
+        <section class="encounter-column">
+          <h3>1. 需要的收藏品</h3>
+          <p class="encounter-hint">玩家只會看到 ???，系統會檢查背包裡對應收藏品數量是否足夠。</p>
+          <div id="encounter-requirements" class="encounter-stack"></div>
+          <button type="button" class="btn btn-outline btn-sm" id="encounter-requirement-add">新增收藏品</button>
+        </section>
+        <section class="encounter-column">
+          <h3>2. 劇情</h3>
+          <p class="encounter-hint">每一段會顯示一次；超過一段時玩家要按「繼續」。只有一段就不會出現繼續按鈕。</p>
+          <div id="encounter-story" class="encounter-stack"></div>
+          <button type="button" class="btn btn-outline btn-sm" id="encounter-story-add">新增段落</button>
+        </section>
+        <section class="encounter-column">
+          <h3>3. 獎勵</h3>
+          <p class="encounter-hint">拉到最左是 0%。全部拉到最右時，會平均分配機率。</p>
+          <div class="encounter-editor-actions">
+            <button type="button" class="btn btn-outline btn-sm" id="encounter-reward-reset">返回預設</button>
+          </div>
+          <div id="encounter-rewards" class="encounter-slider-list"></div>
+        </section>
+      </div>
+    </div>
+  </div>
+</section>
+{% endblock %}
+{% block extra_script %}
+<div id="encounter-toast" class="auction-toast" role="status"></div>
+<script>
+  (function () {
+    var toastBox = document.getElementById("encounter-toast");
+    var toastHideTimer = null;
+    var toastOutTimer = null;
+    var difficultyBox = document.getElementById("encounter-difficulty-sliders");
+    var questListBox = document.getElementById("encounter-quest-list");
+    var editorEmpty = document.getElementById("encounter-editor-empty");
+    var editorBody = document.getElementById("encounter-editor-body");
+    var nameInput = document.getElementById("encounter-quest-name");
+    var difficultySelect = document.getElementById("encounter-quest-difficulty");
+    var requirementsBox = document.getElementById("encounter-requirements");
+    var storyBox = document.getElementById("encounter-story");
+    var rewardsBox = document.getElementById("encounter-rewards");
+    var settings = { difficulty_weights: {} };
+    var quests = [];
+    var collections = [];
+    var rewardItems = [];
+    var difficulties = [];
+    var sliderMax = 100;
+    var sliderDefault = 50;
+    var defaultQuestName = "未命名奇遇";
+    var selectedId = "";
+    var draftCounter = 0;
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function showToast(ok, messageHtml) {
+      if (!toastBox) return;
+      if (toastHideTimer) clearTimeout(toastHideTimer);
+      if (toastOutTimer) clearTimeout(toastOutTimer);
+      toastBox.innerHTML = messageHtml;
+      toastBox.className = "auction-toast " + (ok ? "is-ok" : "is-error");
+      void toastBox.offsetWidth;
+      toastBox.classList.add("is-in");
+      toastHideTimer = setTimeout(function () {
+        toastBox.classList.remove("is-in");
+        toastBox.classList.add("is-out");
+        toastOutTimer = setTimeout(function () {
+          toastBox.className = "auction-toast";
+          toastBox.innerHTML = "";
+        }, 400);
+      }, 2400);
+    }
+
+    function clampWeight(value) {
+      var number = parseInt(value, 10);
+      if (isNaN(number)) return 0;
+      if (number < 0) return 0;
+      if (number > sliderMax) return sliderMax;
+      return number;
+    }
+
+    function weightPercents(weights) {
+      var keys = Object.keys(weights);
+      var total = 0;
+      keys.forEach(function (key) {
+        total += clampWeight(weights[key]);
+      });
+      var percents = {};
+      if (total <= 0) {
+        var even = keys.length ? Math.round((100 / keys.length) * 10) / 10 : 0;
+        keys.forEach(function (key) {
+          percents[key] = even;
+        });
+        return percents;
+      }
+      keys.forEach(function (key) {
+        percents[key] = Math.round((clampWeight(weights[key]) / total) * 1000) / 10;
+      });
+      return percents;
+    }
+
+    function selectedQuest() {
+      for (var index = 0; index < quests.length; index += 1) {
+        if (quests[index].id === selectedId) return quests[index];
+      }
+      return null;
+    }
+
+    function isQuestReady(quest) {
+      if (!quest) return false;
+      var hasStory = (quest.story_paragraphs || []).some(function (paragraph) {
+        return String(paragraph || "").trim();
+      });
+      var hasRequirement = (quest.requirements || []).some(function (entry) {
+        return entry && entry.collection && parseInt(entry.quantity, 10) >= 1;
+      });
+      var hasReward = rewardItems.some(function (item) {
+        return clampWeight((quest.reward_weights || {})[item.item_id]) > 0;
+      });
+      return hasStory && hasRequirement && hasReward;
+    }
+
+    function createDraft() {
+      draftCounter += 1;
+      var weights = {};
+      rewardItems.forEach(function (item) {
+        weights[item.item_id] = sliderDefault;
+      });
+      return {
+        id: "draft-" + draftCounter,
+        name: defaultQuestName,
+        difficulty: difficulties.length ? difficulties[0].key : "easy",
+        story_paragraphs: [""],
+        requirements: [],
+        reward_weights: weights,
+        is_draft: true
+      };
+    }
+
+    function syncEditorToQuest() {
+      var quest = selectedQuest();
+      if (!quest) return;
+      quest.name = nameInput.value;
+      quest.difficulty = difficultySelect.value;
+      quest.story_paragraphs = Array.prototype.map.call(
+        storyBox.querySelectorAll("textarea"),
+        function (textarea) { return textarea.value; }
+      );
+      quest.requirements = Array.prototype.map.call(
+        requirementsBox.querySelectorAll(".encounter-requirement-row"),
+        function (row) {
+          var select = row.querySelector("select");
+          var input = row.querySelector("input");
+          return {
+            collection: select ? select.value : "",
+            quantity: parseInt(input && input.value, 10) || 1
+          };
+        }
+      );
+      quest.reward_weights = quest.reward_weights || {};
+      Array.prototype.forEach.call(rewardsBox.querySelectorAll("input[type='range']"), function (slider) {
+        quest.reward_weights[slider.getAttribute("data-item-id")] = clampWeight(slider.value);
+      });
+    }
+
+    function renderDifficultySliders() {
+      var weights = settings.difficulty_weights || {};
+      var percents = weightPercents(weights);
+      difficultyBox.innerHTML = difficulties.map(function (item) {
+        var value = clampWeight(weights[item.key]);
+        return (
+          '<label class="encounter-slider-row">' +
+            '<span class="encounter-slider-name">' + escapeHtml(item.label) + '</span>' +
+            '<input type="range" min="0" max="' + sliderMax + '" value="' + value + '" data-difficulty="' + escapeHtml(item.key) + '">' +
+            '<span class="encounter-slider-percent" data-percent-for="' + escapeHtml(item.key) + '">' + percents[item.key] + '%</span>' +
+          '</label>'
+        );
+      }).join("");
+    }
+
+    function updateDifficultyPercents() {
+      var weights = {};
+      Array.prototype.forEach.call(difficultyBox.querySelectorAll("input[type='range']"), function (slider) {
+        weights[slider.getAttribute("data-difficulty")] = clampWeight(slider.value);
+      });
+      settings.difficulty_weights = weights;
+      var percents = weightPercents(weights);
+      difficulties.forEach(function (item) {
+        var label = difficultyBox.querySelector('[data-percent-for="' + item.key + '"]');
+        if (label) label.textContent = percents[item.key] + "%";
+      });
+    }
+
+    function renderQuestList() {
+      if (!quests.length) {
+        questListBox.innerHTML = '<p class="encounter-empty">還沒有任務。</p>';
+        return;
+      }
+      questListBox.innerHTML = quests.map(function (quest) {
+        var ready = isQuestReady(quest);
+        var activeClass = quest.id === selectedId ? " is-active" : "";
+        var badge = ready ? "" : '<span class="encounter-badge">未完成</span>';
+        return (
+          '<button type="button" class="encounter-quest-item' + activeClass + '" data-quest-id="' + escapeHtml(quest.id) + '">' +
+            '<strong>' + escapeHtml(quest.name || defaultQuestName) + '</strong>' +
+            '<span>' + escapeHtml(difficultyLabel(quest.difficulty)) + badge + '</span>' +
+          '</button>'
+        );
+      }).join("");
+    }
+
+    function difficultyLabel(key) {
+      for (var index = 0; index < difficulties.length; index += 1) {
+        if (difficulties[index].key === key) return difficulties[index].label;
+      }
+      return key;
+    }
+
+    function renderDifficultyOptions() {
+      difficultySelect.innerHTML = difficulties.map(function (item) {
+        return '<option value="' + escapeHtml(item.key) + '">' + escapeHtml(item.label) + "</option>";
+      }).join("");
+    }
+
+    function renderRequirements() {
+      var quest = selectedQuest();
+      var rows = (quest && quest.requirements) || [];
+      if (!rows.length) {
+        requirementsBox.innerHTML = '<p class="encounter-empty">尚未要求收藏品。</p>';
+        return;
+      }
+      requirementsBox.innerHTML = rows.map(function (entry, index) {
+        var options = collections.map(function (name) {
+          var selected = name === entry.collection ? " selected" : "";
+          return '<option value="' + escapeHtml(name) + '"' + selected + ">" + escapeHtml(name) + "</option>";
+        }).join("");
+        return (
+          '<div class="encounter-requirement-row" data-index="' + index + '">' +
+            '<select>' + options + "</select>" +
+            '<input type="number" min="1" step="1" value="' + (parseInt(entry.quantity, 10) || 1) + '">' +
+            '<button type="button" class="btn btn-outline btn-sm encounter-row-remove" data-kind="requirement">移除</button>' +
+          "</div>"
+        );
+      }).join("");
+    }
+
+    function renderStory() {
+      var quest = selectedQuest();
+      var paragraphs = (quest && quest.story_paragraphs) || [""];
+      if (!paragraphs.length) paragraphs = [""];
+      storyBox.innerHTML = paragraphs.map(function (paragraph, index) {
+        return (
+          '<div class="encounter-story-row">' +
+            '<label>第 ' + (index + 1) + " 段</label>" +
+            '<textarea rows="5" maxlength="1000">' + escapeHtml(paragraph) + "</textarea>" +
+            '<button type="button" class="btn btn-outline btn-sm encounter-row-remove" data-kind="story">移除</button>' +
+          "</div>"
+        );
+      }).join("");
+    }
+
+    function renderRewards() {
+      var quest = selectedQuest();
+      var weights = (quest && quest.reward_weights) || {};
+      var percents = weightPercents(weights);
+      rewardsBox.innerHTML = rewardItems.map(function (item) {
+        var value = clampWeight(weights[item.item_id]);
+        return (
+          '<label class="encounter-slider-row">' +
+            '<span class="encounter-slider-name">' + escapeHtml(item.name) + "</span>" +
+            '<input type="range" min="0" max="' + sliderMax + '" value="' + value + '" data-item-id="' + escapeHtml(item.item_id) + '">' +
+            '<span class="encounter-slider-percent" data-reward-for="' + escapeHtml(item.item_id) + '">' + (percents[item.item_id] || 0) + "%</span>" +
+          "</label>"
+        );
+      }).join("");
+    }
+
+    function updateRewardPercents() {
+      var quest = selectedQuest();
+      if (!quest) return;
+      quest.reward_weights = quest.reward_weights || {};
+      Array.prototype.forEach.call(rewardsBox.querySelectorAll("input[type='range']"), function (slider) {
+        quest.reward_weights[slider.getAttribute("data-item-id")] = clampWeight(slider.value);
+      });
+      var percents = weightPercents(quest.reward_weights);
+      rewardItems.forEach(function (item) {
+        var label = rewardsBox.querySelector('[data-reward-for="' + item.item_id + '"]');
+        if (label) label.textContent = (percents[item.item_id] || 0) + "%";
+      });
+    }
+
+    function showEditor(quest) {
+      selectedId = quest ? quest.id : "";
+      if (!quest) {
+        editorEmpty.classList.remove("is-hidden");
+        editorBody.classList.add("is-hidden");
+        renderQuestList();
+        return;
+      }
+      editorEmpty.classList.add("is-hidden");
+      editorBody.classList.remove("is-hidden");
+      nameInput.value = quest.name || defaultQuestName;
+      difficultySelect.value = quest.difficulty;
+      renderRequirements();
+      renderStory();
+      renderRewards();
+      renderQuestList();
+    }
+
+    function applyPayload(data) {
+      settings = data.settings || { difficulty_weights: {} };
+      quests = data.quests || [];
+      collections = data.collections || [];
+      rewardItems = data.reward_items || [];
+      difficulties = data.difficulties || [];
+      sliderMax = data.slider_max || 100;
+      sliderDefault = data.slider_default || 50;
+      defaultQuestName = data.default_quest_name || "未命名奇遇";
+      renderDifficultyOptions();
+      renderDifficultySliders();
+      if (selectedId) {
+        var current = selectedQuest();
+        showEditor(current || null);
+      } else {
+        showEditor(null);
+      }
+    }
+
+    async function loadAdmin() {
+      var response = await fetch("/api/encounter/admin", { credentials: "same-origin" });
+      var data = await response.json();
+      if (!data.ok) {
+        showToast(false, escapeHtml(data.error || "載入失敗"));
+        return;
+      }
+      applyPayload(data);
+    }
+
+    difficultyBox.addEventListener("input", function (event) {
+      if (event.target && event.target.matches("input[type='range']")) updateDifficultyPercents();
+    });
+
+    rewardsBox.addEventListener("input", function (event) {
+      if (event.target && event.target.matches("input[type='range']")) updateRewardPercents();
+    });
+
+    questListBox.addEventListener("click", function (event) {
+      var button = event.target.closest("[data-quest-id]");
+      if (!button) return;
+      syncEditorToQuest();
+      var quest = quests.find(function (item) { return item.id === button.getAttribute("data-quest-id"); });
+      showEditor(quest || null);
+    });
+
+    nameInput.addEventListener("input", function () {
+      syncEditorToQuest();
+      renderQuestList();
+    });
+    difficultySelect.addEventListener("change", function () {
+      syncEditorToQuest();
+      renderQuestList();
+    });
+
+    document.getElementById("encounter-quest-new").addEventListener("click", function () {
+      syncEditorToQuest();
+      var draft = createDraft();
+      quests.push(draft);
+      showEditor(draft);
+    });
+
+    document.getElementById("encounter-requirement-add").addEventListener("click", function () {
+      var quest = selectedQuest();
+      if (!quest || !collections.length) {
+        showToast(false, "目前沒有可選的收藏品");
+        return;
+      }
+      syncEditorToQuest();
+      quest.requirements = quest.requirements || [];
+      quest.requirements.push({ collection: collections[0], quantity: 1 });
+      renderRequirements();
+    });
+
+    document.getElementById("encounter-story-add").addEventListener("click", function () {
+      var quest = selectedQuest();
+      if (!quest) return;
+      syncEditorToQuest();
+      quest.story_paragraphs = quest.story_paragraphs || [];
+      quest.story_paragraphs.push("");
+      renderStory();
+    });
+
+    document.getElementById("encounter-reward-reset").addEventListener("click", function () {
+      var quest = selectedQuest();
+      if (!quest) return;
+      quest.reward_weights = {};
+      rewardItems.forEach(function (item) {
+        quest.reward_weights[item.item_id] = sliderDefault;
+      });
+      renderRewards();
+    });
+
+    requirementsBox.addEventListener("click", function (event) {
+      var button = event.target.closest(".encounter-row-remove");
+      if (!button) return;
+      var quest = selectedQuest();
+      if (!quest) return;
+      syncEditorToQuest();
+      var row = button.closest(".encounter-requirement-row");
+      var index = row ? parseInt(row.getAttribute("data-index"), 10) : -1;
+      if (index >= 0) quest.requirements.splice(index, 1);
+      renderRequirements();
+    });
+
+    storyBox.addEventListener("click", function (event) {
+      var button = event.target.closest(".encounter-row-remove");
+      if (!button) return;
+      var quest = selectedQuest();
+      if (!quest) return;
+      syncEditorToQuest();
+      var rows = storyBox.querySelectorAll(".encounter-story-row");
+      var index = Array.prototype.indexOf.call(rows, button.closest(".encounter-story-row"));
+      if (index >= 0) quest.story_paragraphs.splice(index, 1);
+      if (!quest.story_paragraphs.length) quest.story_paragraphs.push("");
+      renderStory();
+    });
+
+    document.getElementById("encounter-settings-save").addEventListener("click", async function () {
+      updateDifficultyPercents();
+      try {
+        var response = await fetch("/api/encounter/settings", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ difficulty_weights: settings.difficulty_weights })
+        });
+        var data = await response.json();
+        if (!data.ok) {
+          showToast(false, escapeHtml(data.error || "儲存失敗"));
+          return;
+        }
+        settings = data.settings || settings;
+        renderDifficultySliders();
+        showToast(true, "已儲存難度機率");
+      } catch (error) {
+        showToast(false, "儲存失敗，請稍後再試");
+      }
+    });
+
+    document.getElementById("encounter-quest-save").addEventListener("click", async function () {
+      var quest = selectedQuest();
+      if (!quest) return;
+      syncEditorToQuest();
+      var payload = {
+        name: quest.name,
+        difficulty: quest.difficulty,
+        story_paragraphs: quest.story_paragraphs,
+        requirements: quest.requirements,
+        reward_weights: quest.reward_weights
+      };
+      if (!quest.is_draft) payload.id = quest.id;
+      try {
+        var response = await fetch("/api/encounter/quest", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        var data = await response.json();
+        if (!data.ok || !data.quest) {
+          showToast(false, escapeHtml(data.error || "儲存失敗"));
+          return;
+        }
+        var oldId = quest.id;
+        var nextId = data.quest.id;
+        quests = quests.filter(function (item) { return item.id !== oldId && item.id !== nextId; });
+        quests.push(data.quest);
+        selectedId = nextId;
+        renderQuestList();
+        showEditor(data.quest);
+        showToast(true, data.quest.ready ? "已儲存任務" : "已儲存（尚未完成，玩家還抽不到）");
+      } catch (error) {
+        showToast(false, "儲存失敗，請稍後再試");
+      }
+    });
+
+    document.getElementById("encounter-quest-delete").addEventListener("click", async function () {
+      var quest = selectedQuest();
+      if (!quest) return;
+      if (!window.confirm("確定要刪除這個任務嗎？")) return;
+      if (quest.is_draft) {
+        quests = quests.filter(function (item) { return item.id !== quest.id; });
+        showEditor(quests[0] || null);
+        showToast(true, "已刪除草稿");
+        return;
+      }
+      try {
+        var response = await fetch("/api/encounter/quest/delete", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: quest.id })
+        });
+        var data = await response.json();
+        if (!data.ok) {
+          showToast(false, escapeHtml(data.error || "刪除失敗"));
+          return;
+        }
+        quests = quests.filter(function (item) { return item.id !== quest.id; });
+        showEditor(quests[0] || null);
+        showToast(true, "已刪除任務");
+      } catch (error) {
+        showToast(false, "刪除失敗，請稍後再試");
+      }
+    });
+
+    loadAdmin();
+  })();
+</script>
+{% endblock %}

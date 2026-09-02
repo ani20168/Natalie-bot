@@ -88,6 +88,7 @@ class MongoStorage:
             "shop_history": "shop_history",
             "shop_grant": "shop_grant",
             "shop_settings": "shop_settings",
+            "mining_encounter": "mining_encounter",
         }
         self.user_global_dataset = {"userdata", "mining"}
         self.single_document_dataset = {"odds"}
