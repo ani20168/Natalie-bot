@@ -920,6 +920,7 @@ class Trade(commands.Cog):
         self.robbery_success_rate_per_level = 0.5
         self.robbery_cake_per_level = 100
         self.robbery_interval_key = "robbery interval"
+        self.robbery_forced_cooldown_key = "robbery_forced_cooldown_seconds"
         self.auction_start_price_min = 500
         self.auction_increment_min = 500
         self.auction_duration_max_minutes = 60
@@ -1281,9 +1282,13 @@ class Trade(commands.Cog):
             return
 
         now = datetime.now()
+        forced_seconds = None
+        forced_raw = robber_data.get(self.robbery_forced_cooldown_key)
+        if forced_raw not in (None, ""):
+            forced_seconds = int(forced_raw)
         robbery_cooldown = self.robbery_cooldown
-        if item_house is not None and item_house.has_status_in_data(robber_data, item_house.status_speed_boots):
-            robbery_cooldown = item_house.speed_boots_cooldown
+        if item_house is not None:
+            robbery_cooldown = item_house.robbery_cooldown_of(robber_data, self.robbery_cooldown, forced_seconds)
         last_robbery_raw = robber_data.get(self.robbery_interval_key)
         if last_robbery_raw:
             try:
@@ -1304,6 +1309,8 @@ class Trade(commands.Cog):
 
         # 進入後續判斷：無論成敗皆寫入冷卻
         await common.mongo_storage.update_user_fields(userid, {self.robbery_interval_key: now.strftime("%Y-%m-%d %H:%M:%S")})
+        if forced_seconds is not None:
+            await common.mongo_storage.unset_user_fields(userid, [self.robbery_forced_cooldown_key])
 
         robber_level = int(robber_data.get("level", 1))
         victim_level = int(victim_data.get("level", 1))
@@ -1325,7 +1332,14 @@ class Trade(commands.Cog):
         message.add_field(name="成功率", value=f"**{rate_text}%**", inline=True)
 
         if not success:
-            message.add_field(name="結果", value="失手了！對方把蛋糕護得緊緊的……下次再來吧", inline=False)
+            fail_text = "失手了！對方把蛋糕護得緊緊的……下次再來吧"
+            if item_house is not None and item_house.has_status_in_data(victim_data, item_house.status_bodyguard):
+                fail_text = "失手了！對方的保鏢把你壓制住，搶劫冷卻變成 **1** 天"
+                await common.mongo_storage.update_user_fields(
+                    userid,
+                    {self.robbery_forced_cooldown_key: int(item_house.bodyguard_fail_cooldown.total_seconds())},
+                )
+            message.add_field(name="結果", value=fail_text, inline=False)
             await interaction.response.send_message(embed=message)
             return
 

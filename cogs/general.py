@@ -71,12 +71,15 @@ class ServerItemHouse:
         self.bag_page_size = 10
         self.win_cake_bonus_rate = 0.2
         self.robbery_success_bonus = 20.0
-        self.speed_boots_cooldown = timedelta(minutes=5)
+        self.speed_boots_cooldown = timedelta(minutes=10)
+        self.slow_cooldown_multiplier = 2
+        self.bodyguard_fail_cooldown = timedelta(days=1)
         self.blackjack_cheat_games = 20
         self.jade_bracelet_games = 50
         self.magnet_steal_range = (500, 1000)
         self.strong_magnet_steal_range = (5000, 10000)
         self.status_anti_theft = "anti_theft"
+        self.status_bodyguard = "bodyguard"
         self.status_lucky_glove = "lucky_glove"
         self.status_master_thief = "master_thief"
         self.status_slow = "slow"
@@ -89,6 +92,7 @@ class ServerItemHouse:
         self.charge_effect_keys = {self.status_blackjack_cheat, self.status_jade_bracelet}
         self.status_labels = {
             self.status_anti_theft: "防盜卡",
+            self.status_bodyguard: "保鏢卡",
             self.status_lucky_glove: "妙妙手套",
             self.status_master_thief: "神偷手套",
             self.status_slow: "遲緩",
@@ -106,6 +110,13 @@ class ServerItemHouse:
                 "duration_days": 3,
                 "use_kind": "self_status",
                 "status_key": self.status_anti_theft,
+            },
+            "bodyguard_3": {
+                "name": "保鏢卡(3天)",
+                "description": "被搶劫時，如果對方搶劫失敗，搶劫指令冷卻時間變為一天",
+                "duration_days": 3,
+                "use_kind": "self_status",
+                "status_key": self.status_bodyguard,
             },
             "milk": {
                 "name": "牛奶",
@@ -139,7 +150,7 @@ class ServerItemHouse:
             },
             "slow_potion_3": {
                 "name": "遲緩藥水(3天)",
-                "description": "賦予一位玩家遲緩效果，對有遲緩效果的人搶劫時，成功率提升20%，同時對方搶劫別人的成功率下降20%",
+                "description": "賦予一位玩家遲緩效果，對有遲緩效果的人搶劫時，成功率提升20%，同時對方搶劫別人的成功率下降20%，並且對方每次搶劫後冷卻時間翻倍",
                 "duration_days": 3,
                 "use_kind": "target_status",
                 "status_key": self.status_slow,
@@ -147,7 +158,7 @@ class ServerItemHouse:
             },
             "slow_spray_1": {
                 "name": "遲緩噴霧(1天)",
-                "description": "賦予一位玩家遲緩效果；對象如果在語音房內，語音房的所有玩家都會獲得效果",
+                "description": "賦予一位玩家遲緩效果，對有遲緩效果的人搶劫時，成功率提升20%，同時對方搶劫別人的成功率下降20%，並且對方每次搶劫後冷卻時間翻倍。對象如果在語音房內，語音房的所有玩家都會獲得效果",
                 "duration_days": 1,
                 "use_kind": "slow_spray",
                 "status_key": self.status_slow,
@@ -155,7 +166,7 @@ class ServerItemHouse:
             },
             "speed_boots_3": {
                 "name": "神速靴(3天)",
-                "description": "搶劫冷卻時間變為5分鐘",
+                "description": "搶劫冷卻時間變為10分鐘",
                 "duration_days": 3,
                 "use_kind": "self_status",
                 "status_key": self.status_speed_boots,
@@ -440,6 +451,25 @@ class ServerItemHouse:
         self.prune_status_in_data(user_data)
         status = user_data.get(self.status_key)
         return isinstance(status, dict) and status_key in status
+
+    def robbery_cooldown_of(self, robber_data: dict, base_cooldown: timedelta, forced_seconds: int | None = None) -> timedelta:
+        """
+        依神速靴、遲緩與保鏢卡失敗懲罰計算搶劫冷卻。
+
+        Args:
+            robber_data (dict): "{'item_status': {}}"
+            base_cooldown (timedelta): "1:00:00"
+            forced_seconds (int | None): "86400"
+
+        Returns:
+            cooldown (timedelta): "0:10:00"
+        """
+        if forced_seconds is not None and forced_seconds > 0:
+            return timedelta(seconds=int(forced_seconds))
+        cooldown = self.speed_boots_cooldown if self.has_status_in_data(robber_data, self.status_speed_boots) else base_cooldown
+        if self.has_status_in_data(robber_data, self.status_slow):
+            cooldown = cooldown * self.slow_cooldown_multiplier
+        return cooldown
 
     def charge_remaining_in_data(self, user_data: dict, charge_key: str) -> int:
         """
@@ -904,6 +934,8 @@ class ServerItemHouse:
                 voice_people = self.voice_members(actor)
                 if actor not in voice_people:
                     return False, f"**{item['name']}** 只能在語音房內使用。"
+            if item.get("status_key") == self.status_anti_theft and any(role.id == common.super_vip_id for role in actor.roles):
+                return False, f"至寶本身就不會被搶劫，**{item['name']}** 用不到喔。"
             if int(entry.get("count") or 0) <= 0:
                 return False, "該格沒有物品。"
             bag[slot - 1]["count"] = int(entry["count"]) - 1
