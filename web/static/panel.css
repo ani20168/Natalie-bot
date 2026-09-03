@@ -1525,9 +1525,15 @@ a {
   padding-right: 4px;
 }
 
+.encounter-quest-aside {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
 .encounter-coverage-btn {
   width: 100%;
-  margin-top: 10px;
 }
 
 .encounter-coverage-list {
