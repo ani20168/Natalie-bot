@@ -25,6 +25,11 @@ class EncounterHouse:
             self.difficulty_hard: "困難",
             self.difficulty_legendary: "傳奇",
         }
+        self.difficulty_reward_counts = {
+            self.difficulty_easy: 1,
+            self.difficulty_hard: 2,
+            self.difficulty_legendary: 3,
+        }
         self.daily_limit = 3
         self.reset_hour = 6
         self.slider_min = 0
@@ -195,6 +200,77 @@ class EncounterHouse:
         keys = [key for key, _ in entries]
         values = [weight for _, weight in entries]
         return random.choices(keys, weights=values, k=1)[0]
+
+    def roll_rewards(self, weights: dict, difficulty: str) -> list[str]:
+        """
+        依難度從獎池獨立抽 1～3 次。
+
+        Args:
+            weights (dict): "{'milk': 50}"
+            difficulty (str): "hard"
+
+        Returns:
+            reward_ids (list): "['milk', 'magnet']"
+        """
+        draw_count = self.difficulty_reward_counts.get(difficulty, 1)
+        reward_ids = []
+        for _ in range(draw_count):
+            item_id = self.pick_weighted_key(weights)
+            if not item_id:
+                return []
+            reward_ids.append(item_id)
+        return reward_ids
+
+    def reward_count_map(self, reward_ids: list[str]) -> dict:
+        """
+        把抽出的道具收成數量。
+
+        Args:
+            reward_ids (list): "['milk', 'milk', 'magnet']"
+
+        Returns:
+            counts (dict): "{'milk': 2, 'magnet': 1}"
+        """
+        counts = {}
+        for item_id in reward_ids:
+            counts[item_id] = counts.get(item_id, 0) + 1
+        return counts
+
+    def format_reward_text(self, item_house, reward_ids: list[str]) -> str:
+        """
+        組出完成後的獎勵文字。
+
+        Args:
+            item_house: ServerItemHouse
+            reward_ids (list): "['milk', 'magnet']"
+
+        Returns:
+            text (str): "獲得 **牛奶** x1\\n獲得 **磁鐵** x1"
+        """
+        lines = []
+        for item_id, count in self.reward_count_map(reward_ids).items():
+            lines.append(f"獲得 **{item_house.item_display_name(item_id)}** x{count}")
+        return "\n".join(lines)
+
+    def can_receive_reward_ids(self, item_house, user_data: dict, reward_ids: list[str]) -> bool:
+        """
+        模擬背包能否一次收下這批獎勵。
+
+        Args:
+            item_house: ServerItemHouse
+            user_data (dict): "{'item_bag': []}"
+            reward_ids (list): "['milk', 'magnet']"
+
+        Returns:
+            ok (bool): "True"
+        """
+        bag = []
+        for entry in item_house.normalize_bag(user_data):
+            bag.append(dict(entry) if isinstance(entry, dict) else None)
+        for item_id, count in self.reward_count_map(reward_ids).items():
+            if not item_house.put_items_on_bag(bag, item_id, count):
+                return False
+        return True
 
     def encounter_day_key(self) -> str:
         """
@@ -783,22 +859,32 @@ class EncounterHouse:
                     ephemeral=True,
                 )
                 return
-            reward_id = self.pick_weighted_key(quest.get("reward_weights") or {})
-            if not reward_id or reward_id not in item_house.items:
+            reward_ids = self.roll_rewards(quest.get("reward_weights") or {}, quest.get("difficulty"))
+            if not reward_ids or any(item_id not in item_house.items for item_id in reward_ids):
                 await common.mongo_storage.upsert_user(userid, user_data, "mining")
                 await interaction.response.send_message(
                     embed=Embed(title="挖礦奇遇", description="這個奇遇的獎勵設定有誤，請稍後再試。", color=common.bot_error_color),
                     ephemeral=True,
                 )
                 return
-            if not await item_house.can_receive(userid, reward_id):
+            item_user = await item_house.load_user(userid)
+            if not self.can_receive_reward_ids(item_house, item_user, reward_ids):
                 await common.mongo_storage.upsert_user(userid, user_data, "mining")
                 await interaction.response.send_message(
                     embed=Embed(title="挖礦奇遇", description=self.bag_full_message, color=common.bot_error_color),
                     ephemeral=True,
                 )
                 return
-            if not await item_house.add_items(userid, reward_id, 1):
+            granted = []
+            grant_failed = False
+            for item_id, count in self.reward_count_map(reward_ids).items():
+                if not await item_house.add_items(userid, item_id, count):
+                    grant_failed = True
+                    break
+                granted.append((item_id, count))
+            if grant_failed:
+                for granted_id, granted_count in granted:
+                    await item_house.remove_items(userid, granted_id, granted_count)
                 await common.mongo_storage.upsert_user(userid, user_data, "mining")
                 await interaction.response.send_message(
                     embed=Embed(title="挖礦奇遇", description=self.bag_full_message, color=common.bot_error_color),
@@ -812,9 +898,8 @@ class EncounterHouse:
             user_data["encounter_active"] = None
             await common.mongo_storage.upsert_user(userid, user_data, "mining")
 
-        reward_name = item_house.item_display_name(reward_id)
         embed = Embed(title="挖礦奇遇", description="你成功完成了這次奇遇！", color=common.bot_color)
-        embed.add_field(name="獎勵", value=f"獲得 **{reward_name}** x1", inline=False)
+        embed.add_field(name="獎勵", value=self.format_reward_text(item_house, reward_ids), inline=False)
         await interaction.response.edit_message(embed=embed, view=None)
 
 
