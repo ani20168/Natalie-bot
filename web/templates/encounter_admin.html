@@ -31,6 +31,7 @@
       <button type="button" class="btn btn-outline btn-sm" id="encounter-quest-new">新增任務</button>
     </div>
     <div id="encounter-quest-list" class="encounter-quest-list"></div>
+    <button type="button" class="btn btn-outline btn-sm encounter-coverage-btn" id="encounter-coverage-open">查看收藏品覆蓋數</button>
   </aside>
   <div class="encounter-editor" id="encounter-editor">
     <p class="encounter-empty" id="encounter-editor-empty">請選擇左側任務，或新增任務。</p>
@@ -81,6 +82,16 @@
 {% endblock %}
 {% block extra_script %}
 <div id="encounter-toast" class="auction-toast" role="status"></div>
+<div class="dialog-backdrop" id="encounter-coverage-dialog" role="dialog" aria-modal="true" aria-labelledby="encounter-coverage-title">
+  <div class="dialog-card dialog-wide">
+    <h3 id="encounter-coverage-title">收藏品覆蓋數</h3>
+    <p class="encounter-hint">數字為「有幾個任務用到該收藏品」；同一任務重複需求只算一次。</p>
+    <div id="encounter-coverage-list" class="encounter-coverage-list"></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="encounter-coverage-close">關閉</button>
+    </div>
+  </div>
+</div>
 <script>
   (function () {
     var toastBox = document.getElementById("encounter-toast");
@@ -106,6 +117,8 @@
     var defaultQuestName = "未命名奇遇";
     var selectedId = "";
     var draftCounter = 0;
+    var coverageDialog = document.getElementById("encounter-coverage-dialog");
+    var coverageListBox = document.getElementById("encounter-coverage-list");
 
     function escapeHtml(value) {
       return String(value)
@@ -371,6 +384,64 @@
       }).join("");
     }
 
+    function buildCollectionCoverage() {
+      syncEditorToQuest();
+      var counts = {};
+      collections.forEach(function (name) {
+        counts[name] = 0;
+      });
+      quests.forEach(function (quest) {
+        var usedNames = {};
+        (quest.requirements || []).forEach(function (entry) {
+          if (!entry) return;
+          var collectionName = String(entry.collection || "");
+          if (!collectionName || !Object.prototype.hasOwnProperty.call(counts, collectionName)) return;
+          if (parseInt(entry.quantity, 10) < 1) return;
+          usedNames[collectionName] = true;
+        });
+        Object.keys(usedNames).forEach(function (collectionName) {
+          counts[collectionName] += 1;
+        });
+      });
+      return collections.map(function (name) {
+        return { name: name, quest_count: counts[name] || 0 };
+      }).sort(function (left, right) {
+        if (left.quest_count !== right.quest_count) return left.quest_count - right.quest_count;
+        if (left.name < right.name) return -1;
+        if (left.name > right.name) return 1;
+        return 0;
+      });
+    }
+
+    function renderCollectionCoverage() {
+      if (!coverageListBox) return;
+      if (!collections.length) {
+        coverageListBox.innerHTML = '<p class="encounter-empty">目前沒有收藏品資料。</p>';
+        return;
+      }
+      var rows = buildCollectionCoverage();
+      coverageListBox.innerHTML = rows.map(function (row) {
+        var countClass = row.quest_count > 0 ? "is-used" : "is-zero";
+        return (
+          '<div class="encounter-coverage-row">' +
+            '<span class="encounter-coverage-name">' + escapeHtml(row.name) + "</span>" +
+            '<span class="encounter-coverage-count ' + countClass + '">' + row.quest_count + "</span>" +
+          "</div>"
+        );
+      }).join("");
+    }
+
+    function openCoverageDialog() {
+      if (!coverageDialog) return;
+      renderCollectionCoverage();
+      coverageDialog.classList.add("is-open");
+    }
+
+    function closeCoverageDialog() {
+      if (!coverageDialog) return;
+      coverageDialog.classList.remove("is-open");
+    }
+
     function difficultyLabel(key) {
       for (var index = 0; index < difficulties.length; index += 1) {
         if (difficulties[index].key === key) return difficulties[index].label;
@@ -530,6 +601,22 @@
       sortQuests();
       showEditor(draft);
     });
+
+    document.getElementById("encounter-coverage-open").addEventListener("click", function () {
+      openCoverageDialog();
+    });
+    document.getElementById("encounter-coverage-close").addEventListener("click", function () {
+      closeCoverageDialog();
+    });
+    if (coverageDialog) {
+      var coverageBackdropDown = false;
+      coverageDialog.addEventListener("pointerdown", function (event) {
+        coverageBackdropDown = event.target === coverageDialog;
+      });
+      coverageDialog.addEventListener("click", function (event) {
+        if (coverageBackdropDown && event.target === coverageDialog) closeCoverageDialog();
+      });
+    }
 
     document.getElementById("encounter-requirement-add").addEventListener("click", function () {
       var quest = selectedQuest();

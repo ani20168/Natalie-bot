@@ -1525,6 +1525,51 @@ a {
   padding-right: 4px;
 }
 
+.encounter-coverage-btn {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.encounter-coverage-list {
+  display: grid;
+  gap: 6px;
+  max-height: min(420px, calc(100vh - 260px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  margin: 12px 0 4px;
+  padding-right: 4px;
+}
+
+.encounter-coverage-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(15, 20, 25, 0.35);
+}
+
+.encounter-coverage-name {
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.encounter-coverage-count {
+  flex-shrink: 0;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.encounter-coverage-count.is-zero {
+  color: var(--danger);
+}
+
+.encounter-coverage-count.is-used {
+  color: #4ea1ff;
+}
+
 .encounter-quest-item {
   display: flex;
   flex-direction: column;
