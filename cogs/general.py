@@ -76,6 +76,8 @@ class ServerItemHouse:
         self.bodyguard_fail_cooldown = timedelta(days=1)
         self.blackjack_cheat_games = 20
         self.jade_bracelet_games = 50
+        self.master_thief_robberies = 20
+        self.rain_maker_cake = 1200
         self.magnet_steal_range = (500, 1000)
         self.strong_magnet_steal_range = (5000, 10000)
         self.status_anti_theft = "anti_theft"
@@ -89,6 +91,7 @@ class ServerItemHouse:
         self.status_amethyst = "amethyst_necklace"
         self.status_blackjack_cheat = "blackjack_cheat"
         self.status_jade_bracelet = "jade_bracelet"
+        self.status_rain_maker = "rain_maker"
         self.charge_effect_keys = {self.status_blackjack_cheat, self.status_jade_bracelet}
         self.anti_theft_invalid_title = "你的防盜卡已失效"
         self.anti_theft_expired_reason = "已過期"
@@ -105,6 +108,7 @@ class ServerItemHouse:
             self.status_amethyst: "紫水晶項鍊",
             self.status_blackjack_cheat: "21點作弊卡",
             self.status_jade_bracelet: "玉手鐲",
+            self.status_rain_maker: "造雨機",
         }
         self.items = {
             "anti_theft_3": {
@@ -145,11 +149,12 @@ class ServerItemHouse:
                 "status_key": self.status_lucky_glove,
             },
             "master_thief_3": {
-                "name": "神偷手套(3天)",
-                "description": "搶劫成功後，偷竊數量範圍取最大值",
-                "duration_days": 3,
-                "use_kind": "self_status",
+                "name": "神偷手套",
+                "description": "在接下來的20次搶劫(無論是否成功)，偷竊數量範圍取最大值",
+                "duration_days": 0,
+                "use_kind": "self_charge",
                 "status_key": self.status_master_thief,
+                "charge_amount": self.master_thief_robberies,
             },
             "slow_potion_3": {
                 "name": "遲緩藥水(3天)",
@@ -226,6 +231,13 @@ class ServerItemHouse:
                 "use_kind": "self_status",
                 "status_key": self.status_lightning_rod,
             },
+            "rain_maker_7": {
+                "name": "造雨機",
+                "description": "賦予狀態:在周圍下起蛋糕雨。你在語音房的期間，你與其他同語音的人每隔一段時間都會拿到蛋糕",
+                "duration_days": 7,
+                "use_kind": "self_status",
+                "status_key": self.status_rain_maker,
+            },
         }
 
     def panel_item_guides(self) -> list[dict]:
@@ -241,7 +253,8 @@ class ServerItemHouse:
             if duration_days > 0:
                 kind_label = f"狀態 {duration_days}天"
             elif item.get("use_kind") == "self_charge":
-                kind_label = f"{int(item.get('charge_amount') or 0)}場"
+                charge_amount = int(item.get("charge_amount") or 0)
+                kind_label = f"{charge_amount}次" if item.get("status_key") == self.status_master_thief else f"{charge_amount}場"
             else:
                 kind_label = "一次性"
             guides.append({
@@ -493,6 +506,38 @@ class ServerItemHouse:
             cooldown = cooldown * self.slow_cooldown_multiplier
         return cooldown
 
+    def has_master_thief_effect(self, user_data: dict) -> bool:
+        """
+        是否仍有神偷手套效果（舊版時效狀態或新版次數）。
+
+        Args:
+            user_data (dict): "{'item_status': {}, 'item_charges': {}}"
+
+        Returns:
+            active (bool): "True"
+        """
+        if self.has_status_in_data(user_data, self.status_master_thief):
+            return True
+        return self.charge_remaining_in_data(user_data, self.status_master_thief) > 0
+
+    async def rain_maker_channel_bonus(self, member_ids: list[str]) -> int:
+        """
+        語音房內若有人持有造雨機狀態，回傳該房每人應加的蛋糕。
+
+        Args:
+            member_ids (list): "['4108']"
+
+        Returns:
+            bonus (int): "1200"
+        """
+        if not member_ids:
+            return 0
+        for member_id in member_ids:
+            user_data = await self.load_user(member_id)
+            if self.has_status_in_data(user_data, self.status_rain_maker):
+                return self.rain_maker_cake
+        return 0
+
     def charge_remaining_in_data(self, user_data: dict, charge_key: str) -> int:
         """
         剩餘場數。
@@ -605,19 +650,18 @@ class ServerItemHouse:
             text (str): "防盜卡:剩餘 **72** 小時"
         """
         self.prune_status_in_data(user_data)
-        status = user_data.get(self.status_key)
-        if not isinstance(status, dict) or not status:
-            return ""
         now = datetime.now()
         lines = []
-        for key, entry in status.items():
-            if key in self.charge_effect_keys or not isinstance(entry, dict):
-                continue
-            expires = self.parse_time(entry.get("expires_at"))
-            if expires is None:
-                continue
-            label = self.status_labels.get(key, key)
-            lines.append(f"{label}:{self.remaining_hours_text(expires, now)}")
+        status = user_data.get(self.status_key)
+        if isinstance(status, dict):
+            for key, entry in status.items():
+                if key in self.charge_effect_keys or not isinstance(entry, dict):
+                    continue
+                expires = self.parse_time(entry.get("expires_at"))
+                if expires is None:
+                    continue
+                label = self.status_labels.get(key, key)
+                lines.append(f"{label}:{self.remaining_hours_text(expires, now)}")
         return "\n".join(lines)
 
     def format_win_bonus_line(self, bonus: int) -> str:
@@ -1047,7 +1091,8 @@ class ServerItemHouse:
         if use_kind == "self_charge":
             self.add_charge_status(user_data, item["status_key"], int(item["charge_amount"]))
             remaining = self.charge_remaining_in_data(user_data, item["status_key"])
-            return True, f"使用了 **{name}**，目前剩餘 **{remaining}** 場。"
+            unit = "次" if item["status_key"] == self.status_master_thief else "場"
+            return True, f"使用了 **{name}**，目前剩餘 **{remaining}** {unit}。"
         if use_kind == "target_status":
             target_member = target or actor
             target_data = user_data if str(target_member.id) == user_id else await self.load_user(str(target_member.id))

@@ -191,10 +191,12 @@ class Startup(commands.Cog):
                 540484453445664768
             ]
 
+            item_house = getattr(self.bot, "server_item_house", None)
             reward_map = {}
             for channelid in vclist:
                 channel = self.bot.get_channel(channelid)
                 if channel is None: continue
+                channel_member_ids = []
                 for member in channel.members:
                     if member.bot: continue
                     reward = 3  # 在語音房的基礎獎勵
@@ -209,7 +211,15 @@ class Startup(commands.Cog):
                         reward += 15
                     if reward <= 0: continue
                     member_id = str(member.id)
+                    channel_member_ids.append(member_id)
                     reward_map[member_id] = reward_map.get(member_id, 0) + reward
+                if item_house is None or not channel_member_ids:
+                    continue
+                rain_bonus = await item_house.rain_maker_channel_bonus(channel_member_ids)
+                if rain_bonus <= 0:
+                    continue
+                for member_id in channel_member_ids:
+                    reward_map[member_id] = reward_map.get(member_id, 0) + rain_bonus
 
             userdata_collection = common.mongo_storage.get_collection("userdata")
             defaults = common.mongo_storage.get_user_defaults()

@@ -1306,36 +1306,50 @@ a {
   }
 
   .layout-shop {
-    height: 100vh;
-    height: 100dvh;
-    max-height: 100dvh;
-    overflow: hidden;
-    grid-template-rows: auto minmax(0, 1fr);
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    max-height: none;
+    overflow: visible;
+    grid-template-rows: auto auto;
   }
 
   .layout-shop .main-wrap {
-    min-height: 0;
-    overflow: hidden;
+    min-height: auto;
+    overflow: visible;
   }
 
   .layout-shop .content {
-    min-height: 0;
-    overflow: hidden;
+    min-height: auto;
+    overflow: visible;
+    display: block;
   }
 
   .layout-shop .shop-body,
   .layout-shop .shop-layout,
   .layout-shop .shop-catalog-main {
-    min-height: 0;
-    overflow: hidden;
+    min-height: auto;
+    overflow: visible;
+  }
+
+  .layout-shop .shop-body,
+  .layout-shop .shop-layout {
+    display: block;
+  }
+
+  .layout-shop .shop-catalog-main {
+    display: block;
   }
 
   .layout-shop .shop-products,
   .layout-shop .shop-detail {
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-y;
-    overscroll-behavior: contain;
+    height: auto;
+    min-height: auto;
+    max-height: none;
+    overflow: visible;
+    -webkit-overflow-scrolling: auto;
+    touch-action: auto;
+    overscroll-behavior: auto;
   }
 
   .sidebar {

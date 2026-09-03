@@ -1312,6 +1312,21 @@ class Trade(commands.Cog):
         if forced_seconds is not None:
             await common.mongo_storage.unset_user_fields(userid, [self.robbery_forced_cooldown_key])
 
+        use_max_steal = False
+        master_thief_remaining = None
+        if item_house is not None:
+            use_max_steal = item_house.has_master_thief_effect(robber_data)
+            if use_max_steal and item_house.charge_remaining_in_data(robber_data, item_house.status_master_thief) > 0:
+                if item_house.consume_charge_in_data(robber_data, item_house.status_master_thief):
+                    await common.mongo_storage.update_user_fields(
+                        userid,
+                        {item_house.charge_key: robber_data.get(item_house.charge_key, {})},
+                    )
+                master_thief_remaining = item_house.charge_remaining_in_data(
+                    robber_data,
+                    item_house.status_master_thief,
+                )
+
         robber_level = int(robber_data.get("level", 1))
         victim_level = int(victim_data.get("level", 1))
         success_rate = self.robbery_success_rate(robber_level, victim_level)
@@ -1330,6 +1345,12 @@ class Trade(commands.Cog):
         message.add_field(name="搶劫者", value=f"<@{userid}> 等級:{robber_level}", inline=True)
         message.add_field(name="衰鬼", value=f"<@{member.id}> 等級:{victim_level}", inline=True)
         message.add_field(name="成功率", value=f"**{rate_text}%**", inline=True)
+        if master_thief_remaining is not None:
+            message.add_field(
+                name="神偷手套",
+                value=f"本次已消耗 1 次，剩餘 **{master_thief_remaining}** 次",
+                inline=False,
+            )
 
         if not success:
             fail_text = "失手了！對方把蛋糕護得緊緊的……下次再來吧"
@@ -1344,10 +1365,7 @@ class Trade(commands.Cog):
             return
 
         steal_max = max(1, robber_level * self.robbery_cake_per_level)
-        if item_house is not None and item_house.has_status_in_data(robber_data, item_house.status_master_thief):
-            steal_amount = steal_max
-        else:
-            steal_amount = random.randint(1, steal_max)
+        steal_amount = steal_max if use_max_steal else random.randint(1, steal_max)
         steal_result = await userdata_collection.find_one_and_update(
             {"_id": str(member.id), "cake": {"$gte": steal_amount}},
             {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -steal_amount}},

@@ -472,6 +472,13 @@ class ShopHouse:
                 {"$setOnInsert": product},
                 upsert=True,
             )
+            payload = product.get("payload") if isinstance(product.get("payload"), dict) else {}
+            if payload.get("item_id") not in {"master_thief_3", "rain_maker_7"}:
+                continue
+            await collection.update_one(
+                {"_id": product["_id"]},
+                {"$set": {"name": product["name"], "description": product["description"]}},
+            )
 
     async def allocate_id(self, dataset: str, field_name: str) -> int:
         """
