@@ -90,6 +90,9 @@ class ServerItemHouse:
         self.status_blackjack_cheat = "blackjack_cheat"
         self.status_jade_bracelet = "jade_bracelet"
         self.charge_effect_keys = {self.status_blackjack_cheat, self.status_jade_bracelet}
+        self.anti_theft_invalid_title = "你的防盜卡已失效"
+        self.anti_theft_expired_reason = "已過期"
+        self.anti_theft_milk_reason = "被 {actor_name} 的牛奶消除"
         self.status_labels = {
             self.status_anti_theft: "防盜卡",
             self.status_bodyguard: "保鏢卡",
@@ -452,6 +455,25 @@ class ServerItemHouse:
         status = user_data.get(self.status_key)
         return isinstance(status, dict) and status_key in status
 
+    def anti_theft_is_expired_in_data(self, user_data: dict) -> bool:
+        """
+        文件上的防盜卡是否已到期或無效，這次 prune 會清掉。
+
+        Args:
+            user_data (dict): "{'item_status': {'anti_theft': {'expires_at': '2026-01-01 00:00:00'}}}"
+
+        Returns:
+            expired (bool): "True"
+        """
+        status = user_data.get(self.status_key)
+        if not isinstance(status, dict):
+            return False
+        entry = status.get(self.status_anti_theft)
+        if not isinstance(entry, dict):
+            return False
+        expires = self.parse_time(entry.get("expires_at"))
+        return expires is None or expires <= datetime.now()
+
     def robbery_cooldown_of(self, robber_data: dict, base_cooldown: timedelta, forced_seconds: int | None = None) -> timedelta:
         """
         依神速靴、遲緩與保鏢卡失敗懲罰計算搶劫冷卻。
@@ -624,6 +646,7 @@ class ServerItemHouse:
         """
         user_data = await common.mongo_storage.ensure_user_document(str(user_id))
         self.normalize_bag(user_data)
+        expired_anti_theft = self.anti_theft_is_expired_in_data(user_data)
         if self.prune_status_in_data(user_data):
             await common.mongo_storage.update_user_fields(
                 str(user_id),
@@ -632,7 +655,61 @@ class ServerItemHouse:
                     self.charge_key: user_data.get(self.charge_key, {}),
                 },
             )
+            if expired_anti_theft:
+                await self.notify_anti_theft_expired(user_id)
         return user_data
+
+    async def resolve_user(self, user_id: str) -> discord.User | None:
+        """
+        用 user_id 取得 Discord 使用者，快取沒有再向 API 抓。
+
+        Args:
+            user_id (str): "410847926236086272"
+
+        Returns:
+            user (discord.User | None): "使用者"
+        """
+        try:
+            parsed_id = int(user_id)
+        except (TypeError, ValueError):
+            return None
+        user = self.bot.get_user(parsed_id)
+        if user is not None:
+            return user
+        try:
+            return await self.bot.fetch_user(parsed_id)
+        except (discord.HTTPException, discord.NotFound):
+            return None
+
+    async def send_anti_theft_invalid_dm(self, user, reason_text: str) -> None:
+        """
+        私訊玩家防盜卡已失效；關閉私訊或失敗時略過。
+
+        Args:
+            user: "Discord 使用者"
+            reason_text (str): "已過期"
+        """
+        if user is None:
+            return
+        embed = Embed(
+            title=self.anti_theft_invalid_title,
+            description=f"原因：{reason_text}",
+            color=common.bot_color,
+        )
+        try:
+            await user.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException):
+            return
+
+    async def notify_anti_theft_expired(self, user_id: str) -> None:
+        """
+        防盜卡因過期被清除時私訊玩家。
+
+        Args:
+            user_id (str): "410847926236086272"
+        """
+        user = await self.resolve_user(user_id)
+        await self.send_anti_theft_invalid_dm(user, self.anti_theft_expired_reason)
 
     async def save_bag_and_status(self, user_id: str, user_data: dict) -> None:
         """
@@ -995,9 +1072,15 @@ class ServerItemHouse:
         if use_kind == "milk":
             target_member = target or actor
             target_data = user_data if str(target_member.id) == user_id else await self.load_user(str(target_member.id))
+            had_anti_theft = self.has_status_in_data(target_data, self.status_anti_theft)
             target_data[self.status_key] = {}
             if str(target_member.id) != user_id:
                 await self.save_bag_and_status(str(target_member.id), target_data)
+            if had_anti_theft:
+                await self.send_anti_theft_invalid_dm(
+                    target_member,
+                    self.anti_theft_milk_reason.format(actor_name=actor.display_name),
+                )
             who = "自己" if target_member.id == actor.id else f"<@{target_member.id}>"
             return True, f"使用了 **{name}**，已清除 {who} 的所有狀態。"
         if use_kind == "magnet":

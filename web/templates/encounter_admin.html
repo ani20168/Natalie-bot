@@ -12,8 +12,16 @@
     <h3>難度機率</h3>
     <button type="button" class="btn btn-bid btn-sm" id="encounter-settings-save">儲存難度機率</button>
   </div>
-  <p class="encounter-hint">玩家使用 <code>/encounter</code> 時會依這裡的權重抽難度；該難度沒有可接任務時，會改抽其他難度。<br>完成後簡單從獎池抽 1 次，困難獨立抽 2 次，傳奇獨立抽 3 次。</p>
+  <p class="encounter-hint">玩家使用 <code>/encounter</code> 時會依這裡的權重抽難度；該難度沒有可接任務時，會改抽其他難度。<br>完成後簡單從獎池抽 1 次，困難獨立抽 2 次，傳奇獨立抽 3 次。<br>下方可為各難度設定預設獎勵池；任務編輯時可按「套用難度預設」套到該任務。</p>
   <div id="encounter-difficulty-sliders" class="encounter-slider-list"></div>
+  <details class="shop-accordion encounter-defaults-fold">
+    <summary>
+      <span class="shop-accordion-text">難度預設獎勵</span>
+    </summary>
+    <div class="shop-accordion-body">
+      <div id="encounter-difficulty-reward-defaults" class="encounter-defaults"></div>
+    </div>
+  </details>
 </section>
 
 <section class="encounter-workspace">
@@ -59,6 +67,7 @@
           <p class="encounter-hint">拉到最左是 0%。全部拉到最右時，會平均分配機率。</p>
           <div class="encounter-editor-actions">
             <button type="button" class="btn btn-outline btn-sm" id="encounter-reward-reset">返回預設</button>
+            <button type="button" class="btn btn-outline btn-sm" id="encounter-reward-apply-defaults">套用難度預設</button>
           </div>
           <div id="encounter-rewards" class="encounter-slider-list"></div>
         </section>
@@ -75,6 +84,7 @@
     var toastHideTimer = null;
     var toastOutTimer = null;
     var difficultyBox = document.getElementById("encounter-difficulty-sliders");
+    var difficultyRewardBox = document.getElementById("encounter-difficulty-reward-defaults");
     var questListBox = document.getElementById("encounter-quest-list");
     var editorEmpty = document.getElementById("encounter-editor-empty");
     var editorBody = document.getElementById("encounter-editor-body");
@@ -83,7 +93,7 @@
     var requirementsBox = document.getElementById("encounter-requirements");
     var storyBox = document.getElementById("encounter-story");
     var rewardsBox = document.getElementById("encounter-rewards");
-    var settings = { difficulty_weights: {} };
+    var settings = { difficulty_weights: {}, difficulty_reward_defaults: {} };
     var quests = [];
     var collections = [];
     var rewardItems = [];
@@ -240,6 +250,87 @@
       });
     }
 
+    function emptyRewardWeights(fillValue) {
+      var weights = {};
+      rewardItems.forEach(function (item) {
+        weights[item.item_id] = fillValue;
+      });
+      return weights;
+    }
+
+    function rewardWeightsForDifficulty(difficultyKey) {
+      var stored = (settings.difficulty_reward_defaults || {})[difficultyKey];
+      if (!stored) return emptyRewardWeights(sliderDefault);
+      var weights = {};
+      rewardItems.forEach(function (item) {
+        weights[item.item_id] = Object.prototype.hasOwnProperty.call(stored, item.item_id)
+          ? clampWeight(stored[item.item_id])
+          : 0;
+      });
+      return weights;
+    }
+
+    function renderRewardSliderRows(weights, percentAttr) {
+      var percents = weightPercents(weights);
+      return rewardItems.map(function (item) {
+        var value = clampWeight(weights[item.item_id]);
+        return (
+          '<label class="encounter-slider-row">' +
+            '<span class="encounter-slider-name">' + escapeHtml(item.name) + "</span>" +
+            '<input type="range" min="0" max="' + sliderMax + '" value="' + value + '" data-item-id="' + escapeHtml(item.item_id) + '">' +
+            '<span class="encounter-slider-percent" ' + percentAttr + '="' + escapeHtml(item.item_id) + '">' + (percents[item.item_id] || 0) + "%</span>" +
+          "</label>"
+        );
+      }).join("");
+    }
+
+    function renderDifficultyRewardDefaults() {
+      if (!difficultyRewardBox) return;
+      var defaults = settings.difficulty_reward_defaults || {};
+      difficultyRewardBox.innerHTML = difficulties.map(function (item) {
+        var weights = defaults[item.key] || emptyRewardWeights(sliderDefault);
+        return (
+          '<section class="encounter-defaults-column">' +
+            "<h4 class=\"encounter-defaults-title\">" + escapeHtml(item.label) + "難度預設獎勵</h4>" +
+            '<div class="encounter-slider-list" data-difficulty-defaults="' + escapeHtml(item.key) + '">' +
+              renderRewardSliderRows(weights, "data-default-reward-for") +
+            "</div>" +
+          "</section>"
+        );
+      }).join("");
+    }
+
+    function syncDifficultyRewardDefaultsFromDom() {
+      if (!difficultyRewardBox) return;
+      settings.difficulty_reward_defaults = settings.difficulty_reward_defaults || {};
+      Array.prototype.forEach.call(
+        difficultyRewardBox.querySelectorAll("[data-difficulty-defaults]"),
+        function (listBox) {
+          var difficultyKey = listBox.getAttribute("data-difficulty-defaults");
+          var weights = {};
+          Array.prototype.forEach.call(listBox.querySelectorAll("input[type='range']"), function (slider) {
+            weights[slider.getAttribute("data-item-id")] = clampWeight(slider.value);
+          });
+          settings.difficulty_reward_defaults[difficultyKey] = weights;
+        }
+      );
+    }
+
+    function updateDifficultyRewardDefaultPercents(listBox) {
+      if (!listBox) return;
+      var weights = {};
+      Array.prototype.forEach.call(listBox.querySelectorAll("input[type='range']"), function (slider) {
+        weights[slider.getAttribute("data-item-id")] = clampWeight(slider.value);
+      });
+      settings.difficulty_reward_defaults = settings.difficulty_reward_defaults || {};
+      settings.difficulty_reward_defaults[listBox.getAttribute("data-difficulty-defaults")] = weights;
+      var percents = weightPercents(weights);
+      rewardItems.forEach(function (item) {
+        var label = listBox.querySelector('[data-default-reward-for="' + item.item_id + '"]');
+        if (label) label.textContent = (percents[item.item_id] || 0) + "%";
+      });
+    }
+
     function renderQuestList() {
       if (!quests.length) {
         questListBox.innerHTML = '<p class="encounter-empty">還沒有任務。</p>';
@@ -252,7 +343,7 @@
         return (
           '<button type="button" class="encounter-quest-item' + activeClass + '" data-quest-id="' + escapeHtml(quest.id) + '">' +
             '<strong>' + escapeHtml(quest.name || defaultQuestName) + '</strong>' +
-            '<span>' + escapeHtml(difficultyLabel(quest.difficulty)) + badge + '</span>' +
+            '<span><span class="encounter-quest-difficulty is-' + escapeHtml(quest.difficulty) + '">' + escapeHtml(difficultyLabel(quest.difficulty)) + '</span>' + badge + '</span>' +
           '</button>'
         );
       }).join("");
@@ -311,17 +402,7 @@
     function renderRewards() {
       var quest = selectedQuest();
       var weights = (quest && quest.reward_weights) || {};
-      var percents = weightPercents(weights);
-      rewardsBox.innerHTML = rewardItems.map(function (item) {
-        var value = clampWeight(weights[item.item_id]);
-        return (
-          '<label class="encounter-slider-row">' +
-            '<span class="encounter-slider-name">' + escapeHtml(item.name) + "</span>" +
-            '<input type="range" min="0" max="' + sliderMax + '" value="' + value + '" data-item-id="' + escapeHtml(item.item_id) + '">' +
-            '<span class="encounter-slider-percent" data-reward-for="' + escapeHtml(item.item_id) + '">' + (percents[item.item_id] || 0) + "%</span>" +
-          "</label>"
-        );
-      }).join("");
+      rewardsBox.innerHTML = renderRewardSliderRows(weights, "data-reward-for");
     }
 
     function updateRewardPercents() {
@@ -357,7 +438,7 @@
     }
 
     function applyPayload(data) {
-      settings = data.settings || { difficulty_weights: {} };
+      settings = data.settings || { difficulty_weights: {}, difficulty_reward_defaults: {} };
       quests = data.quests || [];
       collections = data.collections || [];
       rewardItems = data.reward_items || [];
@@ -367,6 +448,7 @@
       defaultQuestName = data.default_quest_name || "未命名奇遇";
       renderDifficultyOptions();
       renderDifficultySliders();
+      renderDifficultyRewardDefaults();
       if (selectedId) {
         var current = selectedQuest();
         showEditor(current || null);
@@ -388,6 +470,13 @@
     difficultyBox.addEventListener("input", function (event) {
       if (event.target && event.target.matches("input[type='range']")) updateDifficultyPercents();
     });
+
+    if (difficultyRewardBox) {
+      difficultyRewardBox.addEventListener("input", function (event) {
+        if (!event.target || !event.target.matches("input[type='range']")) return;
+        updateDifficultyRewardDefaultPercents(event.target.closest("[data-difficulty-defaults]"));
+      });
+    }
 
     rewardsBox.addEventListener("input", function (event) {
       if (event.target && event.target.matches("input[type='range']")) updateRewardPercents();
@@ -441,10 +530,16 @@
     document.getElementById("encounter-reward-reset").addEventListener("click", function () {
       var quest = selectedQuest();
       if (!quest) return;
-      quest.reward_weights = {};
-      rewardItems.forEach(function (item) {
-        quest.reward_weights[item.item_id] = sliderDefault;
-      });
+      quest.reward_weights = emptyRewardWeights(sliderDefault);
+      renderRewards();
+    });
+
+    document.getElementById("encounter-reward-apply-defaults").addEventListener("click", function () {
+      var quest = selectedQuest();
+      if (!quest) return;
+      syncDifficultyRewardDefaultsFromDom();
+      var difficultyKey = difficultySelect.value || quest.difficulty;
+      quest.reward_weights = rewardWeightsForDifficulty(difficultyKey);
       renderRewards();
     });
 
@@ -475,12 +570,16 @@
 
     document.getElementById("encounter-settings-save").addEventListener("click", async function () {
       updateDifficultyPercents();
+      syncDifficultyRewardDefaultsFromDom();
       try {
         var response = await fetch("/api/encounter/settings", {
           method: "POST",
           credentials: "same-origin",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ difficulty_weights: settings.difficulty_weights })
+          body: JSON.stringify({
+            difficulty_weights: settings.difficulty_weights,
+            difficulty_reward_defaults: settings.difficulty_reward_defaults
+          })
         });
         var data = await response.json();
         if (!data.ok) {
@@ -489,6 +588,7 @@
         }
         settings = data.settings || settings;
         renderDifficultySliders();
+        renderDifficultyRewardDefaults();
         showToast(true, "已儲存難度機率");
       } catch (error) {
         showToast(false, "儲存失敗，請稍後再試");

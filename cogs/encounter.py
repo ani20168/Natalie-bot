@@ -35,6 +35,7 @@ class EncounterHouse:
         self.slider_min = 0
         self.slider_max = 100
         self.slider_default = 50
+        self.difficulty_reward_defaults_key = "difficulty_reward_defaults"
         self.default_easy_weight = 60
         self.default_hard_weight = 30
         self.default_legendary_weight = 10
@@ -107,6 +108,35 @@ class EncounterHouse:
             weights (dict): "{'milk': 50}"
         """
         return {item["item_id"]: self.slider_default for item in self.reward_item_catalog()}
+
+    def default_difficulty_reward_defaults(self) -> dict:
+        """
+        各難度預設獎勵池（全部公平）。
+
+        Returns:
+            defaults (dict): "{'easy': {'milk': 50}}"
+        """
+        fair = self.default_reward_weights()
+        return {key: dict(fair) for key in self.difficulty_keys}
+
+    def normalize_difficulty_reward_defaults(self, raw) -> dict:
+        """
+        補齊各難度預設獎勵權重。缺整個難度時用公平預設；已存難度裡的新道具補 0。
+
+        Args:
+            raw: "{'easy': {'milk': 50}}"
+
+        Returns:
+            defaults (dict): "{'easy': {'milk': 50, 'magnet': 0}}"
+        """
+        defaults = self.default_difficulty_reward_defaults()
+        source = raw if isinstance(raw, dict) else {}
+        for key in self.difficulty_keys:
+            raw_weights = source.get(key)
+            if not isinstance(raw_weights, dict):
+                continue
+            defaults[key] = self.normalize_reward_weights(raw_weights)
+        return defaults
 
     def clamp_weight(self, value) -> int:
         """
@@ -512,38 +542,69 @@ class EncounterHouse:
 
     async def load_settings(self) -> dict:
         """
-        讀取難度機率設定。
+        讀取難度機率與各難度預設獎勵池。
 
         Returns:
             settings (dict): "{'difficulty_weights': {'easy': 60}}"
         """
         collection = common.mongo_storage.get_collection(self.dataset_name)
         document = await collection.find_one({"_id": self.settings_document_id}) or {}
-        return {"difficulty_weights": self.normalize_difficulty_weights(document.get("difficulty_weights"))}
+        return {
+            "difficulty_weights": self.normalize_difficulty_weights(document.get("difficulty_weights")),
+            self.difficulty_reward_defaults_key: self.normalize_difficulty_reward_defaults(
+                document.get(self.difficulty_reward_defaults_key)
+            ),
+        }
 
-    async def save_settings(self, raw_weights) -> dict:
+    def settings_payload(self, weights: dict, reward_defaults: dict) -> dict:
         """
-        寫入難度機率設定。
+        組出後台用的設定內容。
+
+        Args:
+            weights (dict): "{'easy': 60}"
+            reward_defaults (dict): "{'easy': {'milk': 50}}"
+
+        Returns:
+            settings (dict): "{'difficulty_weights': {'easy': 60}}"
+        """
+        return {
+            "difficulty_weights": weights,
+            "difficulty_percents": self.weight_percents(weights),
+            self.difficulty_reward_defaults_key: reward_defaults,
+        }
+
+    async def save_settings(self, raw_weights, raw_reward_defaults=None) -> dict:
+        """
+        寫入難度機率與各難度預設獎勵池。
 
         Args:
             raw_weights: "{'easy': 60}"
+            raw_reward_defaults: "{'easy': {'milk': 50}}"
 
         Returns:
             result (dict): "{'ok': True}"
         """
         weights = self.normalize_difficulty_weights(raw_weights)
         collection = common.mongo_storage.get_collection(self.dataset_name)
+        document = await collection.find_one({"_id": self.settings_document_id}) or {}
+        if raw_reward_defaults is None:
+            reward_defaults = self.normalize_difficulty_reward_defaults(
+                document.get(self.difficulty_reward_defaults_key)
+            )
+        else:
+            reward_defaults = self.normalize_difficulty_reward_defaults(raw_reward_defaults)
         await collection.replace_one(
             {"_id": self.settings_document_id},
-            {"_id": self.settings_document_id, "difficulty_weights": weights},
+            {
+                "_id": self.settings_document_id,
+                "difficulty_weights": weights,
+                self.difficulty_reward_defaults_key: reward_defaults,
+            },
             upsert=True,
         )
         return {
             "ok": True,
-            "settings": {
-                "difficulty_weights": weights,
-                "difficulty_percents": self.weight_percents(weights),
-            },
+            "settings": self.settings_payload(weights, reward_defaults),
         }
 
     async def load_quests(self) -> list[dict]:
@@ -636,10 +697,10 @@ class EncounterHouse:
         settings = await self.load_settings()
         return {
             "ok": True,
-            "settings": {
-                "difficulty_weights": settings["difficulty_weights"],
-                "difficulty_percents": self.weight_percents(settings["difficulty_weights"]),
-            },
+            "settings": self.settings_payload(
+                settings["difficulty_weights"],
+                settings[self.difficulty_reward_defaults_key],
+            ),
             "quests": await self.load_quests(),
             "collections": self.all_collection_names(),
             "reward_items": self.reward_item_catalog(),

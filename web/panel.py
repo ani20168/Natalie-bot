@@ -1080,9 +1080,10 @@ class WebPanel:
         try:
             body = await request.json()
             weights = body.get("difficulty_weights")
+            reward_defaults = body.get("difficulty_reward_defaults")
         except Exception:
             return JSONResponse({"ok": False, "error": "難度機率資料格式錯誤"}, status_code=400)
-        return JSONResponse(await house.save_settings(weights))
+        return JSONResponse(await house.save_settings(weights, reward_defaults))
 
     async def encounter_quest_save(self, request: Request):
         """
