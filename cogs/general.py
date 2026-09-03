@@ -232,7 +232,7 @@ class ServerItemHouse:
                 "status_key": self.status_lightning_rod,
             },
             "rain_maker_7": {
-                "name": "造雨機",
+                "name": "造雨機(7天)",
                 "description": "賦予狀態:在周圍下起蛋糕雨。你在語音房的期間，你與其他同語音的人每隔一段時間都會拿到蛋糕",
                 "duration_days": 7,
                 "use_kind": "self_status",
