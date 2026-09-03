@@ -248,6 +248,7 @@ class WebPanel:
         app.add_api_route("/api/permissions", self.permissions_update, methods=["POST"], name="permissions_update")
         app.add_api_route("/shop", self.shop_page, methods=["GET"], response_class=HTMLResponse, name="shop")
         app.add_api_route("/shop/history", self.shop_history_page, methods=["GET"], response_class=HTMLResponse, name="shop_history")
+        app.add_api_route("/shop/orders", self.shop_orders_page, methods=["GET"], response_class=HTMLResponse, name="shop_orders")
         app.add_api_route("/shop/admin", self.shop_admin_page, methods=["GET"], response_class=HTMLResponse, name="shop_admin")
         app.add_api_route("/api/shop/catalog", self.shop_catalog, methods=["GET"], name="shop_catalog")
         app.add_api_route("/api/shop/product", self.shop_product, methods=["GET"], name="shop_product")
@@ -260,6 +261,7 @@ class WebPanel:
         app.add_api_route("/api/shop/skill-pickaxes", self.shop_skill_pickaxes, methods=["GET"], name="shop_skill_pickaxes")
         app.add_api_route("/api/shop/description", self.shop_description, methods=["POST"], name="shop_description")
         app.add_api_route("/api/shop/history", self.shop_history, methods=["GET"], name="shop_history_api")
+        app.add_api_route("/api/shop/my-orders", self.shop_my_orders, methods=["GET"], name="shop_my_orders_api")
         app.add_api_route("/api/shop/fee", self.shop_fee_update, methods=["POST"], name="shop_fee_update")
         app.add_api_route("/encounter/admin", self.encounter_admin_page, methods=["GET"], response_class=HTMLResponse, name="encounter_admin")
         app.add_api_route("/api/encounter/admin", self.encounter_admin_data, methods=["GET"], name="encounter_admin_data")
@@ -634,6 +636,25 @@ class WebPanel:
         context["active_nav"] = "shop"
         return self.templates.TemplateResponse(request, "shop_history.html", context)
 
+    async def shop_orders_page(self, request: Request):
+        """
+        我的買賣單頁。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: 買賣單、拒絕頁或導向登入
+        """
+        reject, context = await self.load_panel_context(request, "/shop/orders")
+        if reject is not None:
+            return reject
+        if not context["permissions"].get(self.permission_shop_visit):
+            return RedirectResponse(url="/panel", status_code=302)
+        context["title"] = "我的買賣單"
+        context["active_nav"] = "shop"
+        return self.templates.TemplateResponse(request, "shop_orders.html", context)
+
     async def shop_admin_page(self, request: Request):
         """
         商店後台管理頁。
@@ -980,6 +1001,30 @@ class WebPanel:
                 "cake": context["cake"],
                 "user_id": context["user_id"],
                 "items": await house.list_my_history(context["user_id"]),
+            }
+        )
+
+    async def shop_my_orders(self, request: Request):
+        """
+        回傳自己目前未成交的賣單與求購單。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True, 'sell_orders': []}"
+        """
+        reject, context, house = await self.shop_api_context(request, "/shop/orders")
+        if reject is not None:
+            return reject
+        payload = await house.list_my_open_orders(context["user_id"])
+        return JSONResponse(
+            {
+                "ok": True,
+                "cake": context["cake"],
+                "user_id": context["user_id"],
+                "sell_orders": payload["sell_orders"],
+                "buy_orders": payload["buy_orders"],
             }
         )
 

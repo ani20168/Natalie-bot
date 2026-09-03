@@ -1282,6 +1282,14 @@ a {
   font-weight: 700;
 }
 
+.shop-history-role.is-sell {
+  color: var(--danger);
+}
+
+.shop-my-order-card .shop-my-order-actions {
+  margin-top: 12px;
+}
+
 @media (max-width: 1200px) {
   .shop-layout {
     grid-template-columns: 1fr;
@@ -1474,6 +1482,11 @@ a {
 .encounter-quest-list {
   display: grid;
   gap: 8px;
+  max-height: min(640px, calc(100vh - 280px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 4px;
 }
 
 .encounter-quest-item {

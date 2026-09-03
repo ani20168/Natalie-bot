@@ -58,9 +58,12 @@
         </section>
         <section class="encounter-column">
           <h3>2. 劇情</h3>
-          <p class="encounter-hint">每一段會顯示一次；超過一段時玩家要按「繼續」。只有一段就不會出現繼續按鈕。</p>
+          <p class="encounter-hint">每一段會顯示一次；超過一段時玩家要按「繼續」。只有一段就不會出現繼續按鈕。<br>也可把整篇貼到第 1 段，再按「智慧分段」依空行拆到後面段落。</p>
           <div id="encounter-story" class="encounter-stack"></div>
-          <button type="button" class="btn btn-outline btn-sm" id="encounter-story-add">新增段落</button>
+          <div class="encounter-editor-actions">
+            <button type="button" class="btn btn-outline btn-sm" id="encounter-story-add">新增段落</button>
+            <button type="button" class="btn btn-outline btn-sm" id="encounter-story-smart-split">智慧分段</button>
+          </div>
         </section>
         <section class="encounter-column">
           <h3>3. 獎勵</h3>
@@ -547,6 +550,28 @@
       quest.story_paragraphs = quest.story_paragraphs || [];
       quest.story_paragraphs.push("");
       renderStory();
+    });
+
+    document.getElementById("encounter-story-smart-split").addEventListener("click", function () {
+      var quest = selectedQuest();
+      if (!quest) return;
+      syncEditorToQuest();
+      var firstText = ((quest.story_paragraphs || [])[0] || "");
+      var parts = String(firstText)
+        .split(/\n\s*\n/)
+        .map(function (part) { return part.trim(); })
+        .filter(function (part) { return part; });
+      if (!parts.length) {
+        showToast(false, "第一段是空的，無法智慧分段");
+        return;
+      }
+      if (parts.length < 2) {
+        showToast(false, "找不到空行分隔，請確認段落之間有空行");
+        return;
+      }
+      quest.story_paragraphs = parts;
+      renderStory();
+      showToast(true, "已分成 " + parts.length + " 段");
     });
 
     document.getElementById("encounter-reward-reset").addEventListener("click", function () {

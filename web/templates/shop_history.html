@@ -5,7 +5,10 @@
     <h2>交易歷史</h2>
     <p class="shop-lead">這裡顯示你的交易紀錄。</p>
   </div>
-  <a class="btn btn-outline btn-sm" href="/shop">返回商店</a>
+  <div class="shop-page-actions">
+    <a class="btn btn-outline btn-sm" href="/shop/orders">查看我的買賣單</a>
+    <a class="btn btn-outline btn-sm" href="/shop">返回商店</a>
+  </div>
 </div>
 <section class="shop-section">
   <div id="shop-history" class="shop-history-list">
@@ -47,12 +50,13 @@
       box.innerHTML = items.map(function (item) {
         var isSeller = String(item.seller_id) === String(userId);
         var role = isSeller ? "賣出" : "買入";
+        var roleClass = isSeller ? "shop-history-role is-sell" : "shop-history-role";
         var other = isSeller ? item.buyer_name : item.seller_name;
         return (
           '<article class="shop-history-card">' +
             '<div class="shop-history-head">' +
               "<h4>" + escapeHtml(item.product_name) + "</h4>" +
-              '<span class="shop-history-role">' + role + "</span>" +
+              '<span class="' + roleClass + '">' + role + "</span>" +
             "</div>" +
             '<p class="shop-card-meta">' + formatTime(item.created_at) + "</p>" +
             '<p class="shop-card-meta">對象：' + escapeHtml(other) + "</p>" +

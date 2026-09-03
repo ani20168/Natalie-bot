@@ -50,6 +50,7 @@ class ShopHouse:
         self.fee_settings_cache = None
         self.history_limit = 80
         self.product_history_limit = 20
+        self.my_orders_limit = 100
         self.trade_dm_title = "Natalie 商店"
 
     def page_url(self) -> str:
@@ -2033,6 +2034,34 @@ class ShopHouse:
             {"$or": [{"buyer_id": str(user_id)}, {"seller_id": str(user_id)}]}
         ).sort("created_at", -1).limit(self.history_limit)
         return [self.history_to_public(document) async for document in cursor if document.get("_id") != self.meta_document_id]
+
+    async def list_my_open_orders(self, user_id: str) -> dict:
+        """
+        列出自己目前未成交的賣單與求購單。
+
+        Args:
+            user_id (str): "410847926236086272"
+
+        Returns:
+            payload (dict): "{'sell_orders': [], 'buy_orders': []}"
+        """
+        collection = common.mongo_storage.get_collection("shop_order")
+        cursor = collection.find(
+            {"status": self.order_status_open, "user_id": str(user_id)}
+        ).sort("created_at", -1).limit(self.my_orders_limit)
+        sell_orders = []
+        buy_orders = []
+        async for document in cursor:
+            if document.get("_id") == self.meta_document_id:
+                continue
+            payload = self.order_to_public(document, user_id)
+            payload["product_id"] = document.get("product_id")
+            payload["product_name"] = document.get("product_name") or document.get("product_id") or ""
+            if document.get("side") == self.side_sell:
+                sell_orders.append(payload)
+            elif document.get("side") == self.side_buy:
+                buy_orders.append(payload)
+        return {"sell_orders": sell_orders, "buy_orders": buy_orders}
 
 
 class Shop(commands.Cog):

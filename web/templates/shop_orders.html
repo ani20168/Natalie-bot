@@ -1,0 +1,240 @@
+{% extends "app_layout.html" %}
+{% block main %}
+<div class="shop-page-head">
+  <div>
+    <h2>我的買賣單</h2>
+    <p class="shop-lead">這裡顯示你目前掛出的賣單與求購單，可以下架或取消。</p>
+  </div>
+  <div class="shop-page-actions">
+    <a class="btn btn-outline btn-sm" href="/shop/history">交易歷史</a>
+    <a class="btn btn-outline btn-sm" href="/shop">返回商店</a>
+  </div>
+</div>
+<section class="shop-section">
+  <h3>我的賣單</h3>
+  <div id="shop-my-sell-orders" class="shop-history-list">
+    <p class="shop-empty">載入中…</p>
+  </div>
+</section>
+<section class="shop-section">
+  <h3>我的求購單</h3>
+  <div id="shop-my-buy-orders" class="shop-history-list">
+    <p class="shop-empty">載入中…</p>
+  </div>
+</section>
+{% endblock %}
+{% block extra_script %}
+<div id="shop-orders-toast" class="auction-toast" role="status"></div>
+<div class="dialog-backdrop" id="shop-orders-confirm" role="dialog" aria-modal="true">
+  <div class="dialog-card">
+    <h3 id="shop-orders-confirm-title">確認</h3>
+    <p id="shop-orders-confirm-text"></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="shop-orders-confirm-cancel">取消</button>
+      <button type="button" class="btn btn-danger btn-sm" id="shop-orders-confirm-ok">確認</button>
+    </div>
+  </div>
+</div>
+<script>
+  (function () {
+    var sellBox = document.getElementById("shop-my-sell-orders");
+    var buyBox = document.getElementById("shop-my-buy-orders");
+    var cakeBox = document.getElementById("topbar-cake");
+    var toastBox = document.getElementById("shop-orders-toast");
+    var confirmDialog = document.getElementById("shop-orders-confirm");
+    var confirmTitle = document.getElementById("shop-orders-confirm-title");
+    var confirmText = document.getElementById("shop-orders-confirm-text");
+    var confirmCancel = document.getElementById("shop-orders-confirm-cancel");
+    var confirmOk = document.getElementById("shop-orders-confirm-ok");
+    var confirmAction = null;
+    var busy = false;
+    var toastTimer = null;
+
+    function escapeHtml(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function cakeIcon() {
+      return '<img class="cake-icon" src="/static/cake.png" alt="蛋糕">';
+    }
+
+    function updateCake(cake) {
+      if (cakeBox && cake !== undefined) {
+        cakeBox.innerHTML = cakeIcon() + " " + cake;
+      }
+    }
+
+    function showToast(ok, message) {
+      if (!toastBox) return;
+      toastBox.className = "auction-toast " + (ok ? "is-ok" : "is-error");
+      toastBox.innerHTML = message;
+      toastBox.classList.add("is-show");
+      if (toastTimer) clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () {
+        toastBox.classList.remove("is-show");
+      }, 2800);
+    }
+
+    function openConfirm(title, text, action) {
+      confirmTitle.textContent = title;
+      confirmText.textContent = text;
+      confirmAction = action;
+      confirmDialog.classList.add("is-open");
+    }
+
+    function closeConfirm() {
+      confirmDialog.classList.remove("is-open");
+      confirmAction = null;
+    }
+
+    function renderSellOrders(orders) {
+      if (!orders || !orders.length) {
+        sellBox.innerHTML = '<p class="shop-empty">你目前沒有掛中的賣單</p>';
+        return;
+      }
+      sellBox.innerHTML = orders.map(function (order) {
+        var skillBlock = "";
+        if (order.skill_lines && order.skill_lines.length) {
+          skillBlock =
+            '<p class="shop-card-meta">技能：' +
+            order.skill_lines.map(escapeHtml).join("、") +
+            "</p>";
+        }
+        var qtyBlock = order.skill_lines && order.skill_lines.length
+          ? ""
+          : '<p class="shop-card-meta">數量 ' + order.quantity + "</p>";
+        return (
+          '<article class="shop-history-card shop-my-order-card">' +
+            '<div class="shop-history-head">' +
+              "<h4>" + escapeHtml(order.product_name) + "</h4>" +
+              '<span class="shop-history-role is-sell">賣單</span>' +
+            "</div>" +
+            '<p class="shop-card-meta">單價 ' + order.price + cakeIcon() + "</p>" +
+            qtyBlock +
+            skillBlock +
+            '<div class="shop-my-order-actions">' +
+              '<button type="button" class="btn btn-danger btn-sm" data-action="unlist" data-id="' +
+              order.order_id + '" data-product="' + escapeHtml(order.product_id || "") + '">下架</button>' +
+            "</div>" +
+          "</article>"
+        );
+      }).join("");
+    }
+
+    function renderBuyOrders(orders) {
+      if (!orders || !orders.length) {
+        buyBox.innerHTML = '<p class="shop-empty">你目前沒有掛中的求購單</p>';
+        return;
+      }
+      buyBox.innerHTML = orders.map(function (order) {
+        return (
+          '<article class="shop-history-card shop-my-order-card">' +
+            '<div class="shop-history-head">' +
+              "<h4>" + escapeHtml(order.product_name) + "</h4>" +
+              '<span class="shop-history-role">求購</span>' +
+            "</div>" +
+            '<p class="shop-card-meta">單價 ' + order.price + cakeIcon() + "</p>" +
+            '<p class="shop-card-meta">數量 ' + order.quantity + "</p>" +
+            '<div class="shop-my-order-actions">' +
+              '<button type="button" class="btn btn-danger btn-sm" data-action="cancel-buy" data-id="' +
+              order.order_id + '" data-product="' + escapeHtml(order.product_id || "") + '">取消求購</button>' +
+            "</div>" +
+          "</article>"
+        );
+      }).join("");
+    }
+
+    async function loadOrders() {
+      try {
+        var response = await fetch("/api/shop/my-orders", { credentials: "same-origin", cache: "no-store" });
+        var data = await response.json();
+        updateCake(data.cake);
+        if (!data.ok) {
+          var errorHtml = '<p class="shop-empty">' + escapeHtml(data.error || "載入失敗") + "</p>";
+          sellBox.innerHTML = errorHtml;
+          buyBox.innerHTML = errorHtml;
+          return;
+        }
+        renderSellOrders(data.sell_orders || []);
+        renderBuyOrders(data.buy_orders || []);
+      } catch (error) {
+        sellBox.innerHTML = '<p class="shop-empty">載入失敗，請稍後再試</p>';
+        buyBox.innerHTML = '<p class="shop-empty">載入失敗，請稍後再試</p>';
+      }
+    }
+
+    async function postCancel(url, body, okMessage) {
+      if (busy) return;
+      busy = true;
+      try {
+        var response = await fetch(url, {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body)
+        });
+        var data = await response.json();
+        updateCake(data.cake);
+        if (!data.ok) {
+          showToast(false, escapeHtml(data.error || "操作失敗"));
+          return;
+        }
+        showToast(true, okMessage);
+        await loadOrders();
+      } catch (error) {
+        showToast(false, "操作失敗，請稍後再試");
+      } finally {
+        busy = false;
+      }
+    }
+
+    document.addEventListener("click", function (event) {
+      var button = event.target.closest("[data-action]");
+      if (!button) return;
+      var action = button.getAttribute("data-action");
+      var orderId = parseInt(button.getAttribute("data-id"), 10);
+      var productId = button.getAttribute("data-product") || "";
+      if (!orderId) return;
+      if (action === "unlist") {
+        openConfirm("確認下架", "確定要下架這筆商品嗎？道具會退回你的背包。", function () {
+          postCancel("/api/shop/sell-order/cancel", {
+            order_id: orderId,
+            product_id: productId
+          }, "已下架");
+        });
+        return;
+      }
+      if (action === "cancel-buy") {
+        openConfirm("取消求購", "確定要取消這筆求購嗎？預扣的蛋糕會退回。", function () {
+          postCancel("/api/shop/buy-order/cancel", {
+            order_id: orderId,
+            product_id: productId
+          }, "已取消求購");
+        });
+      }
+    });
+
+    confirmCancel.addEventListener("click", closeConfirm);
+    confirmDialog.addEventListener("pointerdown", function (event) {
+      confirmDialog.dataset.backdropDown = event.target === confirmDialog ? "1" : "0";
+    });
+    confirmDialog.addEventListener("click", function (event) {
+      if (confirmDialog.dataset.backdropDown === "1" && event.target === confirmDialog) closeConfirm();
+    });
+    confirmOk.addEventListener("click", function () {
+      var action = confirmAction;
+      closeConfirm();
+      if (action) action();
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key === "Escape" && confirmDialog.classList.contains("is-open")) closeConfirm();
+    });
+
+    loadOrders();
+  })();
+</script>
+{% endblock %}
