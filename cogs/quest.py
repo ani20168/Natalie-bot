@@ -142,6 +142,34 @@ class SquidRpsHardWinQuest(DailyQuest):
         self.target = 1
 
 
+class MiningEncounter1Quest(DailyQuest):
+    """完成一次挖礦奇遇的每日任務。"""
+
+    def __init__(self) -> None:
+        """建立完成一次挖礦奇遇的每日任務。"""
+        super().__init__()
+        self.quest_id = "mining_encounter_1"
+        self.description = "完成一次挖礦奇遇"
+        self.cake_reward = 10000
+        self.marshmallow_reward = 1
+        self.event_type = "mining_encounter"
+        self.target = 1
+
+
+class MiningEncounter3Quest(DailyQuest):
+    """完成三次挖礦奇遇的每日任務。"""
+
+    def __init__(self) -> None:
+        """建立完成三次挖礦奇遇的每日任務。"""
+        super().__init__()
+        self.quest_id = "mining_encounter_3"
+        self.description = "完成三次挖礦奇遇"
+        self.cake_reward = 20000
+        self.marshmallow_reward = 2
+        self.event_type = "mining_encounter"
+        self.target = 3
+
+
 async def report_quest_event(bot: commands.Bot, user_id: str | int, event_type: str, amount: int = 1):
     """
     由其他 cog 呼叫：回報事件以推進對應每日任務。
@@ -216,6 +244,8 @@ class Quest(commands.Cog):
             InviteMemberQuest(),
             BlackjackQuest(),
             SquidRpsHardWinQuest(),
+            MiningEncounter1Quest(),
+            MiningEncounter3Quest(),
         ]
         self.quest_map = {quest.quest_id: quest for quest in self.quests}
         self.daily_settlement.start()

@@ -7,6 +7,7 @@ from discord import Embed, app_commands
 from discord.ext import commands
 
 from . import common
+from .quest import report_quest_event
 
 
 class EncounterHouse:
@@ -959,6 +960,7 @@ class EncounterHouse:
             user_data["encounter_active"] = None
             await common.mongo_storage.upsert_user(userid, user_data, "mining")
 
+        await report_quest_event(self.bot, userid, "mining_encounter")
         embed = Embed(title="挖礦奇遇", description="你成功完成了這次奇遇！", color=common.bot_color)
         embed.add_field(name="獎勵", value=self.format_reward_text(item_house, reward_ids), inline=False)
         await interaction.response.edit_message(embed=embed, view=None)
