@@ -507,7 +507,7 @@ class EncounterHouse:
         組出目前段落的 embed。
 
         Args:
-            quest (dict): "{'story_paragraphs': ['...']}"
+            quest (dict): "{'story_paragraphs': ['...'], 'name': '火山地底的低語'}"
             story_index (int): "0"
 
         Returns:
@@ -517,7 +517,9 @@ class EncounterHouse:
         if not paragraphs:
             return Embed(title="挖礦奇遇", description=self.empty_message, color=common.bot_error_color)
         index = max(0, min(story_index, len(paragraphs) - 1))
-        embed = Embed(title="挖礦奇遇", description=paragraphs[index], color=common.bot_color)
+        quest_name = str(quest.get("name") or self.default_quest_name).strip() or self.default_quest_name
+        embed = Embed(title="挖礦奇遇", color=common.bot_color)
+        embed.add_field(name=f"《{quest_name}》", value=paragraphs[index], inline=False)
         if index < len(paragraphs) - 1:
             return embed
         embed.add_field(name="難度", value=self.difficulty_labels.get(quest.get("difficulty"), "簡單"), inline=True)
