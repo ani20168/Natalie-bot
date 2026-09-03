@@ -608,6 +608,23 @@ class EncounterHouse:
             "settings": self.settings_payload(weights, reward_defaults),
         }
 
+    def quest_list_sort_key(self, quest: dict) -> tuple:
+        """
+        後台任務列表排序鍵：難度由易到難，同難度用 id 固定位置。
+
+        Args:
+            quest (dict): "{'id': 'ab12', 'difficulty': 'easy'}"
+
+        Returns:
+            key (tuple): "(0, 'ab12')"
+        """
+        difficulty = quest.get("difficulty")
+        try:
+            difficulty_index = self.difficulty_keys.index(difficulty)
+        except ValueError:
+            difficulty_index = 0
+        return (difficulty_index, str(quest.get("id") or ""))
+
     async def load_quests(self) -> list[dict]:
         """
         讀取全部奇遇任務。
@@ -621,7 +638,7 @@ class EncounterHouse:
             quest = self.normalize_quest(document)
             if quest is not None:
                 quests.append(quest)
-        quests.sort(key=lambda quest: quest.get("name") or "")
+        quests.sort(key=self.quest_list_sort_key)
         return quests
 
     async def get_quest(self, quest_id: str) -> dict | None:
