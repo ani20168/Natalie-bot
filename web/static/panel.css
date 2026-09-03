@@ -1341,6 +1341,11 @@ a {
     display: block;
   }
 
+  .layout-shop .shop-layout.is-hidden,
+  .layout-shop .shop-detail.is-hidden {
+    display: none;
+  }
+
   .layout-shop .shop-products,
   .layout-shop .shop-detail {
     height: auto;
