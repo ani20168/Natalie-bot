@@ -9,6 +9,77 @@
   --accent-dim: rgba(0, 223, 235, 0.15);
   --danger: #ff6b6b;
   --discord: #5865f2;
+  --scroll-size: 8px;
+  --scroll-track: transparent;
+  --scroll-thumb: rgba(139, 155, 176, 0.35);
+  --scroll-thumb-hover: rgba(0, 223, 235, 0.45);
+}
+
+/* 可複用細滾動條（Firefox + Chromium/Safari） */
+.panel-scroll,
+.shop-products,
+.shop-categories,
+.shop-detail,
+.shop-history-list,
+#shop-pickaxe-list,
+.encounter-quest-list {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) var(--scroll-track);
+}
+
+.panel-scroll::-webkit-scrollbar,
+.shop-products::-webkit-scrollbar,
+.shop-categories::-webkit-scrollbar,
+.shop-detail::-webkit-scrollbar,
+.shop-history-list::-webkit-scrollbar,
+#shop-pickaxe-list::-webkit-scrollbar,
+.encounter-quest-list::-webkit-scrollbar {
+  width: var(--scroll-size);
+  height: var(--scroll-size);
+}
+
+.panel-scroll::-webkit-scrollbar-track,
+.shop-products::-webkit-scrollbar-track,
+.shop-categories::-webkit-scrollbar-track,
+.shop-detail::-webkit-scrollbar-track,
+.shop-history-list::-webkit-scrollbar-track,
+#shop-pickaxe-list::-webkit-scrollbar-track,
+.encounter-quest-list::-webkit-scrollbar-track {
+  background: var(--scroll-track);
+}
+
+.panel-scroll::-webkit-scrollbar-thumb,
+.shop-products::-webkit-scrollbar-thumb,
+.shop-categories::-webkit-scrollbar-thumb,
+.shop-detail::-webkit-scrollbar-thumb,
+.shop-history-list::-webkit-scrollbar-thumb,
+#shop-pickaxe-list::-webkit-scrollbar-thumb,
+.encounter-quest-list::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.panel-scroll::-webkit-scrollbar-thumb:hover,
+.shop-products::-webkit-scrollbar-thumb:hover,
+.shop-categories::-webkit-scrollbar-thumb:hover,
+.shop-detail::-webkit-scrollbar-thumb:hover,
+.shop-history-list::-webkit-scrollbar-thumb:hover,
+#shop-pickaxe-list::-webkit-scrollbar-thumb:hover,
+.encounter-quest-list::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-thumb-hover);
+  background-clip: padding-box;
+}
+
+.panel-scroll::-webkit-scrollbar-corner,
+.shop-products::-webkit-scrollbar-corner,
+.shop-categories::-webkit-scrollbar-corner,
+.shop-detail::-webkit-scrollbar-corner,
+.shop-history-list::-webkit-scrollbar-corner,
+#shop-pickaxe-list::-webkit-scrollbar-corner,
+.encounter-quest-list::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 * {
