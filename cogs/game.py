@@ -793,18 +793,16 @@ class MiningGame(commands.Cog):
                         break
                 awarded_digs += 1
 
-            message = Embed(title="Natalie 挖礦", description="\n\n".join(dig_lines), color=common.bot_color)
-            if found_collections:
-                collection_value = "\n".join(f"獲得**{collection}**!" for collection in found_collections)
-                message.add_field(name="找到收藏品!", value=collection_value, inline=False)
-
             pickaxe_broke = broke_by_durability or broke_by_accident or mining_data[userid]["pickaxe_health"] == 0
             if pickaxe_broke and skills.get("collection_on_break"):
                 collection = self.try_roll_collection_reward(mining_data, userid, skills)
                 if collection:
-                    message.add_field(name="毀損時找到收藏品!", value=f"獲得**{collection}**!", inline=False)
-                else:
-                    message.add_field(name="毀損收藏品判定", value="這次沒有找到收藏品。", inline=False)
+                    found_collections.append(collection)
+
+            message = Embed(title="Natalie 挖礦", description="\n\n".join(dig_lines), color=common.bot_color)
+            if found_collections:
+                collection_value = "\n".join(f"獲得**{collection}**!" for collection in found_collections)
+                message.add_field(name="找到收藏品!", value=collection_value, inline=False)
 
             if mine_restore_count > 0:
                 message.add_field(
