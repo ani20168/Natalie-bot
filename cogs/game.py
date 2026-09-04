@@ -220,20 +220,20 @@ class MiningGame(commands.Cog):
         # 額外礦 bonus 必為該礦場最高價值礦物（20%）
         if random.random() < 0.20:
             skills["bonus_force_highest_value"] = True
-        # 增加 5%～20% 獲得收藏品機率（15%）
-        if random.random() < 0.15:
+        # 增加 5%～20% 獲得收藏品機率（20%）
+        if random.random() < 0.20:
             skills["collection_chance_add"] = random.randint(5, 20) / 100.0
         # 每次挖礦有 50% 機率不扣耐久（40%）
         if random.random() < 0.40:
             skills["durability_half_skip"] = True
-        # 2～5 倍挖掘效率（15%）：一次指令等同挖 N 次，等待只算一次
-        if random.random() < 0.15:
+        # 2～5 倍挖掘效率（20%）：一次指令等同挖 N 次，等待只算一次
+        if random.random() < 0.20:
             skills["dig_efficiency_mult"] = random.randint(2, 5)
-        # 礦鎬毀損時再判定一次收藏品（10%）
-        if random.random() < 0.10:
+        # 礦鎬毀損時再判定一次收藏品（15%）：耐久用完或意外毀損皆觸發
+        if random.random() < 0.15:
             skills["collection_on_break"] = True
-        # 挖礦時有 20% 機率不消耗礦場量並回復一次（10% 取得此效果）
-        if random.random() < 0.10:
+        # 挖礦時有 20% 機率不消耗礦場量並回復一次（15% 取得此效果）
+        if random.random() < 0.15:
             skills["mine_limit_restore"] = True
         return skills
 
