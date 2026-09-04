@@ -760,13 +760,14 @@ class MiningGame(commands.Cog):
             skills = self.get_active_skills_from_user(mining_data, userid)
 
             dig_lines = []
+            found_collections = []
             broke_by_accident = False
             awarded_digs = 0
             while awarded_digs < planned_digs:
                 dig_lines.append(self.apply_single_dig_mineral_reward(mining_data, userid, skills))
                 collection = self.try_roll_collection_reward(mining_data, userid, skills)
                 if collection:
-                    dig_lines[-1] += f"\n找到收藏品!**{collection}**!"
+                    found_collections.append(collection)
                 if random.random() < 0.05 and mining_data[userid]["mine"] in ("熾熱火炎山", "虛空洞穴", "天境之地"):
                     mining_data[userid]["pickaxe_health"] = 0
                     self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
@@ -793,6 +794,9 @@ class MiningGame(commands.Cog):
                 awarded_digs += 1
 
             message = Embed(title="Natalie 挖礦", description="\n\n".join(dig_lines), color=common.bot_color)
+            if found_collections:
+                collection_value = "\n".join(f"獲得**{collection}**!" for collection in found_collections)
+                message.add_field(name="找到收藏品!", value=collection_value, inline=False)
 
             pickaxe_broke = broke_by_durability or broke_by_accident or mining_data[userid]["pickaxe_health"] == 0
             if pickaxe_broke and skills.get("collection_on_break"):
