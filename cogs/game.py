@@ -229,7 +229,7 @@ class MiningGame(commands.Cog):
         # 2～5 倍挖掘效率（20%）：一次指令等同挖 N 次，等待只算一次
         if random.random() < 0.20:
             skills["dig_efficiency_mult"] = random.randint(2, 5)
-        # 礦鎬毀損時再判定一次收藏品（15%）：耐久用完或意外毀損皆觸發
+        # 礦鎬毀損時，在執行一次獲得收藏品獎勵判定（15%）：耐久用完或意外毀損皆觸發
         if random.random() < 0.15:
             skills["collection_on_break"] = True
         # 挖礦時有 20% 機率不消耗礦場量並回復一次（15% 取得此效果）
@@ -334,7 +334,7 @@ class MiningGame(commands.Cog):
         if "dig_efficiency_mult" in skills:
             lines.append(f"**{skills['dig_efficiency_mult']}**倍挖掘效率")
         if skills.get("collection_on_break"):
-            lines.append("礦鎬毀損時再判定一次收藏品")
+            lines.append("礦鎬毀損時，在執行一次獲得收藏品獎勵判定")
         if skills.get("mine_limit_restore"):
             lines.append("挖礦時有**20%**機率不消耗礦場挖掘量並回復一次")
         return "\n".join(lines)
