@@ -62,8 +62,10 @@ class MiningGame(commands.Cog):
         self.skill_pickaxe_shop = {
             "災禍鎬": {"需求等級": 50, "價格": 10000},
             "附魔迷你船錨": {"需求等級": 64, "價格": 20000},
+            "靈能之手": {"需求等級": 78, "價格": 30000},
         }
         self.skill_pickaxe_discard_timeout = 60
+        self.mine_limit_restore_proc_chance = 0.20
 
 
     async def miningdata_read(self,userid: str):
@@ -139,6 +141,11 @@ class MiningGame(commands.Cog):
         return random.randint(1, 100) * 10
 
 
+    def roll_psychic_hand_pickaxe_durability(self) -> int:
+        """靈能之手：骰出 10～100、且為 10 倍數的耐久上限。"""
+        return random.randint(1, 10) * 10
+
+
     def roll_disaster_pickaxe_skills(self) -> dict:
         """災禍鎬：各技能獨立骰是否取得，並骰出數值／旗標寫入 dict。"""
         skills = {}
@@ -196,13 +203,53 @@ class MiningGame(commands.Cog):
         return skills
 
 
+    def roll_psychic_hand_pickaxe_skills(self) -> dict:
+        """靈能之手：各技能獨立骰是否取得，並骰出數值／旗標寫入 dict。"""
+        skills = {}
+        # 增加 40%～100% 獲得額外礦物機率（35%）
+        if random.random() < 0.35:
+            skills["bonus_chance_add"] = random.randint(40, 100) / 100.0
+        # 觸發額外礦 bonus 時，額外數量再 +3～8（35%）
+        if random.random() < 0.35:
+            skills["bonus_extra_on_proc"] = random.randint(3, 8)
+        # 減少 4～7 秒挖掘等待（20%）
+        if random.random() < 0.20:
+            skills["dig_time_reduce_sec"] = random.randint(4, 7)
+        # 額外礦 bonus 必為該礦場最高價值礦物（20%）
+        if random.random() < 0.20:
+            skills["bonus_force_highest_value"] = True
+        # 增加 5%～20% 獲得收藏品機率（15%）
+        if random.random() < 0.15:
+            skills["collection_chance_add"] = random.randint(5, 20) / 100.0
+        # 每次挖礦有 50% 機率不扣耐久（40%）
+        if random.random() < 0.40:
+            skills["durability_half_skip"] = True
+        # 2～5 倍挖掘效率（15%）：一次指令等同挖 N 次，等待只算一次
+        if random.random() < 0.15:
+            skills["dig_efficiency_mult"] = random.randint(2, 5)
+        # 礦鎬毀損時再判定一次收藏品（10%）
+        if random.random() < 0.10:
+            skills["collection_on_break"] = True
+        # 挖礦時有 20% 機率不消耗礦場量並回復一次（10% 取得此效果）
+        if random.random() < 0.10:
+            skills["mine_limit_restore"] = True
+        return skills
+
+
     def roll_skill_pickaxe_instance(self, template: str) -> dict:
         """購買技能鎬時產生一筆背包資料：template、耐久與 skills。"""
-        max_health = self.roll_random_pickaxe_durability()
-        if template == "災禍鎬":
+        if template == "靈能之手":
+            max_health = self.roll_psychic_hand_pickaxe_durability()
+            skills = self.roll_psychic_hand_pickaxe_skills()
+        elif template == "災禍鎬":
+            max_health = self.roll_random_pickaxe_durability()
             skills = self.roll_disaster_pickaxe_skills()
-        else:
+        elif template == "附魔迷你船錨":
+            max_health = self.roll_random_pickaxe_durability()
             skills = self.roll_anchor_pickaxe_skills()
+        else:
+            max_health = self.roll_random_pickaxe_durability()
+            skills = {}
         return {"template": template, "max_health": max_health, "current_health": max_health, "skills": skills}
 
 
@@ -257,6 +304,12 @@ class MiningGame(commands.Cog):
             lines.append(f"增加 {int(round(skills['collection_chance_add'] * 100))}% 獲得收藏品的機率")
         if skills.get("durability_half_skip"):
             lines.append("每次挖礦有 50% 機率不消耗耐久")
+        if "dig_efficiency_mult" in skills:
+            lines.append(f"{skills['dig_efficiency_mult']}倍挖掘效率")
+        if skills.get("collection_on_break"):
+            lines.append("礦鎬毀損時再判定一次收藏品")
+        if skills.get("mine_limit_restore"):
+            lines.append("挖礦時有 20% 機率不消耗礦場挖掘量並回復一次")
         return lines
 
     def skill_pickaxe_lines_for_embed(self, skills: dict) -> str:
@@ -276,6 +329,12 @@ class MiningGame(commands.Cog):
             lines.append(f"增加**{int(round(skills['collection_chance_add'] * 100))}%**獲得收藏品的機率")
         if skills.get("durability_half_skip"):
             lines.append("每次挖礦有**50%**機率不消耗耐久")
+        if "dig_efficiency_mult" in skills:
+            lines.append(f"**{skills['dig_efficiency_mult']}**倍挖掘效率")
+        if skills.get("collection_on_break"):
+            lines.append("礦鎬毀損時再判定一次收藏品")
+        if skills.get("mine_limit_restore"):
+            lines.append("挖礦時有**20%**機率不消耗礦場挖掘量並回復一次")
         return "\n".join(lines)
 
 
@@ -401,6 +460,189 @@ class MiningGame(commands.Cog):
         mining_data[userid]["equipped_bag_slot"] = None
 
 
+    def try_roll_collection_reward(self, mining_data: dict, userid: str, skills: dict) -> Optional[str]:
+        """
+        依目前技能機率判定是否獲得收藏品。
+
+        Args:
+            mining_data (dict): "{'4108': {'mine': '森林礦坑'}}"
+            userid (str): "4108"
+            skills (dict): "{'collection_chance_add': 0.05}"
+
+        Returns:
+            collection (str | None): "'昆蟲化石'"
+        """
+        collection_base = 0.01 + float(skills.get("collection_chance_add") or 0)
+        collection_base = min(1.0, collection_base)
+        if random.random() >= collection_base:
+            return None
+        collection = random.choice(self.collection_list[mining_data[userid]["mine"]])
+        if collection not in mining_data[userid]["collections"]:
+            mining_data[userid]["collections"][collection] = 0
+        mining_data[userid]["collections"][collection] += 1
+        return collection
+
+
+    def apply_single_dig_mineral_reward(self, mining_data: dict, userid: str, skills: dict) -> str:
+        """
+        執行一次礦物抽獎（含額外礦 bonus），並回傳該次結果文字。
+
+        Args:
+            mining_data (dict): "{'4108': {'mine': '森林礦坑'}}"
+            userid (str): "4108"
+            skills (dict): "{'bonus_chance_add': 0.4}"
+
+        Returns:
+            dig_text (str): "'你挖到了**鐵礦**!'"
+        """
+        reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
+        random_num = random.random()
+        current_probability = 0
+        reward = "石頭"
+        for mineral_name, probability in reward_probabilities.items():
+            current_probability += probability
+            if random_num < current_probability:
+                reward = mineral_name
+                break
+        dig_text = f"你挖到了**{reward}**!"
+        if reward == "石頭":
+            return dig_text
+        if reward not in mining_data[userid]:
+            mining_data[userid][reward] = 0
+        mining_data[userid][reward] += 1
+        pickaxe_name = mining_data[userid]["pickaxe"]
+        base_prob = 0.0
+        if pickaxe_name == "鑽石鎬":
+            base_prob = 0.1
+        elif pickaxe_name == "不要鎬":
+            base_prob = 0.15
+        base_prob += float(skills.get("bonus_chance_add") or 0)
+        base_prob = min(1.0, base_prob)
+        bonus_extra = int(skills.get("bonus_extra_on_proc") or 0)
+        bonus_qty = 1 + bonus_extra
+        force_highest = bool(skills.get("bonus_force_highest_value"))
+        extra_mineral_type = reward
+        if force_highest:
+            highest = self.highest_priced_mineral_in_mine(mining_data[userid]["mine"])
+            if highest:
+                extra_mineral_type = highest
+        if random.random() < base_prob:
+            if extra_mineral_type not in mining_data[userid]:
+                mining_data[userid][extra_mineral_type] = 0
+            mining_data[userid][extra_mineral_type] += bonus_qty
+            dig_text += f"\n你額外獲得了**{bonus_qty}**個**{extra_mineral_type}**!"
+        return dig_text
+
+
+    async def try_restore_mine_limit(self, mine_name: str, skills: dict) -> Optional[int]:
+        """
+        若有礦場回復技能且觸發，把已消耗的量退回並再回復一次（+2），回傳最新剩餘。
+
+        Args:
+            mine_name (str): "森林礦坑"
+            skills (dict): "{'mine_limit_restore': True}"
+
+        Returns:
+            remain (int | None): "501"
+        """
+        if not skills.get("mine_limit_restore"):
+            return None
+        if random.random() >= self.mine_limit_restore_proc_chance:
+            return None
+        target_key = f"mine_mininglimit.{mine_name}"
+        mining_collection = common.mongo_storage.get_collection("mining")
+        remain_document = await mining_collection.find_one_and_update(
+            {"_id": "global"},
+            {"$inc": {target_key: 2}},
+            return_document=common.ReturnDocument.AFTER,
+        )
+        if remain_document is None:
+            return None
+        return remain_document.get("mine_mininglimit", {}).get(mine_name)
+
+
+    async def try_autofix_pickaxe(self, mining_data: dict, userid: str) -> bool:
+        """
+        若已開啟 autofix，嘗試花 10 蛋糕將礦鎬修至滿耐久。呼叫端須已持有 jsonio_lock，且僅在耐久為 0 時呼叫。
+
+        Args:
+            mining_data (dict): "{'4108': {'autofix': True}}"
+            userid (str): "4108"
+
+        Returns:
+            fixed (bool): "True"
+        """
+        if mining_data[userid].get("autofix") != True:
+            return False
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        defaults = common.mongo_storage.get_user_defaults()
+        spend_fix = await userdata_collection.find_one_and_update(
+            {"_id": userid, "cake": {"$gte": 10}},
+            {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -10}},
+            upsert=False,
+            return_document=common.ReturnDocument.AFTER,
+        )
+        if spend_fix is None:
+            return False
+        mining_data[userid]["pickaxe_health"] = mining_data[userid]["pickaxe_maxhealth"]
+        self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
+        return True
+
+
+    async def refund_mine_limit_delta(self, mine_name: str, mine_deltas: list) -> Optional[int]:
+        """
+        依預扣時記錄的淨變化，退回未發獎次數對礦場量的影響。
+
+        Args:
+            mine_name (str): "森林礦坑"
+            mine_deltas (list): "[-1, 1, -1]"
+
+        Returns:
+            remain (int | None): "500"
+        """
+        undo = 0
+        for delta in mine_deltas:
+            undo -= delta
+        if undo == 0:
+            return None
+        target_key = f"mine_mininglimit.{mine_name}"
+        mining_collection = common.mongo_storage.get_collection("mining")
+        remain_document = await mining_collection.find_one_and_update(
+            {"_id": "global"},
+            {"$inc": {target_key: undo}},
+            return_document=common.ReturnDocument.AFTER,
+        )
+        if remain_document is None:
+            return None
+        return remain_document.get("mine_mininglimit", {}).get(mine_name)
+
+
+    async def prepare_remaining_efficiency_digs(self, mining_data: dict, userid: str, dura_costs: list) -> int:
+        """
+        毀損並修好後，為後續效率次數依序重扣耐久（對齊連續單次挖礦）；中途修失敗則停止。
+
+        Args:
+            mining_data (dict): "{'4108': {'pickaxe_health': 0}}"
+            userid (str): "4108"
+            dura_costs (list): "[10, 0, 10]"
+
+        Returns:
+            prepared_count (int): "2"
+        """
+        prepared = 0
+        for cost in dura_costs:
+            if mining_data[userid]["pickaxe_health"] == 0:
+                if not await self.try_autofix_pickaxe(mining_data, userid):
+                    break
+            if cost > 0:
+                mining_data[userid]["pickaxe_health"] -= cost
+                if mining_data[userid]["pickaxe_health"] < 0:
+                    mining_data[userid]["pickaxe_health"] = 0
+            self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
+            prepared += 1
+        return prepared
+
+
     def parse_mining_bag_drop_arg(self, raw: str) -> Tuple[str, Union[None, int, Tuple[int, int]]]:
         """解析丟棄輸入：all | 單格 1～7 | 區間 "1-3"（數字可含空白）。"""
         text = raw.strip()
@@ -423,6 +665,7 @@ class MiningGame(commands.Cog):
             mining_data = await self.miningdata_read(userid)
             skills_pre = self.get_active_skills_from_user(mining_data, userid)
             dig_reduce = int(skills_pre.get("dig_time_reduce_sec") or 0)
+            dig_efficiency = max(1, int(skills_pre.get("dig_efficiency_mult") or 1))
             # 冷卻與挖掘縮秒同源（下限 1 秒），避免固定 8 秒冷卻與技能縮時不一致
             cooldown_sec = max(1.0, 8.0 - dig_reduce)
             last_mining_ts = float(mining_data[userid].get("mining_cooldown_last") or 0)
@@ -440,116 +683,134 @@ class MiningGame(commands.Cog):
                 return
             await common.mongo_storage.update_global_fields({"gaming_time": time.time()})
 
-            #確認礦場是否已挖完?
             current_mine = mining_data[userid]['mine']
             mining_collection = common.mongo_storage.get_collection("mining")
             target_key = f"mine_mininglimit.{current_mine}"
-            remain_document = await mining_collection.find_one_and_update(
-                {"_id": "global", target_key: {"$gt": 0}},
-                {"$inc": {target_key: -1}},
-                return_document=common.ReturnDocument.AFTER,
-            )
-            remain_after_decrement = None if remain_document is None else remain_document.get("mine_mininglimit", {}).get(current_mine)
-            if remain_after_decrement is None:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"**{current_mine}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color))
+            planned_digs = 0
+            planned_dura_costs = []
+            planned_mine_deltas = []
+            remain_after_decrement = None
+            mine_restore_count = 0
+            broke_by_durability = False
+
+            for dig_index in range(dig_efficiency):
+                # 每次開挖前處理壞掉／自動修理（對齊連續單次 /mining）
+                if mining_data[userid]["pickaxe_health"] == 0:
+                    autofix_on = mining_data[userid].get("autofix") == True
+                    if not await self.try_autofix_pickaxe(mining_data, userid):
+                        if dig_index == 0:
+                            if autofix_on:
+                                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!而且你的蛋糕也不足以修理礦鎬。",color=common.bot_error_color))
+                            else:
+                                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
+                            return
+                        break
+
+                remain_document = await mining_collection.find_one_and_update(
+                    {"_id": "global", target_key: {"$gt": 0}},
+                    {"$inc": {target_key: -1}},
+                    return_document=common.ReturnDocument.AFTER,
+                )
+                remain_after_decrement = None if remain_document is None else remain_document.get("mine_mininglimit", {}).get(current_mine)
+                if remain_after_decrement is None:
+                    if dig_index == 0:
+                        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"**{current_mine}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color))
+                        return
+                    break
+
+                mine_delta = -1
+                restored_remain = await self.try_restore_mine_limit(current_mine, skills_pre)
+                if restored_remain is not None:
+                    remain_after_decrement = restored_remain
+                    mine_restore_count += 1
+                    mine_delta = 1
+
+                consume_dura = True
+                if skills_pre.get("durability_half_skip") and random.random() < 0.5:
+                    consume_dura = False
+                dura_cost = 0
+                if consume_dura:
+                    mining_data[userid]["pickaxe_health"] -= 10
+                    if mining_data[userid]["pickaxe_health"] < 0:
+                        mining_data[userid]["pickaxe_health"] = 0
+                    dura_cost = 10
+                self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
+                planned_dura_costs.append(dura_cost)
+                planned_mine_deltas.append(mine_delta)
+                planned_digs += 1
+                if mining_data[userid]["pickaxe_health"] == 0:
+                    broke_by_durability = True
+                    # 不在此中斷：下一輪會依 autofix 決定是否繼續
+
+            if planned_digs <= 0:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
                 return
 
-            #確認礦鎬壞了沒
-            if mining_data[userid]["pickaxe_health"] == 0:
-                #如果有開啟自動修理
-                if mining_data[userid]["autofix"] == True:
-                    userdata_collection = common.mongo_storage.get_collection("userdata")
-                    defaults = common.mongo_storage.get_user_defaults()
-                    spend_fix = await userdata_collection.find_one_and_update(
-                        {"_id": userid, "cake": {"$gte": 10}},
-                        {"$setOnInsert": {key: value for key, value in defaults.items() if key != "cake"}, "$inc": {"cake": -10}},
-                        upsert=False,
-                        return_document=common.ReturnDocument.AFTER,
-                    )
-                    if spend_fix is None:
-                        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!而且你的蛋糕也不足以修理礦鎬。",color=common.bot_error_color))
-                        return
-                    mining_data[userid]['pickaxe_health'] = mining_data[userid]['pickaxe_maxhealth']
-                    self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
-                else:
-                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
-                    return
-
             dig_sleep = max(0.5, 8.0 - dig_reduce)
-            consume_dura = True
-            if skills_pre.get("durability_half_skip") and random.random() < 0.5:
-                consume_dura = False
-            if consume_dura:
-                mining_data[userid]["pickaxe_health"] -= 10
-            self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
             mining_data[userid]["mining_cooldown_last"] = time.time()
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
-            # 寫入當前使用者挖礦狀態，避免整份資料覆蓋
             await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
 
         await asyncio.sleep(dig_sleep)
 
         async with common.jsonio_lock:
-            #等待時間結束後再次讀取，防止回溯問題
             mining_data = await self.miningdata_read(userid)
+            skills = self.get_active_skills_from_user(mining_data, userid)
 
-            #開始抽獎
-            reward_probabilities = self.mineral_chancelist[mining_data[userid]["mine"]]
-            random_num = random.random()
-            current_probability = 0
-            for reward, probability in reward_probabilities.items():
-                current_probability += probability
-                if random_num < current_probability:
-                    message = Embed(title="Natalie 挖礦",description=f"你挖到了**{reward}**!",color=common.bot_color)
-                    if reward != "石頭":
-                        if reward not in mining_data[userid]:
-                            mining_data[userid][reward] = 0
-                        mining_data[userid][reward] += 1
+            dig_lines = []
+            broke_by_accident = False
+            awarded_digs = 0
+            while awarded_digs < planned_digs:
+                dig_lines.append(self.apply_single_dig_mineral_reward(mining_data, userid, skills))
+                collection = self.try_roll_collection_reward(mining_data, userid, skills)
+                if collection:
+                    dig_lines[-1] += f"\n找到收藏品!**{collection}**!"
+                if random.random() < 0.05 and mining_data[userid]["mine"] in ("熾熱火炎山", "虛空洞穴", "天境之地"):
+                    mining_data[userid]["pickaxe_health"] = 0
+                    self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
+                    broke_by_accident = True
+                    remain_dura = planned_dura_costs[awarded_digs + 1:]
+                    remain_deltas = planned_mine_deltas[awarded_digs + 1:]
+                    if not remain_dura:
+                        dig_lines[-1] += "\n礦鎬意外損毀!需要修理。"
+                        awarded_digs += 1
+                        break
+                    prepared = await self.prepare_remaining_efficiency_digs(mining_data, userid, remain_dura)
+                    if prepared > 0:
+                        dig_lines[-1] += "\n礦鎬意外損毀!已自動修理。"
+                    else:
+                        dig_lines[-1] += "\n礦鎬意外損毀!需要修理。"
+                    cancel_deltas = remain_deltas[prepared:]
+                    refunded_remain = await self.refund_mine_limit_delta(mining_data[userid]["mine"], cancel_deltas)
+                    if refunded_remain is not None:
+                        remain_after_decrement = refunded_remain
+                    planned_digs = awarded_digs + 1 + prepared
+                    if prepared == 0:
+                        awarded_digs += 1
+                        break
+                awarded_digs += 1
 
-                        skills = self.get_active_skills_from_user(mining_data, userid)
-                        pickaxe_name = mining_data[userid]["pickaxe"]
-                        base_prob = 0.0
-                        if pickaxe_name == "鑽石鎬":
-                            base_prob = 0.1
-                        elif pickaxe_name == "不要鎬":
-                            base_prob = 0.15
-                        base_prob += float(skills.get("bonus_chance_add") or 0)
-                        base_prob = min(1.0, base_prob)
-                        bonus_extra = int(skills.get("bonus_extra_on_proc") or 0)
-                        bonus_qty = 1 + bonus_extra
-                        force_highest = bool(skills.get("bonus_force_highest_value"))
-                        extra_mineral_type = reward
-                        if force_highest:
-                            hi = self.highest_priced_mineral_in_mine(mining_data[userid]["mine"])
-                            if hi:
-                                extra_mineral_type = hi
-                        if random.random() < base_prob:
-                            if extra_mineral_type not in mining_data[userid]:
-                                mining_data[userid][extra_mineral_type] = 0
-                            mining_data[userid][extra_mineral_type] += bonus_qty
-                            message.description += f"\n你額外獲得了**{bonus_qty}**個**{extra_mineral_type}**!"
-                    break
+            message = Embed(title="Natalie 挖礦", description="\n\n".join(dig_lines), color=common.bot_color)
 
-            skills_post = self.get_active_skills_from_user(mining_data, userid)
-            collection_base = 0.01 + float(skills_post.get("collection_chance_add") or 0)
-            collection_base = min(1.0, collection_base)
-            random_num = random.random()
-            if random_num < collection_base:
-                collection = random.choice(self.collection_list[mining_data[userid]["mine"]])
-                if collection not in mining_data[userid]["collections"]:
-                    mining_data[userid]["collections"][collection] = 0
-                mining_data[userid]["collections"][collection] += 1
-                message.add_field(name="找到收藏品!",value=f"獲得**{collection}**!",inline= False)
+            pickaxe_broke = broke_by_durability or broke_by_accident or mining_data[userid]["pickaxe_health"] == 0
+            if pickaxe_broke and skills.get("collection_on_break"):
+                collection = self.try_roll_collection_reward(mining_data, userid, skills)
+                if collection:
+                    message.add_field(name="毀損時找到收藏品!", value=f"獲得**{collection}**!", inline=False)
+                else:
+                    message.add_field(name="毀損收藏品判定", value="這次沒有找到收藏品。", inline=False)
 
-            random_num = random.random()
-            if random_num < 0.05 and (mining_data[userid]["mine"] == "熾熱火炎山" or mining_data[userid]["mine"] == "虛空洞穴" or mining_data[userid]["mine"] == "天境之地"):
-                mining_data[userid]["pickaxe_health"] = 0
-                self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
-                message.add_field(name="礦鎬意外損毀!",value="你在挖礦途中不小心把礦鎬弄壞了，需要修理。",inline= False)
+            if mine_restore_count > 0:
+                message.add_field(
+                    name="礦場挖掘量回復!",
+                    value=f"技能觸發，本次共回復礦場挖掘量 **{mine_restore_count}** 次。",
+                    inline=False,
+                )
 
             mine_here = mining_data[userid]["mine"]
             remaining_here = remain_after_decrement
-            message.set_footer(text=f"位置:{mine_here} 剩餘:{remaining_here}")
+            footer_extra = f" 效率x{awarded_digs}" if awarded_digs > 1 else ""
+            message.set_footer(text=f"位置:{mine_here} 剩餘:{remaining_here}{footer_extra}")
 
             await interaction.edit_original_response(embed=message)
             await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
@@ -722,6 +983,7 @@ class MiningGame(commands.Cog):
         app_commands.Choice(name="不要鎬  耐久:1000 需要25等 $5000", value="不要鎬"),
         app_commands.Choice(name="災禍鎬(隨機技能) 耐久10~1000 50等 $10000", value="災禍鎬"),
         app_commands.Choice(name="附魔迷你船錨(隨機技能) 耐久10~1000 64等 $20000", value="附魔迷你船錨"),
+        app_commands.Choice(name="靈能之手(隨機技能) 耐久10~100 78等 $30000", value="靈能之手"),
         ])
     async def pickaxe_buy(self,interaction,choices: app_commands.Choice[str]):
         async with common.jsonio_lock:
@@ -1173,17 +1435,27 @@ class BlackJack(commands.Cog):
         data[userid]["cake"] += bonus
         return house.format_win_bonus_line(bonus)
 
-    def consume_game_item_charges(self, user_data: dict) -> None:
+    def consume_game_item_charges(self, user_data: dict, message=None) -> str:
         """
-        一場遊戲結束時消耗玉手鐲次數。
+        一場遊戲結束時消耗玉手鐲次數，並可寫入結算提示。
 
         Args:
-            user_data (dict): "{'item_status': {}}"
+            user_data (dict): "{'item_charges': {}}"
+            message (Embed | None): "結算 embed"
+
+        Returns:
+            text (str): "本次已消耗 1 場，剩餘 **49** 場"
         """
         house = getattr(self.bot, "server_item_house", None)
         if house is None:
-            return
-        house.consume_charge_in_data(user_data, house.status_jade_bracelet)
+            return ""
+        if not house.consume_charge_in_data(user_data, house.status_jade_bracelet):
+            return ""
+        leftover = house.charge_remaining_in_data(user_data, house.status_jade_bracelet)
+        text = house.format_jade_bracelet_charge_text(leftover)
+        if message is not None:
+            message.add_field(name=house.status_labels[house.status_jade_bracelet], value=text, inline=False)
+        return text
 
     def consume_blackjack_cheat_peek(self, user_data: dict, playing_deck: list) -> str | None:
         """
@@ -1330,10 +1602,6 @@ class BlackJack(commands.Cog):
                     bonus_text = self.apply_item_win_bonus(data, userid, bet + side_bet_amount * mult)
                     data[userid]["blackjack_win_rate"] += 1
                     data[userid]["blackjack_round"] += 1
-                    self.consume_game_item_charges(data[userid])
-                    await common.mongo_storage.replace_user(userid, data[userid])
-                    if len(player_cards) == 2 and self.calculate_point(player_cards) == 21:
-                        await report_quest_event(self.bot, userid, "blackjack")
                     message.add_field(
                         name="結果",
                         value=(
@@ -1345,6 +1613,10 @@ class BlackJack(commands.Cog):
                         ),
                         inline=False,
                     )
+                    self.consume_game_item_charges(data[userid], message)
+                    await common.mongo_storage.replace_user(userid, data[userid])
+                    if len(player_cards) == 2 and self.calculate_point(player_cards) == 21:
+                        await report_quest_event(self.bot, userid, "blackjack")
                     message.set_footer(text=await self.win_rate_show(userid))
                     await interaction.followup.send(embed=message)
                     await self.send_blackjack_peek(interaction, peek_text)
@@ -1356,7 +1628,7 @@ class BlackJack(commands.Cog):
                 message.add_field(name="結果",value=f"**BlackJack!**\n你獲得了**{int(bet*1.5)}**塊{cake_emoji}(blackjack! x 1.5){BlackJack.side_bet_loss_line(side_bet_amount, cake_emoji)}{bonus_text}\n你現在有**{data[userid]['cake']}**塊{cake_emoji}",inline=False)
                 data[userid]["blackjack_win_rate"] += 1
                 data[userid]["blackjack_round"] += 1
-                self.consume_game_item_charges(data[userid])
+                self.consume_game_item_charges(data[userid], message)
                 await common.mongo_storage.replace_user(userid, data[userid])
                 await report_quest_event(self.bot, userid, "blackjack")
                 message.set_footer(text=await self.win_rate_show(userid))
@@ -1568,7 +1840,7 @@ class BlackJackButton(discord.ui.View):
                 self.insurance_button.disabled = True
                 data[userid]["blackjack_playing"] = False
                 data[userid]["blackjack_round"] += 1
-                BlackJack(self.bot).consume_game_item_charges(data[userid])
+                BlackJack(self.bot).consume_game_item_charges(data[userid], message)
                 self.stop()
             #過五關
             elif len(self.player_cards) >= 5:
@@ -1584,7 +1856,7 @@ class BlackJackButton(discord.ui.View):
                 self.insurance_button.disabled = True
                 data[userid]["blackjack_playing"] = False
                 data[userid]["blackjack_round"] += 1
-                BlackJack(self.bot).consume_game_item_charges(data[userid])
+                BlackJack(self.bot).consume_game_item_charges(data[userid], message)
                 self.stop()
 
 
@@ -1648,7 +1920,7 @@ class BlackJackButton(discord.ui.View):
             if insurance_text is not None:
                 message.add_field(name="保險", value=insurance_text, inline=False)
             data[userid]["blackjack_playing"] = False
-            BlackJack(self.bot).consume_game_item_charges(data[userid])
+            BlackJack(self.bot).consume_game_item_charges(data[userid], message)
             await common.mongo_storage.replace_user(userid, data[userid])
         message.set_footer(text=await BlackJack(self.bot).win_rate_show(userid, data))
         await interaction.response.edit_message(embed=message,view=self)
@@ -1702,7 +1974,7 @@ class BlackJackButton(discord.ui.View):
                         message.add_field(name="保險", value=insurance_text, inline=False)
                     self.insurance_button.disabled = True
                     data[userid]["blackjack_playing"] = False
-                    BlackJack(self.bot).consume_game_item_charges(data[userid])
+                    BlackJack(self.bot).consume_game_item_charges(data[userid], message)
                     await common.mongo_storage.replace_user(userid, data[userid])
                 else:
                     #莊家點數未達17點的話，則加牌直到點數>=17點
@@ -1741,7 +2013,7 @@ class BlackJackButton(discord.ui.View):
                         message.add_field(name="保險", value=insurance_text, inline=False)
                     self.insurance_button.disabled = True
                     data[userid]["blackjack_playing"] = False
-                    BlackJack(self.bot).consume_game_item_charges(data[userid])
+                    BlackJack(self.bot).consume_game_item_charges(data[userid], message)
                     await common.mongo_storage.replace_user(userid, data[userid])
         if cake_insufficient:
             await interaction.response.edit_message(view=self)
@@ -2048,17 +2320,27 @@ class PokerGame(commands.Cog):
         data[userid]["cake"] += bonus
         return house.format_win_bonus_line(bonus)
 
-    def consume_game_item_charges(self, user_data: dict) -> None:
+    def consume_game_item_charges(self, user_data: dict, message=None) -> str:
         """
-        一場遊戲結束時消耗玉手鐲次數。
+        一場遊戲結束時消耗玉手鐲次數，並可寫入結算提示。
 
         Args:
-            user_data (dict): "{'item_status': {}}"
+            user_data (dict): "{'item_charges': {}}"
+            message (Embed | None): "結算 embed"
+
+        Returns:
+            text (str): "本次已消耗 1 場，剩餘 **49** 場"
         """
         house = getattr(self.bot, "server_item_house", None)
         if house is None:
-            return
-        house.consume_charge_in_data(user_data, house.status_jade_bracelet)
+            return ""
+        if not house.consume_charge_in_data(user_data, house.status_jade_bracelet):
+            return ""
+        leftover = house.charge_remaining_in_data(user_data, house.status_jade_bracelet)
+        text = house.format_jade_bracelet_charge_text(leftover)
+        if message is not None:
+            message.add_field(name=house.status_labels[house.status_jade_bracelet], value=text, inline=False)
+        return text
 
     @app_commands.command(name="poker", description="撲克牌比大小")
     @app_commands.describe(bet="要下多少賭注?(支援all、half以及輸入蛋糕數量，最多下注100000)")
@@ -2352,7 +2634,7 @@ class PokerButton(discord.ui.View):
             )
 
         data[userid]["poker_playing"] = False
-        PokerGame(self.bot).consume_game_item_charges(data[userid])
+        PokerGame(self.bot).consume_game_item_charges(data[userid], message)
         await common.mongo_storage.replace_user(userid, data[userid])
         message.set_footer(text=await PokerGame(self.bot).win_rate_show(userid))
         return message
@@ -2412,12 +2694,16 @@ class PokerButton(discord.ui.View):
                 data[userid]["poker_fold"] = 0
             data[userid]["poker_fold"] += 1
             data[userid]["poker_playing"] = False
-            PokerGame(self.bot).consume_game_item_charges(data[userid])
+            jade_text = PokerGame(self.bot).consume_game_item_charges(data[userid])
             await common.mongo_storage.replace_user(userid, data[userid])
         self.double_button.disabled = True
         self.reveal_button.disabled = True
         self.fold_button.disabled = True
         message = Embed(title="撲克牌比大小", description=f"你選擇放棄，退回**{refund}**塊{self.cake_emoji}", color=common.bot_color)
+        if jade_text:
+            house = getattr(self.bot, "server_item_house", None)
+            if house is not None:
+                message.add_field(name=house.status_labels[house.status_jade_bracelet], value=jade_text, inline=False)
         message.set_footer(text=await PokerGame(self.bot).win_rate_show(userid))
         await interaction.response.edit_message(embed=message, view=self)
         self.stop()
@@ -2507,17 +2793,27 @@ class SquidRPS(commands.Cog):
         data[userid]["cake"] += bonus
         return house.format_win_bonus_line(bonus)
 
-    def consume_game_item_charges(self, user_data: dict) -> None:
+    def consume_game_item_charges(self, user_data: dict, message=None) -> str:
         """
-        一場遊戲結束時消耗玉手鐲次數。
+        一場遊戲結束時消耗玉手鐲次數，並可寫入結算提示。
 
         Args:
-            user_data (dict): "{'item_status': {}}"
+            user_data (dict): "{'item_charges': {}}"
+            message (Embed | None): "結算 embed"
+
+        Returns:
+            text (str): "本次已消耗 1 場，剩餘 **49** 場"
         """
         house = getattr(self.bot, "server_item_house", None)
         if house is None:
-            return
-        house.consume_charge_in_data(user_data, house.status_jade_bracelet)
+            return ""
+        if not house.consume_charge_in_data(user_data, house.status_jade_bracelet):
+            return ""
+        leftover = house.charge_remaining_in_data(user_data, house.status_jade_bracelet)
+        text = house.format_jade_bracelet_charge_text(leftover)
+        if message is not None:
+            message.add_field(name=house.status_labels[house.status_jade_bracelet], value=text, inline=False)
+        return text
 
     def rps_result(self, a: str, b: str) -> int:
         if a == b:
@@ -2980,7 +3276,6 @@ class SquidRPSView(discord.ui.View):
                         stats = await SquidRPS(self.bot)._ensure_stats(data, userid)
                         stats[self.difficulty]["win"] += 1
                         stats[self.difficulty]["round"] += 1
-                        SquidRPS(self.bot).consume_game_item_charges(data[userid])
                         embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                         embed.add_field(name="難度", value=self.difficulty, inline=False)
                         if self.difficulty == "hard":
@@ -2996,6 +3291,7 @@ class SquidRPSView(discord.ui.View):
                             value=result_message,
                             inline=False,
                         )
+                        SquidRPS(self.bot).consume_game_item_charges(data[userid], embed)
                         await common.mongo_storage.replace_user(userid, data[userid])
                         if self.difficulty == "hard":
                             await report_quest_event(self.bot, userid, "squid_rps_hard_win")
@@ -3047,7 +3343,6 @@ class SquidRPSView(discord.ui.View):
                     data[userid]["squid_playing"] = False
                     stats = await SquidRPS(self.bot)._ensure_stats(data, userid)
                     stats[self.difficulty]["round"] += 1
-                    SquidRPS(self.bot).consume_game_item_charges(data[userid])
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                     embed.add_field(name="難度", value=self.difficulty, inline=False)
                     if self.difficulty == "hard":
@@ -3058,6 +3353,7 @@ class SquidRPSView(discord.ui.View):
                         value=f"你失去了**{self.bet}**塊{self.cake_emoji}\n你現在擁有**{data[userid]['cake']}**塊{self.cake_emoji}",
                         inline=False,
                     )
+                    SquidRPS(self.bot).consume_game_item_charges(data[userid], embed)
                     await common.mongo_storage.replace_user(userid, data[userid])
 
                     embed.set_footer(

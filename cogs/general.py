@@ -77,7 +77,7 @@ class ServerItemHouse:
         self.blackjack_cheat_games = 20
         self.jade_bracelet_games = 50
         self.master_thief_robberies = 20
-        self.rain_maker_cake = 1200
+        self.rain_maker_cake_range = (1, 1200)
         self.magnet_steal_range = (500, 1000)
         self.strong_magnet_steal_range = (5000, 10000)
         self.status_anti_theft = "anti_theft"
@@ -233,7 +233,7 @@ class ServerItemHouse:
             },
             "rain_maker_7": {
                 "name": "造雨機(7天)",
-                "description": "賦予狀態:在周圍下起蛋糕雨。你在語音房的期間，你與其他同語音的人每隔一段時間都會拿到蛋糕",
+                "description": "賦予狀態:在周圍下起蛋糕雨。你在語音房的期間，你與其他同語音的人每隔一段時間都會拿到蛋糕(1~1200)",
                 "duration_days": 7,
                 "use_kind": "self_status",
                 "status_key": self.status_rain_maker,
@@ -528,14 +528,15 @@ class ServerItemHouse:
             member_ids (list): "['4108']"
 
         Returns:
-            bonus (int): "1200"
+            bonus (int): "500"
         """
         if not member_ids:
             return 0
         for member_id in member_ids:
             user_data = await self.load_user(member_id)
             if self.has_status_in_data(user_data, self.status_rain_maker):
-                return self.rain_maker_cake
+                low, high = self.rain_maker_cake_range
+                return random.randint(low, high)
         return 0
 
     def charge_remaining_in_data(self, user_data: dict, charge_key: str) -> int:
@@ -677,6 +678,18 @@ class ServerItemHouse:
         if bonus <= 0:
             return ""
         return f"\n道具加成：**+{bonus}**塊{common.cake_emoji}"
+
+    def format_jade_bracelet_charge_text(self, remaining: int) -> str:
+        """
+        遊戲結算時玉手鐲剩餘場數提示。
+
+        Args:
+            remaining (int): "49"
+
+        Returns:
+            text (str): "本次已消耗 1 場，剩餘 **49** 場"
+        """
+        return f"本次已消耗 1 場，剩餘 **{remaining}** 場"
 
     async def load_user(self, user_id: str) -> dict:
         """

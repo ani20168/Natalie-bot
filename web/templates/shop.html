@@ -482,6 +482,8 @@
         ? '<button type="button" class="btn btn-outline btn-sm" data-action="edit-desc">修改商品描述</button>'
         : "";
       var quickDisabled = !product.can_sell || buyCount < 1;
+      var accordion = detailBox.querySelector(".shop-accordion");
+      var accordionOpen = !!(accordion && accordion.open);
       detailBox.innerHTML =
         '<button type="button" class="btn btn-outline btn-sm shop-back" data-action="back">← 返回商店</button>' +
         '<article class="shop-hero">' +
@@ -498,7 +500,7 @@
           "</div>" +
           '<p class="shop-desc">' + escapeHtml(productDescription(product)) + "</p>" +
         "</article>" +
-        '<details class="shop-accordion">' +
+        '<details class="shop-accordion"' + (accordionOpen ? " open" : "") + ">" +
           "<summary>" +
             '<span class="shop-accordion-text">' + summary + "</span>" +
             '<button type="button" class="btn btn-bid btn-sm" data-action="quick-sell"' +
