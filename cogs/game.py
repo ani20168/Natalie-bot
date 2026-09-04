@@ -65,6 +65,8 @@ class MiningGame(commands.Cog):
             "靈能之手": {"需求等級": 78, "價格": 30000},
         }
         self.skill_pickaxe_discard_timeout = 60
+        self.skill_pickaxe_discard_confirm_skill_count = 3
+        self.skill_pickaxe_discard_confirm_delay = 3
         self.mine_limit_restore_proc_chance = 0.20
 
 
@@ -3416,11 +3418,16 @@ class SkillPickaxeDiscardView(discord.ui.View):
         self.max_health = max_health
         self.skills = skills
         self.message = None
+        self.awaiting_second_confirm = False
 
     def disable_buttons(self) -> None:
         """停用畫面上所有按鈕。"""
         for child in self.children:
             child.disabled = True
+
+    def needs_discard_confirm(self) -> bool:
+        """技能數達門檻時才需要二次確認。"""
+        return len(self.skills) >= self.cog.skill_pickaxe_discard_confirm_skill_count
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """只允許購買者按下丟掉按鈕。"""
@@ -3429,9 +3436,39 @@ class SkillPickaxeDiscardView(discord.ui.View):
         await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="只有購買者可以丟掉這把礦鎬。",color=common.bot_error_color), ephemeral=True)
         return False
 
+    async def begin_discard_confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """
+        第一次按下：顯示確認欄位並暫時停用按鈕。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+            button (discord.ui.Button): "丟掉按鈕"
+        """
+        self.awaiting_second_confirm = True
+        button.disabled = True
+        if interaction.message and interaction.message.embeds:
+            embed = Embed.from_dict(interaction.message.embeds[0].to_dict())
+        else:
+            embed = Embed(title="Natalie 挖礦", color=common.bot_color)
+        embed.add_field(name="你真的要丟掉嗎?", value="按錯就沒救了哦:)", inline=False)
+        await interaction.response.edit_message(embed=embed, view=self)
+        await asyncio.sleep(self.cog.skill_pickaxe_discard_confirm_delay)
+        if self.is_finished():
+            return
+        button.disabled = False
+        if self.message is None:
+            return
+        try:
+            await self.message.edit(view=self)
+        except discord.HTTPException:
+            pass
+
     @discord.ui.button(label="太爛了，丟掉!", style=discord.ButtonStyle.danger)
     async def discard_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """把剛買的技能鎬從裝備背包丟掉，蛋糕不退還。"""
+        if self.needs_discard_confirm() and not self.awaiting_second_confirm:
+            await self.begin_discard_confirm(interaction, button)
+            return
         async with common.jsonio_lock:
             result = await self.cog.discard_bought_skill_pickaxe(
                 self.userid, self.slot, self.template, self.max_health, self.skills
