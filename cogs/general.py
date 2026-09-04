@@ -522,7 +522,7 @@ class ServerItemHouse:
 
     async def rain_maker_channel_bonus(self, member_ids: list[str]) -> int:
         """
-        語音房內若有人持有造雨機狀態，回傳該房每人應加的蛋糕。
+        語音房內每位持有造雨機狀態的人各判定一次，回傳加總後該房每人應加的蛋糕。
 
         Args:
             member_ids (list): "['4108']"
@@ -532,12 +532,13 @@ class ServerItemHouse:
         """
         if not member_ids:
             return 0
+        total_bonus = 0
+        low, high = self.rain_maker_cake_range
         for member_id in member_ids:
             user_data = await self.load_user(member_id)
             if self.has_status_in_data(user_data, self.status_rain_maker):
-                low, high = self.rain_maker_cake_range
-                return random.randint(low, high)
-        return 0
+                total_bonus += random.randint(low, high)
+        return total_bonus
 
     def charge_remaining_in_data(self, user_data: dict, charge_key: str) -> int:
         """
