@@ -80,6 +80,8 @@ class ServerItemHouse:
         self.rain_maker_cake_range = (1, 1200)
         self.magnet_steal_range = (500, 1000)
         self.strong_magnet_steal_range = (5000, 10000)
+        self.magnet_warmup_seconds = 60
+        self.magnet_voice_join_at = {}
         self.status_anti_theft = "anti_theft"
         self.status_bodyguard = "bodyguard"
         self.status_lucky_glove = "lucky_glove"
@@ -203,7 +205,7 @@ class ServerItemHouse:
             },
             "magnet": {
                 "name": "磁鐵",
-                "description": "只能在語音房使用，可以把語音房內其他人的蛋糕吸過來(500~1000)",
+                "description": "只能在語音房使用，進入語音後需暖機1分鐘，可以把語音房內其他人的蛋糕吸過來(500~1000)",
                 "duration_days": 0,
                 "use_kind": "magnet",
                 "steal_range": self.magnet_steal_range,
@@ -211,7 +213,7 @@ class ServerItemHouse:
             },
             "strong_magnet": {
                 "name": "強力磁鐵",
-                "description": "只能在語音房使用，可以把語音房內其他人的蛋糕吸過來(5000~10000)",
+                "description": "只能在語音房使用，進入語音後需暖機1分鐘，可以把語音房內其他人的蛋糕吸過來(5000~10000)",
                 "duration_days": 0,
                 "use_kind": "magnet",
                 "steal_range": self.strong_magnet_steal_range,
@@ -970,6 +972,26 @@ class ServerItemHouse:
             return []
         return [person for person in voice.channel.members if not person.bot]
 
+    def magnet_warmup_remaining_seconds(self, member: discord.Member) -> int:
+        """
+        計算磁鐵暖機剩餘秒數；尚未記錄進語音時間則以當下為起點。
+
+        Args:
+            member (discord.Member): "語音中的玩家"
+
+        Returns:
+            remaining (int): "45"
+        """
+        user_id = str(member.id)
+        join_at = self.magnet_voice_join_at.get(user_id)
+        if join_at is None:
+            self.magnet_voice_join_at[user_id] = time.time()
+            return self.magnet_warmup_seconds
+        remaining = self.magnet_warmup_seconds - (time.time() - join_at)
+        if remaining <= 0:
+            return 0
+        return int(remaining) + (0 if remaining == int(remaining) else 1)
+
     async def transfer_cake(self, from_id: str, to_id: str, amount: int) -> int:
         """
         把蛋糕從一人轉到另一人，實際數量可能較少。
@@ -1069,6 +1091,10 @@ class ServerItemHouse:
                 voice_people = self.voice_members(actor)
                 if actor not in voice_people:
                     return False, f"**{item['name']}** 只能在語音房內使用。"
+            if item.get("use_kind") == "magnet":
+                remaining = self.magnet_warmup_remaining_seconds(actor)
+                if remaining > 0:
+                    return False, f"**{item['name']}** 進入語音後需暖機 **{self.magnet_warmup_seconds}** 秒，還需等待 **{remaining}** 秒。"
             if item.get("status_key") == self.status_anti_theft and any(role.id == common.super_vip_id for role in actor.roles):
                 return False, f"至寶本身就不會被搶劫，**{item['name']}** 用不到喔。"
             if int(entry.get("count") or 0) <= 0:
@@ -2299,11 +2325,18 @@ class General(commands.Cog):
 
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
+        #磁鐵暖機：進出語音時更新（換頻道不重計；離開再進來才重計）
+        user_id = str(member.id)
+        if after.channel and not before.channel:
+            self.server_item_house.magnet_voice_join_at[user_id] = time.time()
+        elif before.channel and not after.channel:
+            self.server_item_house.magnet_voice_join_at.pop(user_id, None)
+
         if member.guild.id != 419108485435883531: return #如果語音事件不在妹妹群內則略過(例如在測試群進語音之類的)
         hide_trace = await self.is_voice_trace_hidden(member)
         #進入語音頻道
         if after.channel and not before.channel:
-            self.member_invoice_time[str(member.id)] = time.time()
+            self.member_invoice_time[user_id] = time.time()
             if not hide_trace:
                 embed = Embed(title="", description=f"{member.display_name} 進入了 {after.channel.name} 語音頻道", color=common.bot_color)
                 embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
@@ -2314,19 +2347,19 @@ class General(commands.Cog):
         if before.channel and not after.channel:
             if not hide_trace:
                 embed = Embed(title="", description=f"{member.display_name} 離開了 {before.channel.name} 語音頻道", color=common.bot_color)
-                invoice_time = time.time() - self.member_invoice_time.get(str(member.id),60)
+                invoice_time = time.time() - self.member_invoice_time.get(user_id,60)
                 if invoice_time  < 10:
                     embed = Embed(title="", description=f"{member.display_name} 離開了 {before.channel.name} 語音頻道 (在{invoice_time:.2f}秒內進出)", color=0xEAC100)
-                self.member_invoice_time.pop(str(member.id),None)
+                self.member_invoice_time.pop(user_id,None)
                 embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
                 embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
                 await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
             else:
-                self.member_invoice_time.pop(str(member.id), None)
+                self.member_invoice_time.pop(user_id, None)
 
-            member_data = await common.mongo_storage.get_user(str(member.id))
+            member_data = await common.mongo_storage.get_user(user_id)
             if isinstance(member_data, dict) and "afk_start" in member_data:
-                await common.mongo_storage.unset_user_fields(str(member.id), ["afk_start"])
+                await common.mongo_storage.unset_user_fields(user_id, ["afk_start"])
 
         #切換語音頻道
         if before.channel != after.channel:
@@ -2335,13 +2368,13 @@ class General(commands.Cog):
                     embed = Embed(title="", description=f"{member.display_name} 從 {before.channel.name} 移動到 {after.channel.name} 頻道", color=common.bot_color)
                     #如果除了自己外房間還有其他人，則檢查進出時間
                     if len(before.channel.members) >= 2:
-                        invoice_time = time.time() - self.member_invoice_time.get(str(member.id),60)
+                        invoice_time = time.time() - self.member_invoice_time.get(user_id,60)
                         if invoice_time  < 10:
                             embed = Embed(title="", description=f"{member.display_name} 從 {before.channel.name} 移動到 {after.channel.name} 頻道 (在{invoice_time:.2f}秒內切換頻道)", color=0xEAC100)
                     embed.set_author(name=f"{member.global_name}", icon_url=member.avatar)
                     embed.timestamp = datetime.now(timezone(timedelta(hours=8)))
                     await self.bot.get_channel(common.mod_log_channel).send(embed=embed)
-                self.member_invoice_time[str(member.id)] = time.time()
+                self.member_invoice_time[user_id] = time.time()
 
     def format_message_audit_content(self, content: str | None) -> str:
         """

@@ -539,9 +539,18 @@ class EncounterHouse:
             view (EncounterView): "EncounterView(...)"
         """
         paragraphs = quest.get("story_paragraphs") or []
-        index = max(0, min(story_index, max(len(paragraphs) - 1, 0)))
-        show_submit = bool(paragraphs) and index >= len(paragraphs) - 1
-        return EncounterView(self, userid, quest["id"], show_submit, self.submit_button_label(quest.get("requirements") or []))
+        page_count = len(paragraphs)
+        index = max(0, min(story_index, max(page_count - 1, 0)))
+        show_submit = page_count > 0 and index >= page_count - 1
+        return EncounterView(
+            self,
+            userid,
+            quest["id"],
+            index,
+            page_count,
+            show_submit,
+            self.submit_button_label(quest.get("requirements") or []),
+        )
 
     async def load_settings(self) -> dict:
         """
@@ -813,14 +822,15 @@ class EncounterHouse:
         user_data["encounter_active"] = {"quest_id": quest["id"], "story_index": 0}
         return quest, 0
 
-    async def handle_continue(self, interaction: discord.Interaction, userid: str, quest_id: str):
+    async def handle_page(self, interaction: discord.Interaction, userid: str, quest_id: str, delta: int):
         """
-        翻到下一段劇情。
+        依 delta 翻到上一段或下一段劇情。
 
         Args:
             interaction (discord.Interaction): 按鈕互動
             userid (str): "410847926236086272"
             quest_id (str): "ab12"
+            delta (int): "-1"
         """
         mining_cog = self.mining_cog()
         if mining_cog is None:
@@ -853,11 +863,10 @@ class EncounterHouse:
                 return
             paragraphs = quest.get("story_paragraphs") or []
             try:
-                story_index = int(active.get("story_index") or 0) + 1
+                story_index = int(active.get("story_index") or 0) + delta
             except (TypeError, ValueError):
-                story_index = 1
-            if story_index > len(paragraphs) - 1:
-                story_index = max(len(paragraphs) - 1, 0)
+                story_index = delta
+            story_index = max(0, min(story_index, max(len(paragraphs) - 1, 0)))
             user_data["encounter_active"] = {"quest_id": quest_id, "story_index": story_index}
             await common.mongo_storage.upsert_user(userid, user_data, "mining")
 
@@ -985,15 +994,26 @@ class EncounterHouse:
         await interaction.response.edit_message(embed=embed, view=None)
 
 
-class EncounterContinueButton(discord.ui.Button):
-    """劇情「繼續」按鈕。"""
+class EncounterPrevButton(discord.ui.Button):
+    """劇情「上一頁」按鈕。"""
 
-    def __init__(self):
-        super().__init__(label="繼續", style=discord.ButtonStyle.primary)
+    def __init__(self, disabled: bool = False):
+        super().__init__(label="上一頁", style=discord.ButtonStyle.secondary, disabled=disabled)
+
+    async def callback(self, interaction: discord.Interaction):
+        """翻到上一段劇情。"""
+        await self.view.house.handle_page(interaction, self.view.userid, self.view.quest_id, -1)
+
+
+class EncounterNextButton(discord.ui.Button):
+    """劇情「下一頁」按鈕。"""
+
+    def __init__(self, disabled: bool = False):
+        super().__init__(label="下一頁", style=discord.ButtonStyle.secondary, disabled=disabled)
 
     async def callback(self, interaction: discord.Interaction):
         """翻到下一段劇情。"""
-        await self.view.house.handle_continue(interaction, self.view.userid, self.view.quest_id)
+        await self.view.house.handle_page(interaction, self.view.userid, self.view.quest_id, 1)
 
 
 class EncounterSubmitButton(discord.ui.Button):
@@ -1010,15 +1030,25 @@ class EncounterSubmitButton(discord.ui.Button):
 class EncounterView(discord.ui.View):
     """挖礦奇遇劇情按鈕。"""
 
-    def __init__(self, house: EncounterHouse, userid: str, quest_id: str, show_submit: bool, submit_label: str):
+    def __init__(
+        self,
+        house: EncounterHouse,
+        userid: str,
+        quest_id: str,
+        story_index: int,
+        page_count: int,
+        show_submit: bool,
+        submit_label: str,
+    ):
         super().__init__(timeout=None)
         self.house = house
         self.userid = userid
         self.quest_id = quest_id
+        if page_count > 1:
+            self.add_item(EncounterPrevButton(disabled=story_index <= 0))
+            self.add_item(EncounterNextButton(disabled=story_index >= page_count - 1))
         if show_submit:
             self.add_item(EncounterSubmitButton(submit_label))
-        else:
-            self.add_item(EncounterContinueButton())
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """只允許接任務的玩家按按鈕。"""

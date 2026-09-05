@@ -67,7 +67,7 @@ class MiningGame(commands.Cog):
         self.skill_pickaxe_discard_timeout = 60
         self.skill_pickaxe_discard_confirm_skill_count = 3
         self.skill_pickaxe_discard_confirm_delay = 3
-        self.mine_limit_restore_proc_chance = 0.20
+        self.mine_limit_restore_proc_chance = 0.5
 
 
     async def miningdata_read(self,userid: str):
@@ -232,7 +232,7 @@ class MiningGame(commands.Cog):
         # 礦鎬毀損時，在執行一次獲得收藏品獎勵判定（15%）：耐久用完或意外毀損皆觸發
         if random.random() < 0.15:
             skills["collection_on_break"] = True
-        # 挖礦時有 20% 機率不消耗礦場量並回復一次（15% 取得此效果）
+        # 挖礦時有一半機會不消耗礦場量並回復一次（15% 取得此效果）
         if random.random() < 0.15:
             skills["mine_limit_restore"] = True
         return skills
@@ -311,7 +311,7 @@ class MiningGame(commands.Cog):
         if skills.get("collection_on_break"):
             lines.append("礦鎬毀損時，在執行一次獲得收藏品獎勵判定")
         if skills.get("mine_limit_restore"):
-            lines.append("挖礦時有 20% 機率不消耗礦場挖掘量並回復一次")
+            lines.append("挖礦時有一半機會不消耗礦場挖掘量並回復一次")
         return lines
 
     def skill_pickaxe_lines_for_embed(self, skills: dict) -> str:
@@ -336,7 +336,7 @@ class MiningGame(commands.Cog):
         if skills.get("collection_on_break"):
             lines.append("礦鎬毀損時，在執行一次獲得收藏品獎勵判定")
         if skills.get("mine_limit_restore"):
-            lines.append("挖礦時有**20%**機率不消耗礦場挖掘量並回復一次")
+            lines.append("挖礦時有**一半**機會不消耗礦場挖掘量並回復一次")
         return "\n".join(lines)
 
 
