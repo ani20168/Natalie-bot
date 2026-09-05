@@ -205,7 +205,7 @@ class ServerItemHouse:
             },
             "magnet": {
                 "name": "磁鐵",
-                "description": "只能在語音房使用，進入語音後需暖機1分鐘，可以把語音房內其他人的蛋糕吸過來(500~1000)",
+                "description": "只能在語音房使用，進入語音後需暖機1分鐘（切換頻道會重新暖機），可以把語音房內其他人的蛋糕吸過來(500~1000)",
                 "duration_days": 0,
                 "use_kind": "magnet",
                 "steal_range": self.magnet_steal_range,
@@ -213,7 +213,7 @@ class ServerItemHouse:
             },
             "strong_magnet": {
                 "name": "強力磁鐵",
-                "description": "只能在語音房使用，進入語音後需暖機1分鐘，可以把語音房內其他人的蛋糕吸過來(5000~10000)",
+                "description": "只能在語音房使用，進入語音後需暖機1分鐘（切換頻道會重新暖機），可以把語音房內其他人的蛋糕吸過來(5000~10000)",
                 "duration_days": 0,
                 "use_kind": "magnet",
                 "steal_range": self.strong_magnet_steal_range,
@@ -974,7 +974,7 @@ class ServerItemHouse:
 
     def magnet_warmup_remaining_seconds(self, member: discord.Member) -> int:
         """
-        計算磁鐵暖機剩餘秒數；尚未記錄進語音時間則以當下為起點。
+        計算磁鐵暖機剩餘秒數；若缺紀錄則以當下補上起點（正常應由進語音／on_ready 寫入）。
 
         Args:
             member (discord.Member): "語音中的玩家"
@@ -2323,11 +2323,27 @@ class General(commands.Cog):
         await common.mongo_storage.unset_user_fields(userid, ["hide_voice_trace"])
         await interaction.response.send_message(embed=Embed(title="隱藏語音足跡", description="已關閉。你的語音進出將恢復記錄。", color=common.bot_color), ephemeral=True)
 
+    def seed_magnet_warmup_from_voice(self):
+        """為目前已在語音的成員補上暖機起點（不覆蓋既有紀錄）。"""
+        now = time.time()
+        house = self.server_item_house
+        for guild in self.bot.guilds:
+            for channel in (*guild.voice_channels, *guild.stage_channels):
+                for member in channel.members:
+                    if member.bot: continue
+                    user_id = str(member.id)
+                    if user_id not in house.magnet_voice_join_at:
+                        house.magnet_voice_join_at[user_id] = now
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        self.seed_magnet_warmup_from_voice()
+
     @commands.Cog.listener()
     async def on_voice_state_update(self,member, before, after):
-        #磁鐵暖機：進出語音時更新（換頻道不重計；離開再進來才重計）
+        #磁鐵暖機：進語音或換頻道重計；離開語音清除
         user_id = str(member.id)
-        if after.channel and not before.channel:
+        if after.channel and (not before.channel or before.channel.id != after.channel.id):
             self.server_item_house.magnet_voice_join_at[user_id] = time.time()
         elif before.channel and not after.channel:
             self.server_item_house.magnet_voice_join_at.pop(user_id, None)
