@@ -729,7 +729,7 @@ class MiningGame(commands.Cog):
         """
         return Embed(
             title="Natalie 挖礦檢定",
-            description=f"每挖 {self.mining_verify_interval} 次需要通過檢定才能繼續挖礦。\n\n**{problem['a']} × {problem['b']} = ?**",
+            description=f"哎呀，挖礦遇到了一點阻礙...\n\n**{problem['a']} × {problem['b']} = ?**",
             color=common.bot_color,
         )
 
@@ -3602,7 +3602,7 @@ class MiningVerifyView(discord.ui.View):
         if str(interaction.user.id) == self.userid:
             return True
         await interaction.response.send_message(
-            embed=Embed(title="Natalie 挖礦檢定", description="這不是你的檢定。", color=common.bot_error_color),
+            embed=Embed(title="Natalie 挖礦檢定", description="欸欸，這題是別人的作業啦，你偷按什麼!", color=common.bot_error_color),
             ephemeral=True,
         )
         return False
