@@ -1071,7 +1071,7 @@ class MiningGame(commands.Cog):
         async with common.jsonio_lock:
             mining_data = await self.miningdata_read(userid)
 
-        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/encounter 挖礦奇遇\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_list 各礦場收藏品清單\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_use 裝備背包內礦鎬\n/mining_bag_drop 丟棄背包內礦鎬(單格/1-3/all)\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
+        message = Embed(title="Natalie 挖礦",description="指令:\n/mining 挖礦\n/encounter 挖礦奇遇\n/pickaxe_fix 修理礦鎬\n/pickaxe_autofix 自動修理礦鎬\n/mineral_sell 賣出礦物\n/collection_list 各礦場收藏品清單\n/mine 更換礦場\n/pickaxe_buy 購買礦鎬\n/mining_bag 裝備背包\n/mining_bag_drop 丟棄背包內礦鎬(單格/1-3/all)\n/mining_bag_unequip 卸下技能礦鎬\n/redeem_collection_role 兌換收藏品稱號\n(注意:本指令缺乏測試，兌換前建議\n先使用mining_info留下收藏品資料。)\n/mining_machine_info 關於自動挖礦機",color=common.bot_color)
         equip_slot = mining_data[userid].get("equipped_bag_slot")
         pickaxe_line = f"{mining_data[userid]['pickaxe']}  {mining_data[userid]['pickaxe_health']}/{mining_data[userid]['pickaxe_maxhealth']}"
         if equip_slot is not None:
@@ -1229,13 +1229,51 @@ class MiningGame(commands.Cog):
             await common.mongo_storage.replace_user(userid, user_data)
             await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
 
+    async def equip_pickaxe_from_bag_slot(self, userid: str, slot: int) -> Embed:
+        """
+        裝備背包第 slot 格的礦鎬並寫入資料庫。
+
+        Args:
+            userid (str): "123456789"
+            slot (int): "3"
+
+        Returns:
+            embed (Embed): "成功或失敗訊息"
+        """
+        async with common.jsonio_lock:
+            mining_data = await self.miningdata_read(userid)
+            if slot < 1 or slot > self.pickaxe_bag_size:
+                return Embed(title="Natalie 挖礦", description=f"格子編號須為 **1**～**{self.pickaxe_bag_size}**。", color=common.bot_error_color)
+            idx = slot - 1
+            entry = mining_data[userid]["pickaxe_bag"][idx]
+            if entry is None:
+                return Embed(title="Natalie 挖礦", description="該格沒有物品。", color=common.bot_error_color)
+            if self.is_pickaxe_bag_lock(entry):
+                return Embed(title="Natalie 挖礦", description=self.pickaxe_bag_lock_message, color=common.bot_error_color)
+            if mining_data[userid].get("equipped_bag_slot") is not None:
+                self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
+            prev_slot = mining_data[userid].get("equipped_bag_slot")
+            if prev_slot is None and mining_data[userid].get("legacy_pickaxe_state") is None:
+                mining_data[userid]["legacy_pickaxe_state"] = {
+                    "name": mining_data[userid]["pickaxe"],
+                    "pickaxe_health": mining_data[userid]["pickaxe_health"],
+                    "pickaxe_maxhealth": mining_data[userid]["pickaxe_maxhealth"],
+                }
+            mining_data[userid]["equipped_bag_slot"] = idx
+            mining_data[userid]["pickaxe"] = entry["template"]
+            mining_data[userid]["pickaxe_maxhealth"] = entry["max_health"]
+            mining_data[userid]["pickaxe_health"] = entry["current_health"]
+            await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
+        return Embed(title="Natalie 挖礦", description=f"已裝備背包第 **{slot}** 格的 **{entry['template']}**。", color=common.bot_color)
+
     @app_commands.command(name = "mining_bag", description = "查看裝備背包（技能礦鎬）")
     async def mining_bag(self, interaction):
         userid = str(interaction.user.id)
         async with common.jsonio_lock:
             mining_data = await self.miningdata_read(userid)
-        message = Embed(title="Natalie 挖礦｜裝備背包", description="共 7 格。使用 `/mining_bag_use` 裝備、`/mining_bag_drop` 丟棄（單格／`1-3`／`all`）、`/mining_bag_unequip` 卸下技能鎬。", color=common.bot_color)
+        message = Embed(title="Natalie 挖礦｜裝備背包", description="共 7 格。點擊下方按鈕裝備、使用 `/mining_bag_drop` 丟棄（單格／`1-3`／`all`）、`/mining_bag_unequip` 卸下技能鎬。", color=common.bot_color)
         equipped = mining_data[userid].get("equipped_bag_slot")
+        equip_slots = []
         for index in range(self.pickaxe_bag_size):
             entry = mining_data[userid]["pickaxe_bag"][index]
             slot_label = index + 1
@@ -1252,7 +1290,12 @@ class MiningGame(commands.Cog):
                 equip_tag = " 裝備中" if equipped == index else ""
                 field_name = f"[{slot_label}] {name}  {cur}/{mx}{equip_tag}"
                 field_value = self.skill_pickaxe_lines_for_embed(entry.get("skills") or {})
+                equip_slots.append(slot_label)
             message.add_field(name=field_name, value=field_value, inline=False)
+        if equip_slots:
+            view = MiningBagEquipView(cog=self, userid=userid, slots=equip_slots)
+            await interaction.response.send_message(embed=message, view=view)
+            return
         await interaction.response.send_message(embed=message)
 
     @app_commands.command(name = "mining_bag_drop", description = "丟棄裝備背包內的技能礦鎬")
@@ -1334,40 +1377,6 @@ class MiningGame(commands.Cog):
                 return
             slots_text = "、".join(dropped_slots)
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"已丟棄 **{len(dropped_slots)}** 把礦鎬（第 **{slots_text}** 格）。", color=common.bot_color))
-
-    @app_commands.command(name = "mining_bag_use", description = "裝備裝備背包第 N 格的礦鎬")
-    @app_commands.describe(slot="格子編號 1~7")
-    @app_commands.rename(slot="格子編號")
-    async def mining_bag_use(self, interaction, slot: int):
-        async with common.jsonio_lock:
-            userid = str(interaction.user.id)
-            mining_data = await self.miningdata_read(userid)
-            if slot < 1 or slot > self.pickaxe_bag_size:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"格子編號須為 **1**～**{self.pickaxe_bag_size}**。", color=common.bot_error_color))
-                return
-            idx = slot - 1
-            entry = mining_data[userid]["pickaxe_bag"][idx]
-            if entry is None:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description="該格沒有物品。", color=common.bot_error_color))
-                return
-            if self.is_pickaxe_bag_lock(entry):
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=self.pickaxe_bag_lock_message, color=common.bot_error_color))
-                return
-            if mining_data[userid].get("equipped_bag_slot") is not None:
-                self.sync_equipped_pickaxe_to_bag_slot(mining_data, userid)
-            prev_slot = mining_data[userid].get("equipped_bag_slot")
-            if prev_slot is None and mining_data[userid].get("legacy_pickaxe_state") is None:
-                mining_data[userid]["legacy_pickaxe_state"] = {
-                    "name": mining_data[userid]["pickaxe"],
-                    "pickaxe_health": mining_data[userid]["pickaxe_health"],
-                    "pickaxe_maxhealth": mining_data[userid]["pickaxe_maxhealth"],
-                }
-            mining_data[userid]["equipped_bag_slot"] = idx
-            mining_data[userid]["pickaxe"] = entry["template"]
-            mining_data[userid]["pickaxe_maxhealth"] = entry["max_health"]
-            mining_data[userid]["pickaxe_health"] = entry["current_health"]
-            await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
-        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"已裝備背包第 **{slot}** 格的 **{entry['template']}**。", color=common.bot_color))
 
     @app_commands.command(name = "mining_bag_unequip", description = "卸下技能礦鎬，還原為先前使用的傳統礦鎬")
     async def mining_bag_unequip(self, interaction):
@@ -3679,6 +3688,46 @@ class MiningVerifyButton(discord.ui.Button):
             skip_dig_sleep=True,
             reply_via_followup=True,
         )
+
+
+class MiningBagEquipView(discord.ui.View):
+    """裝備背包：依有礦鎬的格子動態產生裝備按鈕。"""
+
+    def __init__(self, *, cog, userid: str, slots: list, timeout: float = 180):
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.userid = userid
+        for index, slot in enumerate(slots):
+            self.add_item(MiningBagEquipButton(slot=slot, row=index // 5))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """只允許本人按裝備按鈕。"""
+        if str(interaction.user.id) == self.userid:
+            return True
+        await interaction.response.send_message(
+            embed=Embed(title="Natalie 挖礦", description="這不是你的裝備背包。", color=common.bot_error_color),
+            ephemeral=True,
+        )
+        return False
+
+
+class MiningBagEquipButton(discord.ui.Button):
+    """裝備背包指定格子的礦鎬。"""
+
+    def __init__(self, *, slot: int, row: int):
+        super().__init__(label=f"裝備 {slot}", style=discord.ButtonStyle.primary, row=row)
+        self.slot = slot
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        處理裝備按鈕點擊。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: MiningBagEquipView = self.view
+        embed = await view.cog.equip_pickaxe_from_bag_slot(view.userid, self.slot)
+        await interaction.response.send_message(embed=embed)
 
 
 class SkillPickaxeDiscardView(discord.ui.View):
