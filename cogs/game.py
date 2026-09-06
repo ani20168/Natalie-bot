@@ -68,6 +68,8 @@ class MiningGame(commands.Cog):
         self.skill_pickaxe_discard_confirm_skill_count = 3
         self.skill_pickaxe_discard_confirm_delay = 3
         self.mine_limit_restore_proc_chance = 0.5
+        self.mining_verify_interval = 20
+        self.mining_verify_timeout = 300
 
 
     async def miningdata_read(self,userid: str):
@@ -118,6 +120,13 @@ class MiningGame(commands.Cog):
             user_data["legacy_pickaxe_state"] = None
             bag_migrated = True
         if bag_migrated:
+            user_data_changed = True
+
+        if "mining_verify_count" not in user_data:
+            user_data["mining_verify_count"] = 0
+            user_data_changed = True
+        if "mining_verify_pending" not in user_data:
+            user_data["mining_verify_pending"] = False
             user_data_changed = True
 
         # 新礦場上線時補齊每日挖掘量條目
@@ -659,8 +668,132 @@ class MiningGame(commands.Cog):
         return "single", int(text)
 
 
+    def generate_mining_verify_options(self, answer: int) -> list:
+        """
+        產生含正確答案、且數值接近的五個選項。
+
+        Args:
+            answer (int): "24"
+
+        Returns:
+            options (list): "[20, 24, 27, 28, 30]"
+        """
+        candidates = set()
+        span = max(6, min(12, answer // 2 + 2))
+        while len(candidates) < 4:
+            delta = random.randint(1, span)
+            for sign in (-1, 1):
+                value = answer + sign * delta
+                if value >= 1 and value != answer:
+                    candidates.add(value)
+                if len(candidates) >= 4:
+                    break
+            value = answer + random.randint(-span, span)
+            if value >= 1 and value != answer:
+                candidates.add(value)
+        options = list(candidates)[:4] + [answer]
+        random.shuffle(options)
+        return options
+
+
+    def ensure_mining_verify_problem(self, user_data: dict) -> dict:
+        """
+        取得或建立挖礦檢定題目（未解完前重複使用同一題）。
+
+        Args:
+            user_data (dict): "{'mining_verify_pending': True}"
+
+        Returns:
+            problem (dict): "{'a': 4, 'b': 6, 'options': [20, 24, 27, 28, 30]}"
+        """
+        problem = user_data.get("mining_verify_problem")
+        if isinstance(problem, dict) and "a" in problem and "b" in problem and isinstance(problem.get("options"), list) and len(problem["options"]) == 5:
+            return problem
+        left = random.randint(2, 9)
+        right = random.randint(2, 9)
+        answer = left * right
+        problem = {"a": left, "b": right, "options": self.generate_mining_verify_options(answer)}
+        user_data["mining_verify_problem"] = problem
+        return problem
+
+
+    def build_mining_verify_embed(self, problem: dict) -> Embed:
+        """
+        組出挖礦檢定的 embed。
+
+        Args:
+            problem (dict): "{'a': 4, 'b': 6, 'options': [20, 24, 27, 28, 30]}"
+
+        Returns:
+            embed (Embed): "挖礦檢定 embed"
+        """
+        return Embed(
+            title="Natalie 挖礦檢定",
+            description=f"每挖 {self.mining_verify_interval} 次需要通過檢定才能繼續挖礦。\n\n**{problem['a']} × {problem['b']} = ?**",
+            color=common.bot_color,
+        )
+
+
+    def bump_mining_verify_progress(self, user_data: dict) -> None:
+        """
+        累計成功挖礦次數，達門檻則標記下次需檢定。
+
+        Args:
+            user_data (dict): "{'mining_verify_count': 19}"
+        """
+        count = int(user_data.get("mining_verify_count") or 0) + 1
+        if count >= self.mining_verify_interval:
+            user_data["mining_verify_pending"] = True
+            user_data["mining_verify_count"] = 0
+            user_data["mining_verify_problem"] = None
+            return
+        user_data["mining_verify_count"] = count
+
+
+    def clear_mining_verify_state(self, user_data: dict) -> None:
+        """
+        清除挖礦檢定待解狀態。
+
+        Args:
+            user_data (dict): "{'mining_verify_pending': True}"
+        """
+        user_data["mining_verify_pending"] = False
+        user_data["mining_verify_count"] = 0
+        user_data["mining_verify_problem"] = None
+
+
     @app_commands.command(name = "mining", description = "挖礦!")
-    async def mining(self,interaction):
+    async def mining(self, interaction):
+        """挖礦指令；若需檢定則優先顯示僅個人可見的數學題。"""
+        async with common.jsonio_lock:
+            userid = str(interaction.user.id)
+            mining_data = await self.miningdata_read(userid)
+            if mining_data[userid].get("mining_verify_pending"):
+                problem = self.ensure_mining_verify_problem(mining_data[userid])
+                await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
+                view = MiningVerifyView(
+                    cog=self,
+                    userid=userid,
+                    answer=int(problem["a"]) * int(problem["b"]),
+                    options=[int(option) for option in problem["options"]],
+                    timeout=self.mining_verify_timeout,
+                )
+                await interaction.response.send_message(embed=self.build_mining_verify_embed(problem), view=view, ephemeral=True)
+                view.message = await interaction.original_response()
+                return
+        await self.mining_execute(interaction, skip_cooldown=False, skip_dig_sleep=False, reply_via_followup=False)
+
+
+    async def mining_execute(self, interaction, *, skip_cooldown: bool, skip_dig_sleep: bool, reply_via_followup: bool):
+        """
+        執行挖礦流程。
+
+        Args:
+            interaction (discord.Interaction): "指令或按鈕互動"
+            skip_cooldown (bool): "True"
+            skip_dig_sleep (bool): "True"
+            reply_via_followup (bool): "True"
+        """
         dig_sleep = 8.0
         async with common.jsonio_lock:
             userid = str(interaction.user.id)
@@ -672,16 +805,24 @@ class MiningGame(commands.Cog):
             cooldown_sec = max(1.0, 8.0 - dig_reduce)
             last_mining_ts = float(mining_data[userid].get("mining_cooldown_last") or 0)
             elapsed = time.time() - last_mining_ts
-            if last_mining_ts > 0 and elapsed < cooldown_sec:
+            if not skip_cooldown and last_mining_ts > 0 and elapsed < cooldown_sec:
                 wait_sec = max(1, int(cooldown_sec - elapsed + 0.99))
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦", description=f"挖太快了!請在**{wait_sec}**秒後再試一次。", color=common.bot_error_color), ephemeral=True)
+                cooldown_embed = Embed(title="Natalie 挖礦", description=f"挖太快了!請在**{wait_sec}**秒後再試一次。", color=common.bot_error_color)
+                if reply_via_followup:
+                    await interaction.followup.send(embed=cooldown_embed, ephemeral=True)
+                else:
+                    await interaction.response.send_message(embed=cooldown_embed, ephemeral=True)
                 return
 
             #確認是否正在重啟保護狀態?
             global_userdata = await common.mongo_storage.get_global_document()
             restart_time = float(global_userdata.get("restart_time", 0))
             if time.time() - restart_time <= 15:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="機器人正在重啟，請稍後在試一次。",color=common.bot_error_color))
+                restart_embed = Embed(title="Natalie 挖礦",description="機器人正在重啟，請稍後在試一次。",color=common.bot_error_color)
+                if reply_via_followup:
+                    await interaction.followup.send(embed=restart_embed, ephemeral=False)
+                else:
+                    await interaction.response.send_message(embed=restart_embed)
                 return
             await common.mongo_storage.update_global_fields({"gaming_time": time.time()})
 
@@ -702,9 +843,13 @@ class MiningGame(commands.Cog):
                     if not await self.try_autofix_pickaxe(mining_data, userid):
                         if dig_index == 0:
                             if autofix_on:
-                                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!而且你的蛋糕也不足以修理礦鎬。",color=common.bot_error_color))
+                                broken_embed = Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!而且你的蛋糕也不足以修理礦鎬。",color=common.bot_error_color)
                             else:
-                                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
+                                broken_embed = Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color)
+                            if reply_via_followup:
+                                await interaction.followup.send(embed=broken_embed, ephemeral=False)
+                            else:
+                                await interaction.response.send_message(embed=broken_embed)
                             return
                         break
 
@@ -716,7 +861,11 @@ class MiningGame(commands.Cog):
                 remain_after_decrement = None if remain_document is None else remain_document.get("mine_mininglimit", {}).get(current_mine)
                 if remain_after_decrement is None:
                     if dig_index == 0:
-                        await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"**{current_mine}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color))
+                        empty_embed = Embed(title="Natalie 挖礦",description=f"**{current_mine}**已經挖完了，請明天再來吧，或者移動到其他的礦場。",color=common.bot_error_color)
+                        if reply_via_followup:
+                            await interaction.followup.send(embed=empty_embed, ephemeral=False)
+                        else:
+                            await interaction.response.send_message(embed=empty_embed)
                         return
                     break
 
@@ -745,15 +894,27 @@ class MiningGame(commands.Cog):
                     # 不在此中斷：下一輪會依 autofix 決定是否繼續
 
             if planned_digs <= 0:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color))
+                no_dig_embed = Embed(title="Natalie 挖礦",description="你的礦鎬已經壞了!",color=common.bot_error_color)
+                if reply_via_followup:
+                    await interaction.followup.send(embed=no_dig_embed, ephemeral=False)
+                else:
+                    await interaction.response.send_message(embed=no_dig_embed)
                 return
 
-            dig_sleep = max(0.5, 8.0 - dig_reduce)
+            dig_sleep = 0 if skip_dig_sleep else max(0.5, 8.0 - dig_reduce)
             mining_data[userid]["mining_cooldown_last"] = time.time()
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color))
+            digging_embed = Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color)
+            if skip_dig_sleep:
+                mining_progress_message = None
+            elif reply_via_followup:
+                mining_progress_message = await interaction.followup.send(embed=digging_embed, wait=True, ephemeral=False)
+            else:
+                await interaction.response.send_message(embed=digging_embed)
+                mining_progress_message = None
             await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
 
-        await asyncio.sleep(dig_sleep)
+        if dig_sleep > 0:
+            await asyncio.sleep(dig_sleep)
 
         async with common.jsonio_lock:
             mining_data = await self.miningdata_read(userid)
@@ -816,8 +977,18 @@ class MiningGame(commands.Cog):
             footer_extra = f" 效率x{awarded_digs}" if awarded_digs > 1 else ""
             message.set_footer(text=f"位置:{mine_here} 剩餘:{remaining_here}{footer_extra}")
 
-            await interaction.edit_original_response(embed=message)
+            self.bump_mining_verify_progress(mining_data[userid])
             await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
+
+            if skip_dig_sleep:
+                if reply_via_followup:
+                    await interaction.followup.send(embed=message, ephemeral=False)
+                else:
+                    await interaction.response.send_message(embed=message)
+            elif reply_via_followup and mining_progress_message is not None:
+                await mining_progress_message.edit(embed=message)
+            else:
+                await interaction.edit_original_response(embed=message)
 
 
     @app_commands.command(name = "pickaxe_fix", description = "修理礦鎬(需要10塊蛋糕)")
@@ -3406,6 +3577,106 @@ class SquidRPSView(discord.ui.View):
 
 
         
+
+
+class MiningVerifyView(discord.ui.View):
+    """挖礦檢定：簡單乘法題與五個接近答案的按鈕。"""
+
+    def __init__(self, *, cog, userid: str, answer: int, options: list, timeout: float):
+        super().__init__(timeout=timeout)
+        self.cog = cog
+        self.userid = userid
+        self.answer = answer
+        self.message = None
+        self.resolved = False
+        for option in options:
+            self.add_item(MiningVerifyButton(option=int(option)))
+
+    def disable_buttons(self) -> None:
+        """停用畫面上所有按鈕。"""
+        for child in self.children:
+            child.disabled = True
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """只允許本人作答。"""
+        if str(interaction.user.id) == self.userid:
+            return True
+        await interaction.response.send_message(
+            embed=Embed(title="Natalie 挖礦檢定", description="這不是你的檢定。", color=common.bot_error_color),
+            ephemeral=True,
+        )
+        return False
+
+    async def on_timeout(self) -> None:
+        """逾時後停用按鈕；待解狀態仍保留，下次 /mining 會再顯示檢定。"""
+        self.disable_buttons()
+        if self.message is None:
+            return
+        try:
+            await self.message.edit(view=self)
+        except discord.HTTPException:
+            pass
+
+
+class MiningVerifyButton(discord.ui.Button):
+    """挖礦檢定答案按鈕。"""
+
+    def __init__(self, *, option: int):
+        super().__init__(label=str(option), style=discord.ButtonStyle.primary)
+        self.option = option
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        處理玩家按下的答案。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: MiningVerifyView = self.view
+        if view.resolved:
+            await interaction.response.send_message(
+                embed=Embed(title="Natalie 挖礦檢定", description="這題已經答過了。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+
+        if self.option != view.answer:
+            view.resolved = True
+            view.disable_buttons()
+            view.stop()
+            await interaction.response.edit_message(
+                embed=Embed(title="Natalie 挖礦檢定", description="你答錯了哦", color=common.bot_error_color),
+                view=view,
+            )
+            return
+
+        async with common.jsonio_lock:
+            mining_data = await view.cog.miningdata_read(view.userid)
+            if not mining_data[view.userid].get("mining_verify_pending"):
+                view.resolved = True
+                view.disable_buttons()
+                view.stop()
+                await interaction.response.edit_message(
+                    embed=Embed(title="Natalie 挖礦檢定", description="檢定已結束，請重新使用 `/mining`。", color=common.bot_error_color),
+                    view=view,
+                )
+                return
+            view.cog.clear_mining_verify_state(mining_data[view.userid])
+            await common.mongo_storage.upsert_user(view.userid, mining_data[view.userid], "mining")
+
+        view.resolved = True
+        view.disable_buttons()
+        view.stop()
+        await interaction.response.edit_message(
+            embed=Embed(title="Natalie 挖礦檢定", description="答對了！正在為你挖礦...", color=common.bot_color),
+            view=view,
+        )
+        await view.cog.mining_execute(
+            interaction,
+            skip_cooldown=True,
+            skip_dig_sleep=True,
+            reply_via_followup=True,
+        )
 
 
 class SkillPickaxeDiscardView(discord.ui.View):
