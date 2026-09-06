@@ -1048,6 +1048,8 @@ class MiningGame(commands.Cog):
                     total_price += self.mineral_pricelist[mineral] * quantity
                     if quantity != 0:
                         mineral_sellinfo_show += f"{mineral}:**{quantity}**個\n"
+            if not mineral_sellinfo_show:
+                mineral_sellinfo_show = "你什麼都沒有賣掉。"
             message.add_field(name="你總共賣出了...",value=mineral_sellinfo_show,inline=False)
 
             #清除礦物
