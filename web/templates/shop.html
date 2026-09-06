@@ -426,9 +426,9 @@
       return '<div class="auction-list">' + orders.map(function (order) {
         var action = order.is_mine
           ? (
-              '<button type="button" class="btn btn-danger btn-sm" data-action="ask-unlist" data-id="' + order.order_id + '">下架</button>' +
               '<button type="button" class="btn btn-outline btn-sm" data-action="ask-remark" data-id="' + order.order_id + '">備註</button>' +
-              '<button type="button" class="btn btn-outline btn-sm" data-action="ask-reprice" data-id="' + order.order_id + '">改價</button>'
+              '<button type="button" class="btn btn-outline btn-sm" data-action="ask-reprice" data-id="' + order.order_id + '">改價</button>' +
+              '<button type="button" class="btn btn-danger btn-sm shop-order-unlist" data-action="ask-unlist" data-id="' + order.order_id + '">下架</button>'
             )
           : '<button type="button" class="btn btn-bid btn-sm" data-action="ask-buy" data-id="' + order.order_id +
             '" data-price="' + order.price + '" data-qty="' + order.quantity + '">購買</button>';

@@ -1186,6 +1186,7 @@ a {
 
 .shop-order-card .auction-meta {
   margin: 12px 0 0;
+  grid-template-columns: minmax(120px, 1.4fr) minmax(120px, 1fr) minmax(80px, 0.7fr);
 }
 
 .shop-order-remark {
@@ -1228,16 +1229,21 @@ a {
 }
 
 .shop-order-action {
-  flex: 0 0 auto;
+  flex: 0 0 15.5em;
+  width: 15.5em;
   align-self: center;
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
 }
 
 .shop-order-action .btn {
   width: auto;
   min-width: 4.5em;
+  margin: 0;
   white-space: nowrap;
 }
 
@@ -1356,7 +1362,12 @@ a {
   margin-top: 12px;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  align-items: center;
+  gap: 10px;
+}
+
+.shop-my-order-card .shop-my-order-actions .btn {
+  margin: 0;
 }
 
 @media (max-width: 1200px) {
@@ -1503,6 +1514,21 @@ a {
 
   .shop-row-history > :first-child {
     grid-column: 1 / -1;
+  }
+
+  .shop-order-card {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .shop-order-action {
+    flex: none;
+    width: auto;
+    justify-content: flex-start;
+  }
+
+  .shop-order-card .auction-meta {
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
   }
 }
 

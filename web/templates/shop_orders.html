@@ -177,12 +177,12 @@
             skillBlock +
             remarkBlock +
             '<div class="shop-my-order-actions">' +
-              '<button type="button" class="btn btn-danger btn-sm" data-action="unlist" data-id="' +
-              order.order_id + '" data-product="' + escapeHtml(order.product_id || "") + '">下架</button>' +
               '<button type="button" class="btn btn-outline btn-sm" data-action="remark" data-id="' +
               order.order_id + '" data-product="' + escapeHtml(order.product_id || "") + '">備註</button>' +
               '<button type="button" class="btn btn-outline btn-sm" data-action="reprice" data-id="' +
               order.order_id + '" data-product="' + escapeHtml(order.product_id || "") + '">改價</button>' +
+              '<button type="button" class="btn btn-danger btn-sm shop-order-unlist" data-action="unlist" data-id="' +
+              order.order_id + '" data-product="' + escapeHtml(order.product_id || "") + '">下架</button>' +
             "</div>" +
           "</article>"
         );
