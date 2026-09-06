@@ -3,7 +3,7 @@
 <div class="shop-page-head">
   <div>
     <h2>我的買賣單</h2>
-    <p class="shop-lead">這裡顯示你目前掛出的賣單與求購單，可以下架或取消。</p>
+    <p class="shop-lead">這裡顯示你目前掛出的賣單與求購單，可以下架、改價、備註或取消。</p>
   </div>
   <div class="shop-page-actions">
     <a class="btn btn-outline btn-sm" href="/shop/history">交易歷史</a>
@@ -25,6 +25,24 @@
 {% endblock %}
 {% block extra_script %}
 <div id="shop-orders-toast" class="auction-toast" role="status"></div>
+<div class="dialog-backdrop" id="shop-orders-form" role="dialog" aria-modal="true">
+  <div class="dialog-card dialog-wide">
+    <h3 id="shop-orders-form-title">表單</h3>
+    <p id="shop-orders-form-lead"></p>
+    <div class="shop-field is-hidden" id="shop-orders-field-price">
+      <label for="shop-orders-input-price">單價（蛋糕）</label>
+      <input type="number" id="shop-orders-input-price" min="1" step="1">
+    </div>
+    <div class="shop-field is-hidden" id="shop-orders-field-remark">
+      <label for="shop-orders-input-remark">備註（最多 40 字，留空可清除）</label>
+      <input type="text" id="shop-orders-input-remark" maxlength="40">
+    </div>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="shop-orders-form-cancel">取消</button>
+      <button type="button" class="btn btn-bid btn-sm" id="shop-orders-form-confirm">確認</button>
+    </div>
+  </div>
+</div>
 <div class="dialog-backdrop" id="shop-orders-confirm" role="dialog" aria-modal="true">
   <div class="dialog-card">
     <h3 id="shop-orders-confirm-title">確認</h3>
@@ -41,12 +59,25 @@
     var buyBox = document.getElementById("shop-my-buy-orders");
     var cakeBox = document.getElementById("topbar-cake");
     var toastBox = document.getElementById("shop-orders-toast");
+    var formDialog = document.getElementById("shop-orders-form");
+    var formTitle = document.getElementById("shop-orders-form-title");
+    var formLead = document.getElementById("shop-orders-form-lead");
+    var fieldPrice = document.getElementById("shop-orders-field-price");
+    var fieldRemark = document.getElementById("shop-orders-field-remark");
+    var inputPrice = document.getElementById("shop-orders-input-price");
+    var inputRemark = document.getElementById("shop-orders-input-remark");
+    var formCancel = document.getElementById("shop-orders-form-cancel");
+    var formConfirm = document.getElementById("shop-orders-form-confirm");
     var confirmDialog = document.getElementById("shop-orders-confirm");
     var confirmTitle = document.getElementById("shop-orders-confirm-title");
     var confirmText = document.getElementById("shop-orders-confirm-text");
     var confirmCancel = document.getElementById("shop-orders-confirm-cancel");
     var confirmOk = document.getElementById("shop-orders-confirm-ok");
     var confirmAction = null;
+    var formMode = "";
+    var formOrderId = 0;
+    var formProductId = "";
+    var sellOrdersCache = [];
     var busy = false;
     var toastTimer = null;
 
@@ -91,7 +122,32 @@
       confirmAction = null;
     }
 
+    function openForm(mode, options) {
+      options = options || {};
+      formMode = mode;
+      formOrderId = options.orderId || 0;
+      formProductId = options.productId || "";
+      formTitle.textContent = options.title || "";
+      formLead.innerHTML = options.lead || "";
+      fieldPrice.classList.toggle("is-hidden", !options.showPrice);
+      fieldRemark.classList.toggle("is-hidden", !options.showRemark);
+      inputPrice.value = options.price || "";
+      inputRemark.value = options.remark || "";
+      formConfirm.textContent = options.confirmText || "確認";
+      formDialog.classList.add("is-open");
+      if (options.showPrice) inputPrice.focus();
+      else if (options.showRemark) inputRemark.focus();
+    }
+
+    function closeForm() {
+      formMode = "";
+      formOrderId = 0;
+      formProductId = "";
+      formDialog.classList.remove("is-open");
+    }
+
     function renderSellOrders(orders) {
+      sellOrdersCache = orders || [];
       if (!orders || !orders.length) {
         sellBox.innerHTML = '<p class="shop-empty">你目前沒有掛中的賣單</p>';
         return;
@@ -107,6 +163,9 @@
         var qtyBlock = order.skill_lines && order.skill_lines.length
           ? ""
           : '<p class="shop-card-meta">數量 ' + order.quantity + "</p>";
+        var remarkBlock = order.remark
+          ? '<dl class="shop-order-remark"><div><dt>備註</dt><dd>' + escapeHtml(order.remark) + "</dd></div></dl>"
+          : "";
         return (
           '<article class="shop-history-card shop-my-order-card">' +
             '<div class="shop-history-head">' +
@@ -116,9 +175,14 @@
             '<p class="shop-card-meta">單價 ' + order.price + cakeIcon() + "</p>" +
             qtyBlock +
             skillBlock +
+            remarkBlock +
             '<div class="shop-my-order-actions">' +
               '<button type="button" class="btn btn-danger btn-sm" data-action="unlist" data-id="' +
               order.order_id + '" data-product="' + escapeHtml(order.product_id || "") + '">下架</button>' +
+              '<button type="button" class="btn btn-outline btn-sm" data-action="remark" data-id="' +
+              order.order_id + '" data-product="' + escapeHtml(order.product_id || "") + '">備註</button>' +
+              '<button type="button" class="btn btn-outline btn-sm" data-action="reprice" data-id="' +
+              order.order_id + '" data-product="' + escapeHtml(order.product_id || "") + '">改價</button>' +
             "</div>" +
           "</article>"
         );
@@ -127,7 +191,7 @@
 
     function renderBuyOrders(orders) {
       if (!orders || !orders.length) {
-        buyBox.innerHTML = '<p class="shop-empty">你目前沒有掛中的求購單</p>';
+        buyBox.innerHTML = '<p class="shop-empty">你目前沒有求購單</p>';
         return;
       }
       buyBox.innerHTML = orders.map(function (order) {
@@ -167,7 +231,7 @@
       }
     }
 
-    async function postCancel(url, body, okMessage) {
+    async function postAction(url, body, okMessage) {
       if (busy) return;
       busy = true;
       try {
@@ -192,6 +256,33 @@
       }
     }
 
+    function submitForm() {
+      if (!formOrderId) return;
+      if (formMode === "edit-price") {
+        var price = parseInt(inputPrice.value, 10);
+        var priceOrderId = formOrderId;
+        var priceProductId = formProductId;
+        closeForm();
+        postAction("/api/shop/sell-order/price", {
+          order_id: priceOrderId,
+          product_id: priceProductId,
+          price: price
+        }, "已更新價格");
+        return;
+      }
+      if (formMode === "edit-remark") {
+        var remark = inputRemark.value;
+        var remarkOrderId = formOrderId;
+        var remarkProductId = formProductId;
+        closeForm();
+        postAction("/api/shop/sell-order/remark", {
+          order_id: remarkOrderId,
+          product_id: remarkProductId,
+          remark: remark
+        }, "已更新備註");
+      }
+    }
+
     document.addEventListener("click", function (event) {
       var button = event.target.closest("[data-action]");
       if (!button) return;
@@ -201,21 +292,60 @@
       if (!orderId) return;
       if (action === "unlist") {
         openConfirm("確認下架", "確定要下架這筆商品嗎？道具會退回你的背包。", function () {
-          postCancel("/api/shop/sell-order/cancel", {
+          postAction("/api/shop/sell-order/cancel", {
             order_id: orderId,
             product_id: productId
           }, "已下架");
         });
         return;
       }
+      if (action === "reprice") {
+        var repriceOrder = sellOrdersCache.find(function (order) {
+          return String(order.order_id) === String(orderId);
+        });
+        openForm("edit-price", {
+          title: "改價",
+          lead: "修改這筆賣單的售價。售價必須高於目前最高求購價（若有求購單）。",
+          showPrice: true,
+          price: repriceOrder ? repriceOrder.price : "",
+          confirmText: "確認改價",
+          orderId: orderId,
+          productId: productId
+        });
+        return;
+      }
+      if (action === "remark") {
+        var remarkOrder = sellOrdersCache.find(function (order) {
+          return String(order.order_id) === String(orderId);
+        });
+        openForm("edit-remark", {
+          title: "備註",
+          lead: "幫這筆賣單寫一句短語，沒有備註時不會顯示該欄位。",
+          showRemark: true,
+          remark: remarkOrder ? (remarkOrder.remark || "") : "",
+          confirmText: "儲存備註",
+          orderId: orderId,
+          productId: productId
+        });
+        return;
+      }
       if (action === "cancel-buy") {
         openConfirm("取消求購", "確定要取消這筆求購嗎？預扣的蛋糕會退回。", function () {
-          postCancel("/api/shop/buy-order/cancel", {
+          postAction("/api/shop/buy-order/cancel", {
             order_id: orderId,
             product_id: productId
           }, "已取消求購");
         });
       }
+    });
+
+    formCancel.addEventListener("click", closeForm);
+    formConfirm.addEventListener("click", submitForm);
+    formDialog.addEventListener("pointerdown", function (event) {
+      formDialog.dataset.backdropDown = event.target === formDialog ? "1" : "0";
+    });
+    formDialog.addEventListener("click", function (event) {
+      if (formDialog.dataset.backdropDown === "1" && event.target === formDialog) closeForm();
     });
 
     confirmCancel.addEventListener("click", closeConfirm);
@@ -231,7 +361,9 @@
       if (action) action();
     });
     document.addEventListener("keydown", function (event) {
-      if (event.key === "Escape" && confirmDialog.classList.contains("is-open")) closeConfirm();
+      if (event.key !== "Escape") return;
+      if (confirmDialog.classList.contains("is-open")) closeConfirm();
+      else if (formDialog.classList.contains("is-open")) closeForm();
     });
 
     loadOrders();

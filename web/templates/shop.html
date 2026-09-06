@@ -57,6 +57,10 @@
       <label for="shop-input-description">商品描述</label>
       <textarea id="shop-input-description" rows="5"></textarea>
     </div>
+    <div class="shop-field is-hidden" id="shop-field-remark">
+      <label for="shop-input-remark">備註（最多 40 字，留空可清除）</label>
+      <input type="text" id="shop-input-remark" maxlength="40">
+    </div>
     <div class="dialog-actions">
       <button type="button" class="btn btn-outline btn-sm" id="shop-form-cancel">取消</button>
       <button type="button" class="btn btn-bid btn-sm" id="shop-form-confirm">確認</button>
@@ -91,9 +95,11 @@
     var pickaxeLabel = document.getElementById("shop-pickaxe-label");
     var pickaxeList = document.getElementById("shop-pickaxe-list");
     var fieldDescription = document.getElementById("shop-field-description");
+    var fieldRemark = document.getElementById("shop-field-remark");
     var inputPrice = document.getElementById("shop-input-price");
     var inputQuantity = document.getElementById("shop-input-quantity");
     var inputDescription = document.getElementById("shop-input-description");
+    var inputRemark = document.getElementById("shop-input-remark");
     var formCancel = document.getElementById("shop-form-cancel");
     var formConfirm = document.getElementById("shop-form-confirm");
     var confirmDialog = document.getElementById("shop-confirm-dialog");
@@ -271,17 +277,20 @@
       fieldQuantity.classList.toggle("is-hidden", !options.showQuantity);
       fieldPickaxe.classList.toggle("is-hidden", !options.showPickaxe);
       fieldDescription.classList.toggle("is-hidden", !options.showDescription);
+      fieldRemark.classList.toggle("is-hidden", !options.showRemark);
       if (pickaxeLabel && options.pickaxeLabel) pickaxeLabel.textContent = options.pickaxeLabel;
       inputPrice.value = options.price || "";
       inputPrice.readOnly = !!options.priceLocked;
       inputQuantity.value = options.quantity || 1;
       inputDescription.value = options.description || "";
+      inputRemark.value = options.remark || "";
       formConfirm.textContent = options.confirmText || "確認";
       formConfirm.className = "btn btn-sm " + (options.danger ? "btn-danger" : "btn-bid");
       formDialog.classList.add("is-open");
       if (options.showPrice && !options.priceLocked) inputPrice.focus();
       else if (options.showQuantity) inputQuantity.focus();
       else if (options.showDescription) inputDescription.focus();
+      else if (options.showRemark) inputRemark.focus();
     }
 
     function openConfirm(title, text, action) {
@@ -416,7 +425,11 @@
       }
       return '<div class="auction-list">' + orders.map(function (order) {
         var action = order.is_mine
-          ? '<button type="button" class="btn btn-danger btn-sm" data-action="ask-unlist" data-id="' + order.order_id + '">下架</button>'
+          ? (
+              '<button type="button" class="btn btn-danger btn-sm" data-action="ask-unlist" data-id="' + order.order_id + '">下架</button>' +
+              '<button type="button" class="btn btn-outline btn-sm" data-action="ask-remark" data-id="' + order.order_id + '">備註</button>' +
+              '<button type="button" class="btn btn-outline btn-sm" data-action="ask-reprice" data-id="' + order.order_id + '">改價</button>'
+            )
           : '<button type="button" class="btn btn-bid btn-sm" data-action="ask-buy" data-id="' + order.order_id +
             '" data-price="' + order.price + '" data-qty="' + order.quantity + '">購買</button>';
         var skillBlock = "";
@@ -429,6 +442,13 @@
         var qtyBlock = order.skill_lines && order.skill_lines.length
           ? ""
           : '<div><dt>數量</dt><dd>' + order.quantity + '</dd></div>';
+        var remarkBlock = order.remark
+          ? (
+              '<dl class="auction-meta shop-order-remark">' +
+                '<div><dt>備註</dt><dd>' + escapeHtml(order.remark) + '</dd></div>' +
+              '</dl>'
+            )
+          : "";
         return (
           '<article class="auction-card shop-order-card">' +
             '<div class="shop-order-main">' +
@@ -439,6 +459,7 @@
                 '<div><dt>價格</dt><dd>' + order.price + cakeIcon() + '</dd></div>' +
                 qtyBlock +
               '</dl>' +
+              remarkBlock +
             '</div>' +
             '<div class="shop-order-action">' + action + '</div>' +
           '</article>'
@@ -652,6 +673,26 @@
           product_id: productId,
           description: inputDescription.value
         }, "已更新商品描述");
+        return;
+      }
+      if (formMode === "edit-price") {
+        var orderId = formOrderId;
+        closeForm();
+        postAction("/api/shop/sell-order/price", {
+          order_id: orderId,
+          product_id: productId,
+          price: price
+        }, "已更新價格");
+        return;
+      }
+      if (formMode === "edit-remark") {
+        var remarkOrderId = formOrderId;
+        closeForm();
+        postAction("/api/shop/sell-order/remark", {
+          order_id: remarkOrderId,
+          product_id: productId,
+          remark: inputRemark.value
+        }, "已更新備註");
       }
     }
 
@@ -783,6 +824,37 @@
             order_id: parseInt(button.getAttribute("data-id"), 10),
             product_id: product.product_id
           }, "已下架");
+        });
+        return;
+      }
+      if (action === "ask-reprice") {
+        var repriceOrder = (detailData.sell_orders || []).find(function (order) {
+          return String(order.order_id) === button.getAttribute("data-id");
+        });
+        var repriceHint = detailData.highest_buy_price
+          ? "售價必須高於目前最高求購 " + detailData.highest_buy_price + cakeIcon()
+          : "目前沒有求購單，售價只要大於 0 即可。";
+        openForm("edit-price", {
+          title: "改價",
+          lead: "修改 <strong>" + escapeHtml(product.name) + "</strong> 的售價。<br>" + repriceHint,
+          showPrice: true,
+          price: repriceOrder ? repriceOrder.price : "",
+          confirmText: "確認改價",
+          orderId: parseInt(button.getAttribute("data-id"), 10)
+        });
+        return;
+      }
+      if (action === "ask-remark") {
+        var remarkOrder = (detailData.sell_orders || []).find(function (order) {
+          return String(order.order_id) === button.getAttribute("data-id");
+        });
+        openForm("edit-remark", {
+          title: "備註",
+          lead: "幫這筆賣單寫一句短語，沒有備註時不會顯示該欄位。",
+          showRemark: true,
+          remark: remarkOrder ? (remarkOrder.remark || "") : "",
+          confirmText: "儲存備註",
+          orderId: parseInt(button.getAttribute("data-id"), 10)
         });
         return;
       }

@@ -51,6 +51,7 @@ class ShopHouse:
         self.history_limit = 80
         self.product_history_limit = 20
         self.my_orders_limit = 100
+        self.remark_max_length = 40
         self.trade_dm_title = "Natalie 商店"
 
     def page_url(self) -> str:
@@ -1136,6 +1137,7 @@ class ShopHouse:
         user_id = str(order.get("user_id") or "")
         instance = order.get("item_instance") if isinstance(order.get("item_instance"), dict) else None
         skill_lines = self.skill_pickaxe_public_lines(instance.get("skills")) if instance is not None else []
+        remark = str(order.get("remark") or "").strip()
         return {
             "order_id": int(order.get("order_id") or 0),
             "user_id": user_id,
@@ -1144,6 +1146,7 @@ class ShopHouse:
             "quantity": int(order.get("quantity") or 0),
             "is_mine": user_id == str(viewer_id),
             "skill_lines": skill_lines,
+            "remark": remark,
         }
 
     async def market_stats(self, product_id: str) -> dict:
@@ -1580,6 +1583,67 @@ class ShopHouse:
             )
             if product.get("kind") != self.kind_skill_pickaxe:
                 await self.release_item(user_id, product, quantity)
+        return {"ok": True}
+
+    async def update_sell_order_price(self, order_id: int, user_id: str, price) -> dict:
+        """
+        修改自己賣單的價格。
+
+        Args:
+            order_id (int): "2"
+            user_id (str): "410847926236086272"
+            price: "9000"
+
+        Returns:
+            result (dict): "{'ok': True}"
+        """
+        try:
+            parsed_price, _ = self.parse_price_quantity(price, 1)
+        except Exception:
+            return {"ok": False, "error": "價格必須為正整數"}
+        async with self.lock:
+            collection = common.mongo_storage.get_collection("shop_order")
+            order = await collection.find_one({"_id": str(order_id)})
+            if order is None or order.get("side") != self.side_sell or order.get("status") != self.order_status_open:
+                return {"ok": False, "error": "找不到這筆賣單"}
+            if str(order.get("user_id")) != str(user_id):
+                return {"ok": False, "error": "只能修改自己的賣單"}
+            product_id = str(order.get("product_id") or "")
+            stats = await self.market_stats(product_id)
+            if stats["highest_buy_price"] is not None and parsed_price <= stats["highest_buy_price"]:
+                return {"ok": False, "error": "售價必須高於目前最高的求購單，不然請用快速販賣"}
+            await collection.update_one(
+                {"_id": str(order_id)},
+                {"$set": {"price": parsed_price}},
+            )
+        return {"ok": True}
+
+    async def update_sell_order_remark(self, order_id: int, user_id: str, remark) -> dict:
+        """
+        修改自己賣單的備註；空白則清除。
+
+        Args:
+            order_id (int): "2"
+            user_id (str): "410847926236086272"
+            remark: "急售"
+
+        Returns:
+            result (dict): "{'ok': True}"
+        """
+        text = str(remark or "").strip()
+        if len(text) > self.remark_max_length:
+            return {"ok": False, "error": f"備註最多 {self.remark_max_length} 字"}
+        async with self.lock:
+            collection = common.mongo_storage.get_collection("shop_order")
+            order = await collection.find_one({"_id": str(order_id)})
+            if order is None or order.get("side") != self.side_sell or order.get("status") != self.order_status_open:
+                return {"ok": False, "error": "找不到這筆賣單"}
+            if str(order.get("user_id")) != str(user_id):
+                return {"ok": False, "error": "只能修改自己的賣單"}
+            await collection.update_one(
+                {"_id": str(order_id)},
+                {"$set": {"remark": text}},
+            )
         return {"ok": True}
 
     async def write_history(self, *, product: dict, seller_id: str, seller_name: str, buyer_id: str,

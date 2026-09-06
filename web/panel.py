@@ -256,6 +256,8 @@ class WebPanel:
         app.add_api_route("/api/shop/buy-order/cancel", self.shop_buy_order_cancel, methods=["POST"], name="shop_buy_order_cancel")
         app.add_api_route("/api/shop/sell-order", self.shop_sell_order, methods=["POST"], name="shop_sell_order")
         app.add_api_route("/api/shop/sell-order/cancel", self.shop_sell_order_cancel, methods=["POST"], name="shop_sell_order_cancel")
+        app.add_api_route("/api/shop/sell-order/price", self.shop_sell_order_price, methods=["POST"], name="shop_sell_order_price")
+        app.add_api_route("/api/shop/sell-order/remark", self.shop_sell_order_remark, methods=["POST"], name="shop_sell_order_remark")
         app.add_api_route("/api/shop/buy-listing", self.shop_buy_listing, methods=["POST"], name="shop_buy_listing")
         app.add_api_route("/api/shop/quick-sell", self.shop_quick_sell, methods=["POST"], name="shop_quick_sell")
         app.add_api_route("/api/shop/skill-pickaxes", self.shop_skill_pickaxes, methods=["GET"], name="shop_skill_pickaxes")
@@ -902,6 +904,54 @@ class WebPanel:
         except Exception:
             return JSONResponse({"ok": False, "error": "下架資料格式錯誤"}, status_code=400)
         result = await house.cancel_sell_order(order_id, context["user_id"])
+        result.update(await self.shop_action_payload(house, context, product_id or None))
+        return JSONResponse(result)
+
+    async def shop_sell_order_price(self, request: Request):
+        """
+        修改自己賣單的價格。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            order_id = int(body.get("order_id"))
+            price = body.get("price")
+            product_id = str(body.get("product_id") or "")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "改價資料格式錯誤"}, status_code=400)
+        result = await house.update_sell_order_price(order_id, context["user_id"], price)
+        result.update(await self.shop_action_payload(house, context, product_id or None))
+        return JSONResponse(result)
+
+    async def shop_sell_order_remark(self, request: Request):
+        """
+        修改自己賣單的備註。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            order_id = int(body.get("order_id"))
+            remark = str(body.get("remark") or "")
+            product_id = str(body.get("product_id") or "")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "備註資料格式錯誤"}, status_code=400)
+        result = await house.update_sell_order_remark(order_id, context["user_id"], remark)
         result.update(await self.shop_action_payload(house, context, product_id or None))
         return JSONResponse(result)
 

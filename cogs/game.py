@@ -3679,7 +3679,7 @@ class MiningVerifyButton(discord.ui.Button):
         view.disable_buttons()
         view.stop()
         await interaction.response.edit_message(
-            embed=Embed(title="Natalie 挖礦檢定", description="答對了！正在為你挖礦...", color=common.bot_color),
+            embed=Embed(title="Natalie 挖礦檢定", description="答對了！正在挖礦...", color=common.bot_color),
             view=view,
         )
         await view.cog.mining_execute(
