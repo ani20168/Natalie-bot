@@ -70,6 +70,43 @@ class MiningGame(commands.Cog):
         self.mine_limit_restore_proc_chance = 0.5
         self.mining_verify_interval = 20
         self.mining_verify_timeout = 300
+        # 各技能礦鎬可取得的技能池（命運卷軸增減技能用）
+        self.skill_pickaxe_skill_pools = {
+            "災禍鎬": [
+                "bonus_chance_add",
+                "bonus_extra_on_proc",
+                "dig_time_reduce_sec",
+                "bonus_force_highest_value",
+                "durability_half_skip",
+            ],
+            "附魔迷你船錨": [
+                "bonus_chance_add",
+                "bonus_extra_on_proc",
+                "dig_time_reduce_sec",
+                "bonus_force_highest_value",
+                "collection_chance_add",
+                "durability_half_skip",
+            ],
+            "靈能之手": [
+                "bonus_chance_add",
+                "bonus_extra_on_proc",
+                "dig_time_reduce_sec",
+                "bonus_force_highest_value",
+                "collection_chance_add",
+                "durability_half_skip",
+                "dig_efficiency_mult",
+                "collection_on_break",
+                "mine_limit_restore",
+            ],
+        }
+        # 有數值範圍、可用機會卷軸重骰的技能鍵
+        self.skill_pickaxe_ranged_keys = {
+            "bonus_chance_add",
+            "bonus_extra_on_proc",
+            "dig_time_reduce_sec",
+            "collection_chance_add",
+            "dig_efficiency_mult",
+        }
 
 
     async def miningdata_read(self,userid: str):
@@ -157,24 +194,76 @@ class MiningGame(commands.Cog):
         return random.randint(1, 10) * 10
 
 
+    def roll_skill_value_for_template(self, template: str, skill_key: str):
+        """
+        依礦鎬模板骰出單一技能的數值／旗標（範圍與購買時相同）。
+
+        Args:
+            template (str): "災禍鎬"
+            skill_key (str): "bonus_chance_add"
+
+        Returns:
+            value: "0.25"
+        """
+        if skill_key in ("bonus_force_highest_value", "durability_half_skip", "collection_on_break", "mine_limit_restore"):
+            return True
+        if template == "災禍鎬":
+            if skill_key == "bonus_chance_add":
+                return random.randint(1, 40) / 100.0
+            if skill_key == "bonus_extra_on_proc":
+                return random.randint(1, 3)
+            if skill_key == "dig_time_reduce_sec":
+                return random.randint(1, 3)
+        elif template == "附魔迷你船錨":
+            if skill_key == "bonus_chance_add":
+                return random.randint(20, 100) / 100.0
+            if skill_key == "bonus_extra_on_proc":
+                if random.random() < 0.70:
+                    return random.randint(1, 3)
+                return random.randint(4, 8)
+            if skill_key == "dig_time_reduce_sec":
+                if random.random() < 0.70:
+                    return random.randint(1, 3)
+                return random.randint(4, 7)
+            if skill_key == "collection_chance_add":
+                tier = random.random()
+                if tier < 0.70:
+                    return random.randint(1, 5) / 100.0
+                if tier < 0.90:
+                    return random.randint(6, 10) / 100.0
+                return random.randint(11, 15) / 100.0
+        elif template == "靈能之手":
+            if skill_key == "bonus_chance_add":
+                return random.randint(40, 100) / 100.0
+            if skill_key == "bonus_extra_on_proc":
+                return random.randint(3, 8)
+            if skill_key == "dig_time_reduce_sec":
+                return random.randint(4, 7)
+            if skill_key == "collection_chance_add":
+                return random.randint(5, 20) / 100.0
+            if skill_key == "dig_efficiency_mult":
+                return random.randint(2, 5)
+        raise ValueError(f"未知技能或模板無法骰值：{template}/{skill_key}")
+
+
     def roll_disaster_pickaxe_skills(self) -> dict:
         """災禍鎬：各技能獨立骰是否取得，並骰出數值／旗標寫入 dict。"""
         skills = {}
         # 增加 1%～40% 獲得額外礦物機率（20% 獨立骰是否取得）
         if random.random() < 0.20:
-            skills["bonus_chance_add"] = random.randint(1, 40) / 100.0
+            skills["bonus_chance_add"] = self.roll_skill_value_for_template("災禍鎬", "bonus_chance_add")
         # 觸發額外礦 bonus 時，額外數量再 +1～3（20%）
         if random.random() < 0.20:
-            skills["bonus_extra_on_proc"] = random.randint(1, 3)
+            skills["bonus_extra_on_proc"] = self.roll_skill_value_for_template("災禍鎬", "bonus_extra_on_proc")
         # 減少 1～3 秒挖掘等待（15%）
         if random.random() < 0.15:
-            skills["dig_time_reduce_sec"] = random.randint(1, 3)
+            skills["dig_time_reduce_sec"] = self.roll_skill_value_for_template("災禍鎬", "dig_time_reduce_sec")
         # 額外礦 bonus 必為該礦場最高價值礦物（15%）
         if random.random() < 0.15:
-            skills["bonus_force_highest_value"] = True
+            skills["bonus_force_highest_value"] = self.roll_skill_value_for_template("災禍鎬", "bonus_force_highest_value")
         # 每次挖礦有 50% 機率不扣耐久（30% 獨立骰是否擁有此效果）
         if random.random() < 0.30:
-            skills["durability_half_skip"] = True
+            skills["durability_half_skip"] = self.roll_skill_value_for_template("災禍鎬", "durability_half_skip")
         return skills
 
 
@@ -183,34 +272,22 @@ class MiningGame(commands.Cog):
         skills = {}
         # 增加 20%～100% 獲得額外礦物機率（30%）
         if random.random() < 0.30:
-            skills["bonus_chance_add"] = random.randint(20, 100) / 100.0
+            skills["bonus_chance_add"] = self.roll_skill_value_for_template("附魔迷你船錨", "bonus_chance_add")
         # 觸發額外礦 bonus 時額外數量（30% 取得）；內層 70% 為 +1～3、30% 為 +4～8
         if random.random() < 0.30:
-            if random.random() < 0.70:
-                skills["bonus_extra_on_proc"] = random.randint(1, 3)
-            else:
-                skills["bonus_extra_on_proc"] = random.randint(4, 8)
+            skills["bonus_extra_on_proc"] = self.roll_skill_value_for_template("附魔迷你船錨", "bonus_extra_on_proc")
         # 減少挖掘等待（15% 取得）；內層 70% 為 1～3 秒、30% 為 4～7 秒
         if random.random() < 0.15:
-            if random.random() < 0.70:
-                skills["dig_time_reduce_sec"] = random.randint(1, 3)
-            else:
-                skills["dig_time_reduce_sec"] = random.randint(4, 7)
+            skills["dig_time_reduce_sec"] = self.roll_skill_value_for_template("附魔迷你船錨", "dig_time_reduce_sec")
         # 額外礦 bonus 必為該礦場最高價值礦物（20%）
         if random.random() < 0.20:
-            skills["bonus_force_highest_value"] = True
+            skills["bonus_force_highest_value"] = self.roll_skill_value_for_template("附魔迷你船錨", "bonus_force_highest_value")
         # 增加收藏品機率（10% 取得）；內層 70% 為 1%～5%、20% 為 6%～10%、10% 為 11%～15%
         if random.random() < 0.10:
-            tier = random.random()
-            if tier < 0.70:
-                skills["collection_chance_add"] = random.randint(1, 5) / 100.0
-            elif tier < 0.90:
-                skills["collection_chance_add"] = random.randint(6, 10) / 100.0
-            else:
-                skills["collection_chance_add"] = random.randint(11, 15) / 100.0
+            skills["collection_chance_add"] = self.roll_skill_value_for_template("附魔迷你船錨", "collection_chance_add")
         # 每次挖礦有 50% 機率不扣耐久（40%）
         if random.random() < 0.40:
-            skills["durability_half_skip"] = True
+            skills["durability_half_skip"] = self.roll_skill_value_for_template("附魔迷你船錨", "durability_half_skip")
         return skills
 
 
@@ -219,31 +296,31 @@ class MiningGame(commands.Cog):
         skills = {}
         # 增加 40%～100% 獲得額外礦物機率（35%）
         if random.random() < 0.35:
-            skills["bonus_chance_add"] = random.randint(40, 100) / 100.0
+            skills["bonus_chance_add"] = self.roll_skill_value_for_template("靈能之手", "bonus_chance_add")
         # 觸發額外礦 bonus 時，額外數量再 +3～8（35%）
         if random.random() < 0.35:
-            skills["bonus_extra_on_proc"] = random.randint(3, 8)
+            skills["bonus_extra_on_proc"] = self.roll_skill_value_for_template("靈能之手", "bonus_extra_on_proc")
         # 減少 4～7 秒挖掘等待（20%）
         if random.random() < 0.20:
-            skills["dig_time_reduce_sec"] = random.randint(4, 7)
+            skills["dig_time_reduce_sec"] = self.roll_skill_value_for_template("靈能之手", "dig_time_reduce_sec")
         # 額外礦 bonus 必為該礦場最高價值礦物（20%）
         if random.random() < 0.20:
-            skills["bonus_force_highest_value"] = True
+            skills["bonus_force_highest_value"] = self.roll_skill_value_for_template("靈能之手", "bonus_force_highest_value")
         # 增加 5%～20% 獲得收藏品機率（20%）
         if random.random() < 0.20:
-            skills["collection_chance_add"] = random.randint(5, 20) / 100.0
+            skills["collection_chance_add"] = self.roll_skill_value_for_template("靈能之手", "collection_chance_add")
         # 每次挖礦有 50% 機率不扣耐久（40%）
         if random.random() < 0.40:
-            skills["durability_half_skip"] = True
+            skills["durability_half_skip"] = self.roll_skill_value_for_template("靈能之手", "durability_half_skip")
         # 2～5 倍挖掘效率（20%）：一次指令等同挖 N 次，等待只算一次
         if random.random() < 0.20:
-            skills["dig_efficiency_mult"] = random.randint(2, 5)
+            skills["dig_efficiency_mult"] = self.roll_skill_value_for_template("靈能之手", "dig_efficiency_mult")
         # 礦鎬毀損時，在執行一次獲得收藏品獎勵判定（15%）：耐久用完或意外毀損皆觸發
         if random.random() < 0.15:
-            skills["collection_on_break"] = True
+            skills["collection_on_break"] = self.roll_skill_value_for_template("靈能之手", "collection_on_break")
         # 挖礦時有一半機會不消耗礦場量並回復一次（15% 取得此效果）
         if random.random() < 0.15:
-            skills["mine_limit_restore"] = True
+            skills["mine_limit_restore"] = self.roll_skill_value_for_template("靈能之手", "mine_limit_restore")
         return skills
 
 
@@ -358,6 +435,125 @@ class MiningGame(commands.Cog):
         if slot >= len(bag) or not self.is_skill_pickaxe_entry(bag[slot]):
             return {}
         return bag[slot].get("skills") or {}
+
+
+    def get_equipped_skill_pickaxe_entry(self, mining_data: dict, userid: str):
+        """
+        取得目前裝備中的技能礦鎬背包格資料。
+
+        Args:
+            mining_data (dict): "{'4108': {'equipped_bag_slot': 0}}"
+            userid (str): "4108"
+
+        Returns:
+            entry (dict | None): "{'template': '災禍鎬', 'skills': {}}"
+        """
+        slot = mining_data[userid].get("equipped_bag_slot")
+        if slot is None:
+            return None
+        bag = mining_data[userid]["pickaxe_bag"]
+        if slot < 0 or slot >= len(bag):
+            return None
+        entry = bag[slot]
+        if not self.is_skill_pickaxe_entry(entry):
+            return None
+        return entry
+
+
+    def skill_line_for_key(self, skill_key: str, skills: dict) -> str:
+        """
+        單一技能鍵的中文說明。
+
+        Args:
+            skill_key (str): "dig_time_reduce_sec"
+            skills (dict): "{'dig_time_reduce_sec': 2}"
+
+        Returns:
+            line (str): "減少 2 秒挖掘時間"
+        """
+        lines = self.skill_pickaxe_line_list({skill_key: skills[skill_key]} if skill_key in skills else {})
+        return lines[0] if lines else skill_key
+
+
+    async def apply_chance_scroll(self, userid: str) -> tuple[bool, str]:
+        """
+        機會卷軸：重骰目前裝備技能礦鎬上所有有範圍的技能數值。
+
+        Args:
+            userid (str): "4108"
+
+        Returns:
+            result (tuple): "(True, '重骰成功說明')"
+        """
+        async with common.jsonio_lock:
+            mining_data = await self.miningdata_read(userid)
+            entry = self.get_equipped_skill_pickaxe_entry(mining_data, userid)
+            if entry is None:
+                return False, "你目前沒有裝備技能礦鎬，無法使用機會卷軸。"
+            template = str(entry.get("template") or "")
+            if template not in self.skill_pickaxe_skill_pools:
+                return False, "目前裝備的礦鎬無法使用機會卷軸。"
+            skills = dict(entry.get("skills") or {})
+            ranged_keys = [key for key in skills if key in self.skill_pickaxe_ranged_keys]
+            if not ranged_keys:
+                return False, "這把礦鎬沒有可重骰數值範圍的技能，機會卷軸派不上用場。"
+            before_lines = []
+            after_lines = []
+            for skill_key in ranged_keys:
+                before_lines.append(self.skill_line_for_key(skill_key, skills))
+                skills[skill_key] = self.roll_skill_value_for_template(template, skill_key)
+                after_lines.append(self.skill_line_for_key(skill_key, skills))
+            entry["skills"] = skills
+            await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
+        changes = "\n".join(
+            f"・{before} → **{after}**" for before, after in zip(before_lines, after_lines)
+        )
+        return True, f"使用了 **機會卷軸**，已重骰 **{template}** 上所有可重骰技能：\n{changes}"
+
+
+    async def apply_fate_scroll(self, userid: str) -> tuple[bool, str]:
+        """
+        命運卷軸：對目前裝備技能礦鎬 50% 多一個技能、50% 少一個技能。
+
+        Args:
+            userid (str): "4108"
+
+        Returns:
+            result (tuple): "(True, '效果說明')"
+        """
+        async with common.jsonio_lock:
+            mining_data = await self.miningdata_read(userid)
+            entry = self.get_equipped_skill_pickaxe_entry(mining_data, userid)
+            if entry is None:
+                return False, "你目前沒有裝備技能礦鎬，無法使用命運卷軸。"
+            template = str(entry.get("template") or "")
+            pool = list(self.skill_pickaxe_skill_pools.get(template) or [])
+            if not pool:
+                return False, "目前裝備的礦鎬無法使用命運卷軸。"
+            skills = dict(entry.get("skills") or {})
+            if len(skills) >= len(pool):
+                return False, f"**{template}** 的技能已滿，命運卷軸無法再增加技能，因此不能使用。"
+            if random.random() < 0.5:
+                missing = [key for key in pool if key not in skills]
+                if not missing:
+                    return False, f"**{template}** 的技能已滿，命運卷軸無法再增加技能，因此不能使用。"
+                skill_key = random.choice(missing)
+                skills[skill_key] = self.roll_skill_value_for_template(template, skill_key)
+                entry["skills"] = skills
+                await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
+                gained = self.skill_line_for_key(skill_key, skills)
+                return True, f"使用了 **命運卷軸**，命運眷顧！**{template}** 多出了技能：\n・**{gained}**"
+            if not skills:
+                return True, (
+                    f"使用了 **命運卷軸**，命運想抽走你的技能……"
+                    f"但 **{template}** 本來就空空如也，卷軸乾笑一聲後自己燒成灰了。"
+                )
+            skill_key = random.choice(list(skills.keys()))
+            lost_line = self.skill_line_for_key(skill_key, skills)
+            del skills[skill_key]
+            entry["skills"] = skills
+            await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
+            return True, f"使用了 **命運卷軸**，命運翻臉！**{template}** 失去了技能：\n・**{lost_line}**"
 
 
     def sync_equipped_pickaxe_to_bag_slot(self, mining_data: dict, userid: str) -> None:

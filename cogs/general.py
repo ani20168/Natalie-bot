@@ -84,6 +84,11 @@ class ServerItemHouse:
         self.strong_magnet_steal_range = (5000, 10000)
         self.magnet_warmup_seconds = 60
         self.magnet_voice_join_at = {}
+        self.gambler_gift_contents = (
+            ("blackjack_cheat", 1),
+            ("chance_scroll", 3),
+            ("fate_scroll", 3),
+        )
         self.status_anti_theft = "anti_theft"
         self.status_bodyguard = "bodyguard"
         self.status_lucky_glove = "lucky_glove"
@@ -242,6 +247,25 @@ class ServerItemHouse:
                 "use_kind": "self_status",
                 "status_key": self.status_rain_maker,
             },
+            "chance_scroll": {
+                "name": "機會卷軸",
+                "description": "重骰當前裝備的技能礦鎬的技能數值",
+                "duration_days": 0,
+                "use_kind": "chance_scroll",
+            },
+            "fate_scroll": {
+                "name": "命運卷軸",
+                "description": "對當前裝備的技能礦鎬：50% 多一個尚未擁有的技能、50% 少一個技能",
+                "duration_days": 0,
+                "use_kind": "fate_scroll",
+            },
+            "gambler_gift": {
+                "name": "賭狗大禮包",
+                "description": "開啟後獲得：21點作弊卡 x1、機會卷軸 x3、命運卷軸 x3",
+                "duration_days": 0,
+                "use_kind": "item_bundle",
+                "grant_items": self.gambler_gift_contents,
+            },
         }
 
     def panel_item_guides(self) -> list[dict]:
@@ -359,6 +383,28 @@ class ServerItemHouse:
             if isinstance(entry, dict) and entry.get("item_id") == item_id:
                 return True
         return self.first_empty_index(bag) is not None
+
+    def can_receive_bundle_on_bag(self, bag: list, grant_items) -> bool:
+        """
+        此背包能否一次收下禮包內全部道具。
+
+        Args:
+            bag (list): "[{'item_id': 'milk', 'count': 1}]"
+            grant_items: "[('chance_scroll', 3)]"
+
+        Returns:
+            ok (bool): "True"
+        """
+        simulated = []
+        for entry in bag:
+            if isinstance(entry, dict) and entry.get("item_id") and int(entry.get("count") or 0) > 0:
+                simulated.append({"item_id": str(entry["item_id"]), "count": int(entry["count"])})
+            else:
+                simulated.append(None)
+        for item_id, quantity in grant_items:
+            if not self.put_items_on_bag(simulated, str(item_id), int(quantity)):
+                return False
+        return True
 
     def count_item_on_bag(self, bag: list, item_id: str) -> int:
         """
@@ -1214,6 +1260,38 @@ class ServerItemHouse:
                 return False, f"<@{target.id}> 的背包是空的，天罰沒有東西可以摧毀。"
             await self.save_bag_and_status(str(target.id), victim_data)
             return True, f"使用了 **{name}**，摧毀了 <@{target.id}> 的 **{destroyed}**。"
+        if use_kind == "chance_scroll":
+            mining_cog = self.bot.get_cog("MiningGame")
+            if mining_cog is None:
+                self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
+                return False, "挖礦系統尚未就緒，暫時無法使用機會卷軸。"
+            ok, message = await mining_cog.apply_chance_scroll(user_id)
+            if not ok:
+                self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
+            return ok, message
+        if use_kind == "fate_scroll":
+            mining_cog = self.bot.get_cog("MiningGame")
+            if mining_cog is None:
+                self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
+                return False, "挖礦系統尚未就緒，暫時無法使用命運卷軸。"
+            ok, message = await mining_cog.apply_fate_scroll(user_id)
+            if not ok:
+                self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
+            return ok, message
+        if use_kind == "item_bundle":
+            grant_items = item.get("grant_items") or ()
+            bag = self.normalize_bag(user_data)
+            if not self.can_receive_bundle_on_bag(bag, grant_items):
+                self.put_items_on_bag(bag, item_id, 1)
+                return False, f"背包空間不足，無法開啟 **{name}**。"
+            granted_lines = []
+            for grant_item_id, quantity in grant_items:
+                if not self.put_items_on_bag(bag, str(grant_item_id), int(quantity)):
+                    self.put_items_on_bag(bag, item_id, 1)
+                    return False, f"背包空間不足，無法開啟 **{name}**。"
+                granted_lines.append(f"・**{self.item_display_name(str(grant_item_id))}** x{int(quantity)}")
+            detail = "\n".join(granted_lines)
+            return True, f"開啟了 **{name}**，獲得：\n{detail}"
         self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
         return False, "這個道具目前無法使用。"
 
