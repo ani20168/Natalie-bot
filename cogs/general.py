@@ -77,6 +77,7 @@ class ServerItemHouse:
         self.blackjack_cheat_games = 20
         self.jade_bracelet_games = 50
         self.master_thief_robberies = 20
+        self.pickaxe_discount_buys = 20
         self.rain_maker_cake_low = 1
         self.rain_maker_cake_high_by_count = {1: 1200, 2: 800, 3: 600, 4: 500}
         self.rain_maker_cake_high_5_plus = 450
@@ -101,7 +102,9 @@ class ServerItemHouse:
         self.status_blackjack_cheat = "blackjack_cheat"
         self.status_jade_bracelet = "jade_bracelet"
         self.status_rain_maker = "rain_maker"
+        self.status_pickaxe_discount = "pickaxe_discount"
         self.charge_effect_keys = {self.status_blackjack_cheat, self.status_jade_bracelet}
+        self.charge_count_unit_keys = {self.status_master_thief, self.status_pickaxe_discount}
         self.anti_theft_invalid_title = "你的防盜卡已失效"
         self.anti_theft_expired_reason = "已過期"
         self.anti_theft_milk_reason = "被 {actor_name} 的牛奶消除"
@@ -118,6 +121,7 @@ class ServerItemHouse:
             self.status_blackjack_cheat: "21點作弊卡",
             self.status_jade_bracelet: "玉手鐲",
             self.status_rain_maker: "造雨機",
+            self.status_pickaxe_discount: "礦鎬折價卷",
         }
         self.items = {
             "anti_theft_3": {
@@ -266,6 +270,14 @@ class ServerItemHouse:
                 "use_kind": "item_bundle",
                 "grant_items": self.gambler_gift_contents,
             },
+            "pickaxe_discount_coupon": {
+                "name": "礦鎬折價卷",
+                "description": "給予20次礦鎬購買半價優惠",
+                "duration_days": 0,
+                "use_kind": "self_charge",
+                "status_key": self.status_pickaxe_discount,
+                "charge_amount": self.pickaxe_discount_buys,
+            },
         }
 
     def panel_item_guides(self) -> list[dict]:
@@ -282,7 +294,8 @@ class ServerItemHouse:
                 kind_label = f"狀態 {duration_days}天"
             elif item.get("use_kind") == "self_charge":
                 charge_amount = int(item.get("charge_amount") or 0)
-                kind_label = f"{charge_amount}次" if item.get("status_key") == self.status_master_thief else f"{charge_amount}場"
+                unit = "次" if item.get("status_key") in self.charge_count_unit_keys else "場"
+                kind_label = f"{charge_amount}{unit}"
             else:
                 kind_label = "一次性"
             guides.append({
@@ -1184,7 +1197,7 @@ class ServerItemHouse:
         if use_kind == "self_charge":
             self.add_charge_status(user_data, item["status_key"], int(item["charge_amount"]))
             remaining = self.charge_remaining_in_data(user_data, item["status_key"])
-            unit = "次" if item["status_key"] == self.status_master_thief else "場"
+            unit = "次" if item["status_key"] in self.charge_count_unit_keys else "場"
             return True, f"使用了 **{name}**，目前剩餘 **{remaining}** {unit}。"
         if use_kind == "target_status":
             target_member = target or actor

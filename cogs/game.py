@@ -1353,6 +1353,42 @@ class MiningGame(commands.Cog):
             await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
             await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"已移動到**{choices.value}**礦場，當前礦場剩餘挖礦次數:**{mining_data['mine_mininglimit'][choices.value]}**",color=common.bot_color))
 
+    def pickaxe_buy_price(self, user_data: dict, base_price: int) -> tuple[int, bool]:
+        """
+        依礦鎬折價卷剩餘次數計算實付價格。
+
+        Args:
+            user_data (dict): "{'item_charges': {}}"
+            base_price (int): "10000"
+
+        Returns:
+            result (tuple): "(5000, True)"
+        """
+        if base_price <= 0:
+            return base_price, False
+        house = getattr(self.bot, "server_item_house", None)
+        if house is None:
+            return base_price, False
+        if house.charge_remaining_in_data(user_data, house.status_pickaxe_discount) <= 0:
+            return base_price, False
+        return base_price // 2, True
+
+    def consume_pickaxe_discount_charge(self, user_data: dict) -> int:
+        """
+        成功套用半價後扣除 1 次折價，回傳剩餘次數。
+
+        Args:
+            user_data (dict): "{'item_charges': {}}"
+
+        Returns:
+            remaining (int): "19"
+        """
+        house = getattr(self.bot, "server_item_house", None)
+        if house is None:
+            return 0
+        house.consume_charge_in_data(user_data, house.status_pickaxe_discount)
+        return house.charge_remaining_in_data(user_data, house.status_pickaxe_discount)
+
     @app_commands.command(name = "pickaxe_buy",description="購買礦鎬")
     @app_commands.describe(choices="要購買的礦鎬")
     @app_commands.rename(choices="選擇礦鎬")
@@ -1380,14 +1416,19 @@ class MiningGame(commands.Cog):
                 if meta["需求等級"] > user_data["level"]:
                     await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你的等級不足以購買此礦鎬!",color=common.bot_error_color))
                     return
-                if user_data["cake"] < meta["價格"]:
-                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{meta['價格']}**，你只有**{user_data['cake']}**)。",color=common.bot_error_color))
+                price, used_discount = self.pickaxe_buy_price(user_data, meta["價格"])
+                if user_data["cake"] < price:
+                    await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{price}**，你只有**{user_data['cake']}**)。",color=common.bot_error_color))
                     return
                 free_index = self.first_empty_pickaxe_bag_index(mining_data, userid)
                 if free_index is None:
                     await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="裝備背包已滿(7格)，請先使用 `/mining_bag_drop` 丟棄礦鎬後再購買。",color=common.bot_error_color))
                     return
-                user_data["cake"] -= meta["價格"]
+                user_data["cake"] -= price
+                discount_text = ""
+                if used_discount:
+                    leftover = self.consume_pickaxe_discount_charge(user_data)
+                    discount_text = f"\n半價優惠：**{price}**（原價 **{meta['價格']}**），折價剩餘 **{leftover}** 次"
                 instance = self.roll_skill_pickaxe_instance(value)
                 mining_data[userid]["pickaxe_bag"][free_index] = instance
                 skill_text = self.skill_pickaxe_lines_for_embed(instance["skills"])
@@ -1401,7 +1442,7 @@ class MiningGame(commands.Cog):
                     skills=dict(instance["skills"]),
                 )
                 await interaction.response.send_message(
-                    embed=Embed(title="Natalie 挖礦",description=f"購買成功！**{value}**已放入裝備背包第 **{free_index + 1}** 格。\n耐久 **{instance['current_health']}/{instance['max_health']}**\n\n{skill_text}\n\n技能不滿意可在 **{self.skill_pickaxe_discard_timeout}** 秒內丟掉（蛋糕不退還）。",color=common.bot_color),
+                    embed=Embed(title="Natalie 挖礦",description=f"購買成功！**{value}**已放入裝備背包第 **{free_index + 1}** 格。\n耐久 **{instance['current_health']}/{instance['max_health']}**\n\n{skill_text}{discount_text}\n\n技能不滿意可在 **{self.skill_pickaxe_discard_timeout}** 秒內丟掉（蛋糕不退還）。",color=common.bot_color),
                     view=discard_view,
                 )
                 discard_view.message = await interaction.original_response()
@@ -1419,16 +1460,22 @@ class MiningGame(commands.Cog):
             if self.pickaxe_list[value]['需求等級'] < current_tier:
                 await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="你不能購買更劣質的礦鎬!",color=common.bot_error_color))
                 return
-            if user_data['cake'] < self.pickaxe_list[value]['價格']:
-                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{self.pickaxe_list[value]['價格']}**，你只有**{user_data['cake']}**)。",color=common.bot_error_color))
+            base_price = self.pickaxe_list[value]['價格']
+            price, used_discount = self.pickaxe_buy_price(user_data, base_price)
+            if user_data['cake'] < price:
+                await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"你沒有足夠的蛋糕購買此礦鎬!(購買需要**{price}**，你只有**{user_data['cake']}**)。",color=common.bot_error_color))
                 return
 
-            user_data['cake'] -= self.pickaxe_list[value]['價格']
+            user_data['cake'] -= price
+            discount_text = ""
+            if used_discount:
+                leftover = self.consume_pickaxe_discount_charge(user_data)
+                discount_text = f"\n半價優惠：**{price}**（原價 **{base_price}**），折價剩餘 **{leftover}** 次"
             mining_data[userid]["equipped_bag_slot"] = None
             mining_data[userid]["legacy_pickaxe_state"] = None
             mining_data[userid]["pickaxe"] = value
             mining_data[userid]['pickaxe_maxhealth'] = self.pickaxe_list[value]['耐久度']
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功! 你現在擁有了**{value}**。",color=common.bot_color))
+            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功! 你現在擁有了**{value}**。{discount_text}",color=common.bot_color))
             await common.mongo_storage.replace_user(userid, user_data)
             await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
 
