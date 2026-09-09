@@ -77,7 +77,9 @@ class ServerItemHouse:
         self.blackjack_cheat_games = 20
         self.jade_bracelet_games = 50
         self.master_thief_robberies = 20
-        self.rain_maker_cake_range = (1, 1200)
+        self.rain_maker_cake_low = 1
+        self.rain_maker_cake_high_by_count = {1: 1200, 2: 800, 3: 600, 4: 500}
+        self.rain_maker_cake_high_5_plus = 450
         self.magnet_steal_range = (500, 1000)
         self.strong_magnet_steal_range = (5000, 10000)
         self.magnet_warmup_seconds = 60
@@ -524,7 +526,7 @@ class ServerItemHouse:
 
     async def rain_maker_channel_bonus(self, member_ids: list[str]) -> int:
         """
-        語音房內每位持有造雨機狀態的人各判定一次，回傳加總後該房每人應加的蛋糕。
+        同語音持有造雨機人數 N 則骰 N 次再加總；每次上限依人數遞減，回傳該房每人應加的蛋糕。
 
         Args:
             member_ids (list): "['4108']"
@@ -534,13 +536,18 @@ class ServerItemHouse:
         """
         if not member_ids:
             return 0
-        total_bonus = 0
-        low, high = self.rain_maker_cake_range
+        holder_count = 0
         for member_id in member_ids:
             user_data = await self.load_user(member_id)
             if self.has_status_in_data(user_data, self.status_rain_maker):
-                total_bonus += random.randint(low, high)
-        return total_bonus
+                holder_count += 1
+        if holder_count <= 0:
+            return 0
+        high = self.rain_maker_cake_high_by_count.get(
+            holder_count, self.rain_maker_cake_high_5_plus
+        )
+        low = self.rain_maker_cake_low
+        return sum(random.randint(low, high) for _ in range(holder_count))
 
     def charge_remaining_in_data(self, user_data: dict, charge_key: str) -> int:
         """

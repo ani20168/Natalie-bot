@@ -752,7 +752,7 @@ class MiningGame(commands.Cog):
 
     def clear_mining_verify_state(self, user_data: dict) -> None:
         """
-        清除挖礦檢定待解狀態。
+        清除挖礦檢定待解狀態，並重置挖礦冷卻。
 
         Args:
             user_data (dict): "{'mining_verify_pending': True}"
@@ -760,6 +760,8 @@ class MiningGame(commands.Cog):
         user_data["mining_verify_pending"] = False
         user_data["mining_verify_count"] = 0
         user_data["mining_verify_problem"] = None
+        # 檢定通過後可立刻再挖；冷卻時間戳清零避免誤判仍在冷卻
+        user_data["mining_cooldown_last"] = 0
 
 
     @app_commands.command(name = "mining", description = "挖礦!")
@@ -902,7 +904,12 @@ class MiningGame(commands.Cog):
                 return
 
             dig_sleep = 0 if skip_dig_sleep else max(0.5, 8.0 - dig_reduce)
-            mining_data[userid]["mining_cooldown_last"] = time.time()
+            # 檢定通過路徑會 skip_cooldown／skip_dig_sleep：不可再寫入冷卻時間戳，
+            # 否則礦物立刻產出後下一次 /mining 會誤判仍在冷卻
+            if skip_cooldown:
+                mining_data[userid]["mining_cooldown_last"] = 0
+            else:
+                mining_data[userid]["mining_cooldown_last"] = time.time()
             digging_embed = Embed(title="Natalie 挖礦",description="正在挖礦中...",color=common.bot_color)
             if skip_dig_sleep:
                 mining_progress_message = None
