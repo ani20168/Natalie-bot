@@ -71,6 +71,35 @@ a {
   padding: 24px;
 }
 
+.page-restart {
+  height: 100vh;
+  height: 100dvh;
+  margin: 0;
+  overflow: hidden;
+  background: #070b14;
+}
+
+.restart-stage {
+  width: 100%;
+  height: 100%;
+  line-height: 0;
+}
+
+.restart-art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+}
+
+/* 直式螢幕比圖片更瘦，cover 會裁掉右側文字；改 contain 保住整張構圖 */
+@media (orientation: portrait) {
+  .restart-art {
+    object-fit: contain;
+  }
+}
+
 .auth-card {
   width: min(420px, 100%);
   background: var(--bg-panel);

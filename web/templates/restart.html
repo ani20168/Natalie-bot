@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block body_class %}page-restart{% endblock %}
+{% block head_extra %}
+{% if not preview %}
+<meta http-equiv="refresh" content="15">
+{% endif %}
+{% endblock %}
+{% block content %}
+<main class="restart-stage">
+  <img class="restart-art" src="/static/restart.png?v=20260912-2" alt="伺服器暫時休息中">
+</main>
+{% endblock %}

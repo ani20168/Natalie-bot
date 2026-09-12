@@ -216,7 +216,18 @@ class WebPanel:
             self.public_base_url = str(self.secret_config.get("WEB_PUBLIC_BASE_URL") or "").rstrip("/")
         self.session_https_only = self.public_base_url.startswith("https://")
         self.auction_hub = AuctionSocketHub(self)
+        self.restart_page_path = "/restart"
         self.app = self.create_app()
+
+    def is_restart_pending(self) -> bool:
+        """
+        讀取 BotSystem 的重啟旗標。
+
+        Returns:
+            pending (bool): "True"
+        """
+        cog = self.bot.get_cog("BotSystem")
+        return bool(cog and getattr(cog, "restart_pending", False))
 
     def create_app(self) -> FastAPI:
         """
@@ -238,6 +249,7 @@ class WebPanel:
         app.add_api_route("/auth/login", self.auth_login, methods=["GET"], name="auth_login")
         app.add_api_route("/auth/callback", self.auth_callback, methods=["GET"], name="auth_callback")
         app.add_api_route("/auth/logout", self.auth_logout, methods=["GET"], name="auth_logout")
+        app.add_api_route("/restart", self.restart_page, methods=["GET"], response_class=HTMLResponse, name="restart")
         app.add_api_route("/panel", self.panel, methods=["GET"], response_class=HTMLResponse, name="panel")
         app.add_api_route("/auction", self.auction_page, methods=["GET"], response_class=HTMLResponse, name="auction")
         app.add_api_route("/api/auction/list", self.auction_list, methods=["GET"], name="auction_list")
@@ -283,12 +295,34 @@ class WebPanel:
         Returns:
             response: HTML 或導向
         """
+        if self.is_restart_pending():
+            return RedirectResponse(url=self.restart_page_path, status_code=302)
         if request.session.get("user_id"):
             return RedirectResponse(url="/panel", status_code=302)
         return self.templates.TemplateResponse(
             request,
             "login.html",
             {"title": "偽造妹妹伺服器互動面板", "error": None},
+        )
+
+    async def restart_page(self, request: Request):
+        """
+        重啟提示頁：有旗標時顯示重啟圖，否則導回面板。
+        加上 ?preview=1 可在沒有旗標時預覽版面。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: HTML 或導向
+        """
+        preview = request.query_params.get("preview") == "1"
+        if not preview and not self.is_restart_pending():
+            return RedirectResponse(url="/panel", status_code=302)
+        return self.templates.TemplateResponse(
+            request,
+            "restart.html",
+            {"title": "伺服器暫時休息中", "preview": preview},
         )
 
     async def auth_login(self, request: Request):
@@ -1231,6 +1265,9 @@ class WebPanel:
         guild = self.bot.get_guild(common.fake_sister_server_id)
         member = guild.get_member(int(user_id)) if guild is not None and user_id else None
         await websocket.accept()
+        if self.is_restart_pending():
+            await websocket.close(code=1013)
+            return
         if not user_id:
             await websocket.close(code=4401)
             return
@@ -1260,6 +1297,9 @@ class WebPanel:
         Returns:
             result (tuple): "(None, {'user_id': '4108', 'cake': 0})"
         """
+        if self.is_restart_pending():
+            return RedirectResponse(url=self.restart_page_path, status_code=302), None
+
         user_id = request.session.get("user_id")
         if not user_id:
             request.session["login_next"] = next_path
