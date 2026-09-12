@@ -1012,16 +1012,6 @@ class MiningGame(commands.Cog):
                     await interaction.response.send_message(embed=cooldown_embed, ephemeral=True)
                 return
 
-            #確認是否正在重啟保護狀態?
-            global_userdata = await common.mongo_storage.get_global_document()
-            restart_time = float(global_userdata.get("restart_time", 0))
-            if time.time() - restart_time <= 15:
-                restart_embed = Embed(title="Natalie 挖礦",description="機器人正在重啟，請稍後在試一次。",color=common.bot_error_color)
-                if reply_via_followup:
-                    await interaction.followup.send(embed=restart_embed, ephemeral=False)
-                else:
-                    await interaction.response.send_message(embed=restart_embed)
-                return
             await common.mongo_storage.update_global_fields({"gaming_time": time.time()})
 
             current_mine = mining_data[userid]['mine']
