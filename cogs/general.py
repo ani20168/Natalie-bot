@@ -1437,90 +1437,9 @@ class General(commands.Cog):
         client.server_item_house = self.server_item_house
         self.notuse_emoji_lookback = timedelta(days=183)
         self.notuse_emoji_list_count = 35
-        # 僅存有自訂表情的紀錄：(created_at, emoji_ids)；增量掃描水位另存 newest_id
-        self.lobby_emoji_scan_cache: list[tuple[datetime, tuple[int, ...]]] = []
-        self.lobby_emoji_scan_newest_id: int | None = None
+        self.notuse_emoji_progress_interval = 10
         self.lobby_emoji_scan_lock = asyncio.Lock()
         self.custom_emoji_id_pattern = re.compile(r"<a?:\w+:(\d+)>")
-
-    def extract_custom_emoji_ids_from_message(self, message: discord.Message) -> tuple[int, ...]:
-        """
-        從訊息內文與 reaction 取出自訂表情 ID（不含 unicode）。
-
-        Args:
-            message (discord.Message): "大廳歷史訊息"
-
-        Returns:
-            emoji_ids (tuple[int, ...]): "(896670335326371840, 896670335326371840)"
-        """
-        emoji_ids: list[int] = []
-        for match in self.custom_emoji_id_pattern.finditer(message.content or ""):
-            emoji_ids.append(int(match.group(1)))
-        for reaction in message.reactions:
-            emoji = reaction.emoji
-            emoji_id = getattr(emoji, "id", None)
-            if emoji_id is None:
-                continue
-            emoji_ids.extend([int(emoji_id)] * reaction.count)
-        return tuple(emoji_ids)
-
-    def prune_lobby_emoji_scan_cache(self, cutoff: datetime) -> None:
-        """
-        移除快取中早於統計時間範圍的紀錄。
-
-        Args:
-            cutoff (datetime): "2026-03-15T00:00:00+00:00"
-        """
-        self.lobby_emoji_scan_cache = [
-            entry for entry in self.lobby_emoji_scan_cache if entry[0] >= cutoff
-        ]
-
-    async def fetch_new_lobby_messages_into_cache(self, channel: discord.TextChannel, cutoff: datetime) -> int:
-        """
-        掃描大廳尚未處理的歷史訊息，只把含自訂表情的紀錄寫入快取。
-
-        Args:
-            channel (discord.TextChannel): "大廳頻道"
-            cutoff (datetime): "2026-03-15T00:00:00+00:00"
-
-        Returns:
-            fetched_count (int): "120"
-        """
-        history_kwargs = {"limit": None, "oldest_first": True}
-        if self.lobby_emoji_scan_newest_id is not None:
-            history_kwargs["after"] = discord.Object(id=self.lobby_emoji_scan_newest_id)
-        else:
-            history_kwargs["after"] = cutoff
-
-        fetched_count = 0
-        async for message in channel.history(**history_kwargs):
-            fetched_count += 1
-            self.lobby_emoji_scan_newest_id = message.id
-            if message.created_at < cutoff:
-                continue
-            emoji_ids = self.extract_custom_emoji_ids_from_message(message)
-            if not emoji_ids:
-                continue
-            self.lobby_emoji_scan_cache.append((message.created_at, emoji_ids))
-        return fetched_count
-
-    def build_guild_emoji_usage_counts(self, guild: discord.Guild) -> list[tuple[discord.Emoji, int]]:
-        """
-        依快取統計伺服器表情使用次數，回傳由少到多排序結果。
-
-        Args:
-            guild (discord.Guild): "表情所屬伺服器"
-
-        Returns:
-            ranked (list[tuple[discord.Emoji, int]]): "[(emoji, 0), (emoji, 1)]"
-        """
-        usage_counter: Counter[int] = Counter()
-        for _created_at, emoji_ids in self.lobby_emoji_scan_cache:
-            usage_counter.update(emoji_ids)
-
-        ranked = [(emoji, usage_counter.get(emoji.id, 0)) for emoji in guild.emojis]
-        ranked.sort(key=lambda item: (item[1], item[0].name.lower(), item[0].id))
-        return ranked
 
     @staticmethod
     def compute_red_packet_amounts(total: int, people: int) -> list[int]:
@@ -1817,33 +1736,121 @@ class General(commands.Cog):
         Args:
             interaction (discord.Interaction): "slash 指令互動"
         """
-        await interaction.response.defer(thinking=True)
+        # 檢查大廳頻道與伺服器表情
         channel = self.bot.get_channel(common.lobby_channel)
         if channel is None or not isinstance(channel, discord.TextChannel):
-            await interaction.followup.send(embed=Embed(title="少用表情", description="找不到大廳頻道。", color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title="少用表情", description="找不到大廳頻道。", color=common.bot_error_color))
             return
 
         guild = channel.guild
         if guild is None or not guild.emojis:
-            await interaction.followup.send(embed=Embed(title="少用表情", description="伺服器沒有可用的自訂表情。", color=common.bot_error_color))
+            await interaction.response.send_message(embed=Embed(title="少用表情", description="伺服器沒有可用的自訂表情。", color=common.bot_error_color))
             return
+
+        # 先送出進度 embed，後續掃描會更新同一則訊息
+        progress_embed = Embed(
+            title="少用表情（掃描中）",
+            description="正在掃描大廳歷史訊息...\n已掃描：**0** 則\n表情紀錄：**0** 筆\n目前掃到：尚無",
+            color=common.bot_color,
+        )
+        await interaction.response.send_message(embed=progress_embed)
+        progress_message = await interaction.original_response()
 
         cutoff = datetime.now(timezone.utc) - self.notuse_emoji_lookback
         async with self.lobby_emoji_scan_lock:
-            self.prune_lobby_emoji_scan_cache(cutoff)
-            fetched_count = await self.fetch_new_lobby_messages_into_cache(channel, cutoff)
-            ranked = self.build_guild_emoji_usage_counts(guild)
+            # 從 DB 讀取快取，並丟掉超出 6 個月的舊紀錄
+            global_document = await common.mongo_storage.get_global_document()
+            payload = global_document.get("lobby_emoji_scan")
+            newest_id = None
+            entries: list[tuple[datetime, tuple[int, ...]]] = []
+            if isinstance(payload, dict):
+                raw_newest_id = payload.get("newest_id")
+                newest_id = int(raw_newest_id) if raw_newest_id is not None else None
+                for item in payload.get("entries", []):
+                    if not isinstance(item, dict):
+                        continue
+                    created_at = datetime.fromtimestamp(float(item["t"]), tz=timezone.utc)
+                    if created_at < cutoff:
+                        continue
+                    emoji_ids = tuple(int(emoji_id) for emoji_id in item.get("e", []))
+                    if emoji_ids:
+                        entries.append((created_at, emoji_ids))
 
+            # 只掃快取之後的新訊息（首次則掃整個 6 個月範圍）
+            history_kwargs = {"limit": None, "oldest_first": True}
+            history_kwargs["after"] = discord.Object(id=newest_id) if newest_id is not None else cutoff
+            fetched_count = 0
+            last_progress_at = time.monotonic()
+            newest_created_at: datetime | None = None
+            async for message in channel.history(**history_kwargs):
+                fetched_count += 1
+                newest_id = message.id
+                newest_created_at = message.created_at
+                # 從內文與 reaction 抽出自訂表情 ID
+                if message.created_at >= cutoff:
+                    emoji_ids = [
+                        int(match.group(1))
+                        for match in self.custom_emoji_id_pattern.finditer(message.content or "")
+                    ]
+                    for reaction in message.reactions:
+                        emoji_id = getattr(reaction.emoji, "id", None)
+                        if emoji_id is not None:
+                            emoji_ids.extend([int(emoji_id)] * reaction.count)
+                    if emoji_ids:
+                        entries.append((message.created_at, tuple(emoji_ids)))
+
+                # 每 10 秒更新進度 embed，並順便寫入 DB
+                if time.monotonic() - last_progress_at < self.notuse_emoji_progress_interval:
+                    continue
+                newest_text = discord.utils.format_dt(newest_created_at, style="F") if newest_created_at else "尚無"
+                await progress_message.edit(embed=Embed(
+                    title="少用表情（掃描中）",
+                    description=(
+                        "正在掃描大廳歷史訊息...\n"
+                        f"已掃描：**{fetched_count}** 則\n"
+                        f"表情紀錄：**{len(entries)}** 筆\n"
+                        f"目前掃到：{newest_text}"
+                    ),
+                    color=common.bot_color,
+                ))
+                await common.mongo_storage.update_global_fields({
+                    "lobby_emoji_scan": {
+                        "newest_id": newest_id,
+                        "entries": [{"t": created_at.timestamp(), "e": list(emoji_ids)} for created_at, emoji_ids in entries],
+                    }
+                })
+                last_progress_at = time.monotonic()
+
+            # 掃描結束後寫回最終快取
+            await common.mongo_storage.update_global_fields({
+                "lobby_emoji_scan": {
+                    "newest_id": newest_id,
+                    "entries": [{"t": created_at.timestamp(), "e": list(emoji_ids)} for created_at, emoji_ids in entries],
+                }
+            })
+
+            # 統計伺服器表情使用次數，由少到多排序
+            usage_counter: Counter[int] = Counter()
+            for _created_at, emoji_ids in entries:
+                usage_counter.update(emoji_ids)
+            ranked = [(emoji, usage_counter.get(emoji.id, 0)) for emoji in guild.emojis]
+            ranked.sort(key=lambda item: (item[1], item[0].name.lower(), item[0].id))
+
+        # 用同一則訊息顯示最少使用的 35 個表情
         top_least = ranked[: self.notuse_emoji_list_count]
-        lines = [f"{index}. {emoji} `{emoji.name}` — **{count}**" for index, (emoji, count) in enumerate(top_least, start=1)]
-        description = "\n".join(lines) if lines else "沒有可顯示的表情。"
-        embed = Embed(
+        lines = [
+            f"{index}. {emoji} `{emoji.name}` ({emoji.id}) — **{count}**"
+            for index, (emoji, count) in enumerate(top_least, start=1)
+        ]
+        result_embed = Embed(
             title="少用表情（大廳近6個月）",
-            description=description,
+            description="\n".join(lines) if lines else "沒有可顯示的表情。",
             color=common.bot_color,
         )
-        embed.set_footer(text=f"表情紀錄 {len(self.lobby_emoji_scan_cache)} 筆｜本次掃描 {fetched_count} 則｜統計 {len(guild.emojis)} 個伺服器表情")
-        await interaction.followup.send(embed=embed)
+        result_embed.set_footer(
+            text=f"表情紀錄 {len(entries)} 筆｜本次掃描 {fetched_count} 則｜統計 {len(guild.emojis)} 個伺服器表情"
+        )
+        await progress_message.edit(embed=result_embed)
 
     @app_commands.command(name = "cake_add", description = "增加蛋糕")
     @app_commands.describe(member = "選擇一個成員",amount = "數量(扣除蛋糕加上負號)")
