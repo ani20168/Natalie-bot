@@ -9,7 +9,7 @@ import discord
 import time
 import random
 from typing import Optional
-from collections import deque
+from collections import Counter, deque
 import asyncio
 
 
@@ -1435,6 +1435,92 @@ class General(commands.Cog):
         ]
         self.server_item_house = ServerItemHouse(client)
         client.server_item_house = self.server_item_house
+        self.notuse_emoji_lookback = timedelta(days=183)
+        self.notuse_emoji_list_count = 35
+        # 僅存有自訂表情的紀錄：(created_at, emoji_ids)；增量掃描水位另存 newest_id
+        self.lobby_emoji_scan_cache: list[tuple[datetime, tuple[int, ...]]] = []
+        self.lobby_emoji_scan_newest_id: int | None = None
+        self.lobby_emoji_scan_lock = asyncio.Lock()
+        self.custom_emoji_id_pattern = re.compile(r"<a?:\w+:(\d+)>")
+
+    def extract_custom_emoji_ids_from_message(self, message: discord.Message) -> tuple[int, ...]:
+        """
+        從訊息內文與 reaction 取出自訂表情 ID（不含 unicode）。
+
+        Args:
+            message (discord.Message): "大廳歷史訊息"
+
+        Returns:
+            emoji_ids (tuple[int, ...]): "(896670335326371840, 896670335326371840)"
+        """
+        emoji_ids: list[int] = []
+        for match in self.custom_emoji_id_pattern.finditer(message.content or ""):
+            emoji_ids.append(int(match.group(1)))
+        for reaction in message.reactions:
+            emoji = reaction.emoji
+            emoji_id = getattr(emoji, "id", None)
+            if emoji_id is None:
+                continue
+            emoji_ids.extend([int(emoji_id)] * reaction.count)
+        return tuple(emoji_ids)
+
+    def prune_lobby_emoji_scan_cache(self, cutoff: datetime) -> None:
+        """
+        移除快取中早於統計時間範圍的紀錄。
+
+        Args:
+            cutoff (datetime): "2026-03-15T00:00:00+00:00"
+        """
+        self.lobby_emoji_scan_cache = [
+            entry for entry in self.lobby_emoji_scan_cache if entry[0] >= cutoff
+        ]
+
+    async def fetch_new_lobby_messages_into_cache(self, channel: discord.TextChannel, cutoff: datetime) -> int:
+        """
+        掃描大廳尚未處理的歷史訊息，只把含自訂表情的紀錄寫入快取。
+
+        Args:
+            channel (discord.TextChannel): "大廳頻道"
+            cutoff (datetime): "2026-03-15T00:00:00+00:00"
+
+        Returns:
+            fetched_count (int): "120"
+        """
+        history_kwargs = {"limit": None, "oldest_first": True}
+        if self.lobby_emoji_scan_newest_id is not None:
+            history_kwargs["after"] = discord.Object(id=self.lobby_emoji_scan_newest_id)
+        else:
+            history_kwargs["after"] = cutoff
+
+        fetched_count = 0
+        async for message in channel.history(**history_kwargs):
+            fetched_count += 1
+            self.lobby_emoji_scan_newest_id = message.id
+            if message.created_at < cutoff:
+                continue
+            emoji_ids = self.extract_custom_emoji_ids_from_message(message)
+            if not emoji_ids:
+                continue
+            self.lobby_emoji_scan_cache.append((message.created_at, emoji_ids))
+        return fetched_count
+
+    def build_guild_emoji_usage_counts(self, guild: discord.Guild) -> list[tuple[discord.Emoji, int]]:
+        """
+        依快取統計伺服器表情使用次數，回傳由少到多排序結果。
+
+        Args:
+            guild (discord.Guild): "表情所屬伺服器"
+
+        Returns:
+            ranked (list[tuple[discord.Emoji, int]]): "[(emoji, 0), (emoji, 1)]"
+        """
+        usage_counter: Counter[int] = Counter()
+        for _created_at, emoji_ids in self.lobby_emoji_scan_cache:
+            usage_counter.update(emoji_ids)
+
+        ranked = [(emoji, usage_counter.get(emoji.id, 0)) for emoji in guild.emojis]
+        ranked.sort(key=lambda item: (item[1], item[0].name.lower(), item[0].id))
+        return ranked
 
     @staticmethod
     def compute_red_packet_amounts(total: int, people: int) -> list[int]:
@@ -1722,6 +1808,42 @@ class General(commands.Cog):
             )
 
         await interaction.response.send_message(embed=embed)
+
+    @app_commands.command(name="notuse_emoji", description="列出大廳近6個月使用次數最少的伺服器表情")
+    async def notuse_emoji(self, interaction: discord.Interaction):
+        """
+        掃描大廳歷史訊息，列出使用次數最少的伺服器自訂表情。
+
+        Args:
+            interaction (discord.Interaction): "slash 指令互動"
+        """
+        await interaction.response.defer(thinking=True)
+        channel = self.bot.get_channel(common.lobby_channel)
+        if channel is None or not isinstance(channel, discord.TextChannel):
+            await interaction.followup.send(embed=Embed(title="少用表情", description="找不到大廳頻道。", color=common.bot_error_color))
+            return
+
+        guild = channel.guild
+        if guild is None or not guild.emojis:
+            await interaction.followup.send(embed=Embed(title="少用表情", description="伺服器沒有可用的自訂表情。", color=common.bot_error_color))
+            return
+
+        cutoff = datetime.now(timezone.utc) - self.notuse_emoji_lookback
+        async with self.lobby_emoji_scan_lock:
+            self.prune_lobby_emoji_scan_cache(cutoff)
+            fetched_count = await self.fetch_new_lobby_messages_into_cache(channel, cutoff)
+            ranked = self.build_guild_emoji_usage_counts(guild)
+
+        top_least = ranked[: self.notuse_emoji_list_count]
+        lines = [f"{index}. {emoji} `{emoji.name}` — **{count}**" for index, (emoji, count) in enumerate(top_least, start=1)]
+        description = "\n".join(lines) if lines else "沒有可顯示的表情。"
+        embed = Embed(
+            title="少用表情（大廳近6個月）",
+            description=description,
+            color=common.bot_color,
+        )
+        embed.set_footer(text=f"表情紀錄 {len(self.lobby_emoji_scan_cache)} 筆｜本次掃描 {fetched_count} 則｜統計 {len(guild.emojis)} 個伺服器表情")
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(name = "cake_add", description = "增加蛋糕")
     @app_commands.describe(member = "選擇一個成員",amount = "數量(扣除蛋糕加上負號)")
