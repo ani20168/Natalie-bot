@@ -81,6 +81,18 @@
     </div>
   </div>
 </div>
+<div class="dialog-backdrop" id="shop-skill-filter-dialog" role="dialog" aria-modal="true">
+  <div class="dialog-card dialog-wide">
+    <h3>篩選技能</h3>
+    <p>勾選要保留的技能（須全部符合才會顯示）。</p>
+    <div class="shop-skill-filter-list" id="shop-skill-filter-list"></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="shop-skill-filter-clear">清除</button>
+      <button type="button" class="btn btn-outline btn-sm" id="shop-skill-filter-cancel">取消</button>
+      <button type="button" class="btn btn-bid btn-sm" id="shop-skill-filter-confirm">套用</button>
+    </div>
+  </div>
+</div>
 <script>
   (function () {
     var catalogBox = document.getElementById("shop-catalog");
@@ -113,6 +125,11 @@
     var confirmText = document.getElementById("shop-confirm-text");
     var confirmCancel = document.getElementById("shop-confirm-cancel");
     var confirmOk = document.getElementById("shop-confirm-ok");
+    var skillFilterDialog = document.getElementById("shop-skill-filter-dialog");
+    var skillFilterList = document.getElementById("shop-skill-filter-list");
+    var skillFilterClear = document.getElementById("shop-skill-filter-clear");
+    var skillFilterCancel = document.getElementById("shop-skill-filter-cancel");
+    var skillFilterConfirm = document.getElementById("shop-skill-filter-confirm");
     var selectedCategory = "server";
     var selectedProductId = "";
     var catalogData = { categories: [], products: [] };
@@ -127,6 +144,18 @@
     var pollTimer = null;
     var busy = false;
     var catalogView = localStorage.getItem("shop_catalog_view") === "list" ? "list" : "grid";
+    var skillFilterKeys = [];
+    var skillFilterOptions = [
+      { key: "dig_time_reduce_sec", label: "減少 X 秒挖掘時間" },
+      { key: "bonus_chance_add", label: "增加 X% 獲得額外礦物的機率" },
+      { key: "bonus_extra_on_proc", label: "觸發額外礦物時，額外礦物再增加 X 個" },
+      { key: "bonus_force_highest_value", label: "額外礦物必為該礦場最高價值礦物" },
+      { key: "collection_chance_add", label: "增加 X% 獲得收藏品的機率" },
+      { key: "durability_half_skip", label: "每次挖礦有 50% 機率不消耗耐久" },
+      { key: "dig_efficiency_mult", label: "X 倍挖掘效率" },
+      { key: "collection_on_break", label: "礦鎬毀損時，在執行一次獲得收藏品獎勵判定" },
+      { key: "mine_limit_restore", label: "挖礦時有一半機會不消耗礦場挖掘量並回復一次" }
+    ];
 
     function escapeHtml(value) {
       return String(value)
@@ -147,6 +176,54 @@
 
     function isSkillPickaxe(product) {
       return product && product.kind === "skill_pickaxe";
+    }
+
+    function funnelIconSvg() {
+      return (
+        '<svg viewBox="0 0 24 24" aria-hidden="true">' +
+          '<path d="M3 4h18l-7 8v6l-4 2v-8L3 4z"/>' +
+        "</svg>"
+      );
+    }
+
+    function orderMatchesSkillFilter(order) {
+      if (!skillFilterKeys.length) return true;
+      var keys = order.skill_keys || [];
+      return skillFilterKeys.every(function (key) {
+        return keys.indexOf(key) !== -1;
+      });
+    }
+
+    function filteredSellOrders(orders) {
+      if (!skillFilterKeys.length) return orders || [];
+      return (orders || []).filter(orderMatchesSkillFilter);
+    }
+
+    function closeSkillFilterDialog() {
+      skillFilterDialog.classList.remove("is-open");
+    }
+
+    function openSkillFilterDialog() {
+      skillFilterList.innerHTML = skillFilterOptions.map(function (option) {
+        var checked = skillFilterKeys.indexOf(option.key) !== -1 ? " checked" : "";
+        return (
+          '<label class="shop-skill-filter-option">' +
+            '<input type="checkbox" name="shop-skill-filter" value="' + option.key + '"' + checked + ">" +
+            "<span>" + escapeHtml(option.label) + "</span>" +
+          "</label>"
+        );
+      }).join("");
+      skillFilterDialog.classList.add("is-open");
+    }
+
+    function applySkillFilterFromDialog() {
+      var selected = [];
+      skillFilterList.querySelectorAll("input[name='shop-skill-filter']:checked").forEach(function (input) {
+        selected.push(input.value);
+      });
+      skillFilterKeys = selected;
+      closeSkillFilterDialog();
+      renderDetail();
     }
 
     function selectedPickaxeSlot() {
@@ -241,6 +318,7 @@
     function showCatalog() {
       selectedProductId = "";
       detailData = null;
+      skillFilterKeys = [];
       detailBox.classList.add("is-hidden");
       detailBox.innerHTML = "";
       catalogBox.classList.remove("is-hidden");
@@ -447,7 +525,9 @@
 
     function renderSellOrders(orders, productName) {
       if (!orders || !orders.length) {
-        return '<p class="shop-empty">目前沒有賣單</p>';
+        return '<p class="shop-empty">' +
+          (skillFilterKeys.length ? "沒有符合篩選條件的賣單" : "目前沒有賣單") +
+          "</p>";
       }
       return '<div class="auction-list">' + orders.map(function (order) {
         var action = order.is_mine
@@ -531,6 +611,20 @@
       var quickDisabled = !product.can_sell || buyCount < 1;
       var accordion = detailBox.querySelector(".shop-accordion");
       var accordionOpen = !!(accordion && accordion.open);
+      var skillPickaxe = isSkillPickaxe(product);
+      var filterActive = skillPickaxe && skillFilterKeys.length > 0;
+      var sellOrders = skillPickaxe ? filteredSellOrders(detailData.sell_orders) : (detailData.sell_orders || []);
+      var sellSectionHead = skillPickaxe
+        ? (
+            '<div class="shop-section-head">' +
+              "<h3>目前賣單</h3>" +
+              '<button type="button" class="shop-skill-filter-btn' + (filterActive ? " is-active" : "") +
+              '" data-action="skill-filter" aria-label="篩選技能" title="篩選技能">' +
+              funnelIconSvg() +
+              "</button>" +
+            "</div>"
+          )
+        : "<h3>目前賣單</h3>";
       detailBox.innerHTML =
         '<button type="button" class="btn btn-outline btn-sm shop-back" data-action="back">← 返回商店</button>' +
         '<article class="shop-hero">' +
@@ -556,8 +650,8 @@
           '<div class="shop-accordion-body">' + renderBuyOrders(detailData.buy_orders) + "</div>" +
         "</details>" +
         '<section class="shop-section">' +
-          " <h3>目前賣單</h3>" +
-          renderSellOrders(detailData.sell_orders, product.name) +
+          sellSectionHead +
+          renderSellOrders(sellOrders, product.name) +
         "</section>" +
         '<section class="shop-section">' +
           "<h3>此商品最近成交</h3>" +
@@ -588,6 +682,9 @@
     }
 
     async function loadProduct(productId, silent) {
+      if (productId !== selectedProductId) {
+        skillFilterKeys = [];
+      }
       selectedProductId = productId;
       var data = await fetchJson("/api/shop/product?product_id=" + encodeURIComponent(productId));
       if (!data.ok) {
@@ -604,7 +701,9 @@
     function startPoll() {
       stopPoll();
       pollTimer = setInterval(function () {
-        if (!selectedProductId || formDialog.classList.contains("is-open") || confirmDialog.classList.contains("is-open")) {
+        if (!selectedProductId || formDialog.classList.contains("is-open") ||
+            confirmDialog.classList.contains("is-open") ||
+            skillFilterDialog.classList.contains("is-open")) {
           return;
         }
         loadProduct(selectedProductId, true);
@@ -751,6 +850,10 @@
       if (action === "back") {
         showCatalog();
         loadCatalog(selectedCategory);
+        return;
+      }
+      if (action === "skill-filter") {
+        openSkillFilterDialog();
         return;
       }
       if (!product) return;
@@ -924,9 +1027,19 @@
       if (action) action();
     });
 
+    skillFilterCancel.addEventListener("click", closeSkillFilterDialog);
+    bindBackdropClose(skillFilterDialog, closeSkillFilterDialog);
+    skillFilterClear.addEventListener("click", function () {
+      skillFilterList.querySelectorAll("input[name='shop-skill-filter']").forEach(function (input) {
+        input.checked = false;
+      });
+    });
+    skillFilterConfirm.addEventListener("click", applySkillFilterFromDialog);
+
     document.addEventListener("keydown", function (event) {
       if (event.key !== "Escape") return;
       if (confirmDialog.classList.contains("is-open")) closeConfirm();
+      else if (skillFilterDialog.classList.contains("is-open")) closeSkillFilterDialog();
       else if (formDialog.classList.contains("is-open")) closeForm();
     });
 

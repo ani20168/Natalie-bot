@@ -1136,7 +1136,9 @@ class ShopHouse:
         """
         user_id = str(order.get("user_id") or "")
         instance = order.get("item_instance") if isinstance(order.get("item_instance"), dict) else None
-        skill_lines = self.skill_pickaxe_public_lines(instance.get("skills")) if instance is not None else []
+        skills = instance.get("skills") if instance is not None and isinstance(instance.get("skills"), dict) else {}
+        skill_lines = self.skill_pickaxe_public_lines(skills) if instance is not None else []
+        skill_keys = [key for key, value in skills.items() if value]
         remark = str(order.get("remark") or "").strip()
         return {
             "order_id": int(order.get("order_id") or 0),
@@ -1146,6 +1148,7 @@ class ShopHouse:
             "quantity": int(order.get("quantity") or 0),
             "is_mine": user_id == str(viewer_id),
             "skill_lines": skill_lines,
+            "skill_keys": skill_keys,
             "remark": remark,
         }
 

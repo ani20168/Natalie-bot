@@ -1158,6 +1158,83 @@ a {
   font-size: 1.2rem;
 }
 
+.shop-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.shop-section-head h3 {
+  margin: 0;
+}
+
+.shop-skill-filter-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.shop-skill-filter-btn:hover {
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+
+.shop-skill-filter-btn.is-active {
+  border-color: #4ea1ff;
+  color: #4ea1ff;
+  background: rgba(78, 161, 255, 0.12);
+}
+
+.shop-skill-filter-btn svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+  stroke: none;
+}
+
+.shop-skill-filter-list {
+  display: grid;
+  gap: 8px;
+  max-height: 320px;
+  overflow: auto;
+  margin: 12px 0 4px;
+}
+
+.shop-skill-filter-option {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.shop-skill-filter-option:has(input:checked) {
+  border-color: #4ea1ff;
+  background: rgba(78, 161, 255, 0.12);
+}
+
+.shop-skill-filter-option input {
+  margin-top: 2px;
+  accent-color: #4ea1ff;
+}
+
+.shop-skill-filter-option span {
+  color: var(--text);
+  font-size: 0.95rem;
+  line-height: 1.45;
+}
+
 .shop-order-card {
   display: flex;
   align-items: flex-start;
