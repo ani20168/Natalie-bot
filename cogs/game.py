@@ -1415,10 +1415,11 @@ class MiningGame(commands.Cog):
                     await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description="裝備背包已滿(7格)，請先使用 `/mining_bag_drop` 丟棄礦鎬後再購買。",color=common.bot_error_color))
                     return
                 user_data["cake"] -= price
+                # 礦鎬折價卷：成功套用半價後扣除次數，優惠改以 embed field 顯示
                 discount_text = ""
                 if used_discount:
                     leftover = self.consume_pickaxe_discount_charge(user_data)
-                    discount_text = f"\n半價優惠：**{price}**（原價 **{meta['價格']}**），折價剩餘 **{leftover}** 次"
+                    discount_text = f"半價優惠：**{price}**（原價 **{meta['價格']}**），折價剩餘 **{leftover}** 次"
                 instance = self.roll_skill_pickaxe_instance(value)
                 mining_data[userid]["pickaxe_bag"][free_index] = instance
                 skill_text = self.skill_pickaxe_lines_for_embed(instance["skills"])
@@ -1431,8 +1432,11 @@ class MiningGame(commands.Cog):
                     max_health=instance["max_health"],
                     skills=dict(instance["skills"]),
                 )
+                embed = Embed(title="Natalie 挖礦",description=f"購買成功！**{value}**已放入裝備背包第 **{free_index + 1}** 格。\n耐久 **{instance['current_health']}/{instance['max_health']}**\n\n{skill_text}\n\n技能不滿意可在 **{self.skill_pickaxe_discard_timeout}** 秒內丟掉（蛋糕不退還）。",color=common.bot_color)
+                if discount_text:
+                    embed.add_field(name="礦鎬折價卷", value=discount_text, inline=False)
                 await interaction.response.send_message(
-                    embed=Embed(title="Natalie 挖礦",description=f"購買成功！**{value}**已放入裝備背包第 **{free_index + 1}** 格。\n耐久 **{instance['current_health']}/{instance['max_health']}**\n\n{skill_text}{discount_text}\n\n技能不滿意可在 **{self.skill_pickaxe_discard_timeout}** 秒內丟掉（蛋糕不退還）。",color=common.bot_color),
+                    embed=embed,
                     view=discard_view,
                 )
                 discard_view.message = await interaction.original_response()
@@ -1457,15 +1461,19 @@ class MiningGame(commands.Cog):
                 return
 
             user_data['cake'] -= price
+            # 礦鎬折價卷：成功套用半價後扣除次數，優惠改以 embed field 顯示
             discount_text = ""
             if used_discount:
                 leftover = self.consume_pickaxe_discount_charge(user_data)
-                discount_text = f"\n半價優惠：**{price}**（原價 **{base_price}**），折價剩餘 **{leftover}** 次"
+                discount_text = f"半價優惠：**{price}**（原價 **{base_price}**），折價剩餘 **{leftover}** 次"
             mining_data[userid]["equipped_bag_slot"] = None
             mining_data[userid]["legacy_pickaxe_state"] = None
             mining_data[userid]["pickaxe"] = value
             mining_data[userid]['pickaxe_maxhealth'] = self.pickaxe_list[value]['耐久度']
-            await interaction.response.send_message(embed=Embed(title="Natalie 挖礦",description=f"購買成功! 你現在擁有了**{value}**。{discount_text}",color=common.bot_color))
+            embed = Embed(title="Natalie 挖礦",description=f"購買成功! 你現在擁有了**{value}**。",color=common.bot_color)
+            if discount_text:
+                embed.add_field(name="礦鎬折價卷", value=discount_text, inline=False)
+            await interaction.response.send_message(embed=embed)
             await common.mongo_storage.replace_user(userid, user_data)
             await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
 

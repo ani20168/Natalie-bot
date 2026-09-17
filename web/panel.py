@@ -215,6 +215,8 @@ class WebPanel:
         if common.mongo_storage.get_runtime_env() == "PRD":
             self.public_base_url = str(self.secret_config.get("WEB_PUBLIC_BASE_URL") or "").rstrip("/")
         self.session_https_only = self.public_base_url.startswith("https://")
+        # 登入 cookie／簽名有效期：10 年（實務上等同不會因時間過期）
+        self.session_max_age = 10 * 365 * 24 * 60 * 60
         self.auction_hub = AuctionSocketHub(self)
         self.restart_page_path = "/restart"
         self.app = self.create_app()
@@ -240,6 +242,7 @@ class WebPanel:
         app.add_middleware(
             SessionMiddleware,
             secret_key=self.session_secret,
+            max_age=self.session_max_age,
             same_site="lax",
             https_only=self.session_https_only,
         )
@@ -1195,7 +1198,7 @@ class WebPanel:
 
     async def encounter_settings_update(self, request: Request):
         """
-        更新奇遇難度機率。
+        更新奇遇難度機率與各難度預設獎勵；預設變更時會同步已套用舊預設的任務。
 
         Args:
             request (Request): FastAPI request

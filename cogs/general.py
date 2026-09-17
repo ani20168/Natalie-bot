@@ -148,7 +148,7 @@ class ServerItemHouse:
             },
             "blackjack_cheat": {
                 "name": "21點作弊卡",
-                "description": "在接下來的20場blackjack小遊戲，可以偷看第五張牌",
+                "description": "在接下來的20場blackjack小遊戲，在雙方抽牌後，可以偷看牌堆最頂部的一張牌",
                 "duration_days": 0,
                 "use_kind": "self_charge",
                 "status_key": self.status_blackjack_cheat,

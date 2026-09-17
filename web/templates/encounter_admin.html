@@ -74,6 +74,7 @@
           <div class="encounter-editor-actions">
             <button type="button" class="btn btn-outline btn-sm" id="encounter-reward-reset">返回預設</button>
             <button type="button" class="btn btn-outline btn-sm" id="encounter-reward-apply-defaults">套用難度預設</button>
+            <span id="encounter-reward-using-defaults" class="encounter-reward-using-defaults is-hidden">目前套用難度預設值</span>
           </div>
           <div id="encounter-rewards" class="encounter-slider-list"></div>
         </section>
@@ -110,6 +111,7 @@
     var storyBox = document.getElementById("encounter-story");
     var rewardsBox = document.getElementById("encounter-rewards");
     var settings = { difficulty_weights: {}, difficulty_reward_defaults: {} };
+    var savedRewardDefaults = {};
     var quests = [];
     var collections = [];
     var rewardItems = [];
@@ -286,6 +288,37 @@
           : 0;
       });
       return weights;
+    }
+
+    function rewardWeightsEqual(left, right) {
+      left = left || {};
+      right = right || {};
+      for (var index = 0; index < rewardItems.length; index += 1) {
+        var itemId = rewardItems[index].item_id;
+        if (clampWeight(left[itemId]) !== clampWeight(right[itemId])) return false;
+      }
+      return true;
+    }
+
+    function updateRewardDefaultsHint() {
+      var hint = document.getElementById("encounter-reward-using-defaults");
+      if (!hint) return;
+      var quest = selectedQuest();
+      if (!quest) {
+        hint.classList.add("is-hidden");
+        return;
+      }
+      var difficultyKey = difficultySelect.value || quest.difficulty;
+      var matches = rewardWeightsEqual(quest.reward_weights, rewardWeightsForDifficulty(difficultyKey));
+      hint.classList.toggle("is-hidden", !matches);
+    }
+
+    function cloneRewardDefaults(source) {
+      var result = {};
+      Object.keys(source || {}).forEach(function (key) {
+        result[key] = Object.assign({}, source[key] || {});
+      });
+      return result;
     }
 
     function renderRewardSliderRows(weights, percentAttr) {
@@ -498,6 +531,7 @@
       var quest = selectedQuest();
       var weights = (quest && quest.reward_weights) || {};
       rewardsBox.innerHTML = renderRewardSliderRows(weights, "data-reward-for");
+      updateRewardDefaultsHint();
     }
 
     function updateRewardPercents() {
@@ -512,6 +546,7 @@
         var label = rewardsBox.querySelector('[data-reward-for="' + item.item_id + '"]');
         if (label) label.textContent = (percents[item.item_id] || 0) + "%";
       });
+      updateRewardDefaultsHint();
     }
 
     function showEditor(quest) {
@@ -534,6 +569,7 @@
 
     function applyPayload(data) {
       settings = data.settings || { difficulty_weights: {}, difficulty_reward_defaults: {} };
+      savedRewardDefaults = cloneRewardDefaults(settings.difficulty_reward_defaults);
       quests = data.quests || [];
       collections = data.collections || [];
       rewardItems = data.reward_items || [];
@@ -571,6 +607,7 @@
       difficultyRewardBox.addEventListener("input", function (event) {
         if (!event.target || !event.target.matches("input[type='range']")) return;
         updateDifficultyRewardDefaultPercents(event.target.closest("[data-difficulty-defaults]"));
+        updateRewardDefaultsHint();
       });
     }
 
@@ -594,6 +631,7 @@
       syncEditorToQuest();
       sortQuests();
       renderQuestList();
+      updateRewardDefaultsHint();
     });
 
     document.getElementById("encounter-quest-new").addEventListener("click", function () {
@@ -706,6 +744,9 @@
 
     document.getElementById("encounter-settings-save").addEventListener("click", async function () {
       updateDifficultyPercents();
+      syncEditorToQuest();
+      // 用「上次已儲存」的預設當修改前基準（畫面拉桿可能已先改過 settings）
+      var previousDefaults = cloneRewardDefaults(savedRewardDefaults);
       syncDifficultyRewardDefaultsFromDom();
       try {
         var response = await fetch("/api/encounter/settings", {
@@ -723,9 +764,33 @@
           return;
         }
         settings = data.settings || settings;
+        savedRewardDefaults = cloneRewardDefaults(settings.difficulty_reward_defaults);
+        // 本地任務若獎勵仍等於修改前預設，同步成新預設（保留其他未儲存欄位）
+        quests.forEach(function (quest) {
+          var difficultyKey = quest.difficulty;
+          var oldWeights = previousDefaults[difficultyKey];
+          if (!oldWeights) return;
+          if (!rewardWeightsEqual(quest.reward_weights, oldWeights)) return;
+          quest.reward_weights = rewardWeightsForDifficulty(difficultyKey);
+        });
         renderDifficultySliders();
         renderDifficultyRewardDefaults();
-        showToast(true, "已儲存難度機率");
+        if (selectedId) {
+          var current = selectedQuest();
+          if (current) {
+            renderRewards();
+            renderQuestList();
+          } else {
+            showEditor(null);
+          }
+        }
+        var syncedCount = data.synced_quest_count || 0;
+        showToast(
+          true,
+          syncedCount > 0
+            ? "已儲存難度機率，並同步 " + syncedCount + " 個任務獎勵"
+            : "已儲存難度機率"
+        );
       } catch (error) {
         showToast(false, "儲存失敗，請稍後再試");
       }

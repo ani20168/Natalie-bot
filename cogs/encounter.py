@@ -588,6 +588,7 @@ class EncounterHouse:
     async def save_settings(self, raw_weights, raw_reward_defaults=None) -> dict:
         """
         寫入難度機率與各難度預設獎勵池。
+        若某難度預設獎勵有變更，會把「獎勵權重與修改前預設相同」的同難度任務一起更新。
 
         Args:
             raw_weights: "{'easy': 60}"
@@ -596,15 +597,19 @@ class EncounterHouse:
         Returns:
             result (dict): "{'ok': True}"
         """
+        # 正規化難度機率，並讀取修改前的預設獎勵
         weights = self.normalize_difficulty_weights(raw_weights)
         collection = common.mongo_storage.get_collection(self.dataset_name)
         document = await collection.find_one({"_id": self.settings_document_id}) or {}
+        old_reward_defaults = self.normalize_difficulty_reward_defaults(
+            document.get(self.difficulty_reward_defaults_key)
+        )
         if raw_reward_defaults is None:
-            reward_defaults = self.normalize_difficulty_reward_defaults(
-                document.get(self.difficulty_reward_defaults_key)
-            )
+            reward_defaults = old_reward_defaults
         else:
             reward_defaults = self.normalize_difficulty_reward_defaults(raw_reward_defaults)
+
+        # 寫入設定
         await collection.replace_one(
             {"_id": self.settings_document_id},
             {
@@ -614,10 +619,37 @@ class EncounterHouse:
             },
             upsert=True,
         )
-        return {
+
+        # 同步已套用舊預設的任務獎勵（同難度且 reward_weights 與修改前預設完全相同）
+        synced_quest_count = 0
+        if raw_reward_defaults is not None:
+            for difficulty_key in self.difficulty_keys:
+                old_weights = old_reward_defaults.get(difficulty_key) or {}
+                new_weights = reward_defaults.get(difficulty_key) or {}
+                if old_weights == new_weights:
+                    continue
+                async for quest_document in collection.find(
+                    {"_id": {"$ne": self.settings_document_id}, "difficulty": difficulty_key}
+                ):
+                    quest = self.normalize_quest(quest_document)
+                    if quest is None:
+                        continue
+                    if quest.get("reward_weights") != old_weights:
+                        continue
+                    await collection.update_one(
+                        {"_id": quest["id"]},
+                        {"$set": {"reward_weights": dict(new_weights)}},
+                    )
+                    synced_quest_count += 1
+
+        result = {
             "ok": True,
             "settings": self.settings_payload(weights, reward_defaults),
+            "synced_quest_count": synced_quest_count,
         }
+        if synced_quest_count > 0:
+            result["quests"] = await self.load_quests()
+        return result
 
     def quest_list_sort_key(self, quest: dict) -> tuple:
         """

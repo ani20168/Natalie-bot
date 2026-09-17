@@ -49,6 +49,10 @@
       <label for="shop-input-quantity">數量</label>
       <input type="number" id="shop-input-quantity" min="1" step="1" value="1">
     </div>
+    <div class="shop-field is-hidden" id="shop-field-total">
+      <label>總價（蛋糕）</label>
+      <p id="shop-form-total" class="shop-form-total">—</p>
+    </div>
     <div class="shop-field is-hidden" id="shop-field-pickaxe">
       <label id="shop-pickaxe-label">選擇礦鎬</label>
       <div id="shop-pickaxe-list"></div>
@@ -91,6 +95,8 @@
     var formExtra = document.getElementById("shop-form-extra");
     var fieldPrice = document.getElementById("shop-field-price");
     var fieldQuantity = document.getElementById("shop-field-quantity");
+    var fieldTotal = document.getElementById("shop-field-total");
+    var formTotal = document.getElementById("shop-form-total");
     var fieldPickaxe = document.getElementById("shop-field-pickaxe");
     var pickaxeLabel = document.getElementById("shop-pickaxe-label");
     var pickaxeList = document.getElementById("shop-pickaxe-list");
@@ -113,6 +119,8 @@
     var detailData = null;
     var formMode = "";
     var formOrderId = 0;
+    var formUnitPrice = 0;
+    var formShowTotal = false;
     var confirmAction = null;
     var toastHideTimer = null;
     var toastOutTimer = null;
@@ -247,6 +255,8 @@
     function closeForm() {
       formMode = "";
       formOrderId = 0;
+      formUnitPrice = 0;
+      formShowTotal = false;
       formDialog.classList.remove("is-open");
       if (pickaxeList) pickaxeList.innerHTML = "";
     }
@@ -266,15 +276,30 @@
       });
     }
 
+    function updateFormTotal() {
+      if (!formShowTotal || !formTotal) return;
+      var price = parseInt(inputPrice.value, 10);
+      if (isNaN(price) || price < 1) price = formUnitPrice;
+      var quantity = parseInt(inputQuantity.value, 10);
+      if (isNaN(price) || price < 1 || isNaN(quantity) || quantity < 1) {
+        formTotal.textContent = "—";
+        return;
+      }
+      formTotal.innerHTML = (price * quantity) + cakeIcon();
+    }
+
     function openForm(mode, options) {
       options = options || {};
       formMode = mode;
       formOrderId = options.orderId || 0;
+      formUnitPrice = parseInt(options.price, 10) || 0;
+      formShowTotal = !!options.showTotal;
       formTitle.textContent = options.title || "";
       formLead.innerHTML = options.lead || "";
       formExtra.innerHTML = options.extra || "";
       fieldPrice.classList.toggle("is-hidden", !options.showPrice);
       fieldQuantity.classList.toggle("is-hidden", !options.showQuantity);
+      fieldTotal.classList.toggle("is-hidden", !formShowTotal);
       fieldPickaxe.classList.toggle("is-hidden", !options.showPickaxe);
       fieldDescription.classList.toggle("is-hidden", !options.showDescription);
       fieldRemark.classList.toggle("is-hidden", !options.showRemark);
@@ -286,6 +311,7 @@
       inputRemark.value = options.remark || "";
       formConfirm.textContent = options.confirmText || "確認";
       formConfirm.className = "btn btn-sm " + (options.danger ? "btn-danger" : "btn-bid");
+      updateFormTotal();
       formDialog.classList.add("is-open");
       if (options.showPrice && !options.priceLocked) inputPrice.focus();
       else if (options.showQuantity) inputQuantity.focus();
@@ -787,6 +813,7 @@
           price: detailData.highest_buy_price || "",
           priceLocked: true,
           showQuantity: true,
+          showTotal: true,
           confirmText: "賣出",
           pickaxeLabel: "選擇要快速販賣的礦鎬"
         };
@@ -813,6 +840,8 @@
             (isSkillPickaxe(product) ? "<br>購買後會放進挖礦背包，背包需要有空位。" : ""),
           showQuantity: !isSkillPickaxe(product),
           quantity: 1,
+          price: unitPrice,
+          showTotal: true,
           confirmText: "確認購買",
           orderId: parseInt(button.getAttribute("data-id"), 10)
         });
@@ -871,6 +900,8 @@
     formCancel.addEventListener("click", closeForm);
     bindBackdropClose(formDialog, closeForm);
     formConfirm.addEventListener("click", submitForm);
+    inputQuantity.addEventListener("input", updateFormTotal);
+    inputPrice.addEventListener("input", updateFormTotal);
     formExtra.addEventListener("click", function (event) {
       var button = event.target.closest("[data-action='ask-cancel-buy']");
       if (!button) return;

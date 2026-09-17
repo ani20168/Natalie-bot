@@ -1337,6 +1337,16 @@ a {
   opacity: 0.75;
 }
 
+.shop-form-total {
+  margin: 0;
+  padding: 8px 10px;
+  background: #0f1419;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  opacity: 0.75;
+}
+
 .shop-admin-card {
   max-width: 480px;
   margin-top: 16px;
@@ -1720,6 +1730,12 @@ a {
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 10px;
+  align-items: center;
+}
+
+.encounter-reward-using-defaults {
+  color: #3dd68c;
+  font-size: 13px;
 }
 
 .encounter-editor-columns {
