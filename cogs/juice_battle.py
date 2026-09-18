@@ -684,13 +684,26 @@ class JuiceBattle(commands.Cog):
         embed = Embed(title="Juice Battle", color=common.bot_color)
         for fighter in (view.fighter_a, view.fighter_b):
             ability = self.character_ability(fighter["character_id"])
+            # 大山架式：技能已發動或對調攻擊尚未打完時，顯示對調後攻防
+            stance_active = bool(fighter.get("stance_swap_attack")) or (
+                bool(fighter.get("skill_armed")) and ability is not None and ability.get("id") == "stance_swap"
+            )
+            if stance_active:
+                display_atk = fighter["defense"]
+                display_def = fighter["atk"]
+                display_atk_offset = fighter["def_offset"]
+                display_def_offset = fighter["atk_offset"]
+            else:
+                display_atk = fighter["atk"]
+                display_def = fighter["defense"]
+                display_atk_offset = fighter["atk_offset"]
+                display_def_offset = fighter["def_offset"]
+
             status_parts = []
             if fighter.get("poison_remaining", 0) > 0:
                 status_parts.append(f"中毒剩餘 {fighter['poison_remaining']}")
-            if fighter.get("skill_armed"):
+            if fighter.get("skill_armed") and not stance_active:
                 status_parts.append("技能已發動")
-            if fighter.get("stance_swap_attack"):
-                status_parts.append("架式對調（下次攻擊）")
             if ability and ability.get("cd") is not None and int(fighter.get("skill_cd", 0)) > 0:
                 status_parts.append(f"{ability['name']} CD {fighter['skill_cd']}")
             elif ability and ability.get("cd") is None and fighter.get("skill_used_once"):
@@ -701,8 +714,8 @@ class JuiceBattle(commands.Cog):
                 name=f"{fighter['display_name']}（{fighter['character_name']}）",
                 value=(
                     f"HP **{fighter['hp']}/{fighter['max_hp']}**\n"
-                    f"攻擊 {fighter['atk']}({fighter['atk_offset']:+d})｜"
-                    f"防禦 {fighter['defense']}({fighter['def_offset']:+d})｜"
+                    f"攻擊 {display_atk}({display_atk_offset:+d})｜"
+                    f"防禦 {display_def}({display_def_offset:+d})｜"
                     f"敏捷 {fighter['agi']}({fighter['agi_offset']:+d})"
                     f"{ability_text}{status_text}"
                 ),
@@ -1624,11 +1637,11 @@ class JuiceBattleDodgeButton(discord.ui.Button):
 
 
 class JuiceBattleSkillButton(discord.ui.Button):
-    """角色技能按鈕（淡紫色／blurple）。"""
+    """角色技能按鈕（綠色，與攻擊／防禦／閃避區隔）。"""
 
     def __init__(self, *, label: str, armed: bool):
         display = f"{label}（已發動）" if armed else label
-        super().__init__(label=display, style=discord.ButtonStyle.primary)
+        super().__init__(label=display, style=discord.ButtonStyle.success)
 
     async def callback(self, interaction: discord.Interaction):
         """
