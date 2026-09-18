@@ -464,21 +464,17 @@ class JuiceBattle(commands.Cog):
         Returns:
             result (tuple): "(先攻方, 後攻方, 說明文字)"
         """
-        lines = []
         while True:
-            dice_a, total_a = self.roll_stat(fighter_a["agi"], fighter_a["agi_offset"])
-            dice_b, total_b = self.roll_stat(fighter_b["agi"], fighter_b["agi_offset"])
-            lines.append(
-                f"{fighter_a['display_name']} 閃避骰 {dice_a}+{fighter_a['agi']}+{fighter_a['agi_offset']}={total_a}\n"
-                f"{fighter_b['display_name']} 閃避骰 {dice_b}+{fighter_b['agi']}+{fighter_b['agi_offset']}={total_b}"
+            _dice_a, total_a = self.roll_stat(fighter_a["agi"], fighter_a["agi_offset"])
+            _dice_b, total_b = self.roll_stat(fighter_b["agi"], fighter_b["agi_offset"])
+            summary = (
+                f"{fighter_a['display_name']} 先攻 **{total_a}**｜"
+                f"{fighter_b['display_name']} 先攻 **{total_b}**"
             )
             if total_a > total_b:
-                lines.append(f"**{fighter_a['display_name']}** 先攻！")
-                return fighter_a, fighter_b, "\n".join(lines)
+                return fighter_a, fighter_b, f"{summary}\n**{fighter_a['display_name']}** 先攻！"
             if total_b > total_a:
-                lines.append(f"**{fighter_b['display_name']}** 先攻！")
-                return fighter_b, fighter_a, "\n".join(lines)
-            lines.append("平手，重新擲骰…")
+                return fighter_b, fighter_a, f"{summary}\n**{fighter_b['display_name']}** 先攻！"
 
     def build_battle_embed(self, view: "JuiceBattleView") -> Embed:
         """
@@ -502,6 +498,7 @@ class JuiceBattle(commands.Cog):
                 ),
                 inline=False,
             )
+        embed.add_field(name="賭注", value=f"{self.default_bet} {common.cake_emoji}", inline=False)
         if view.log_text:
             embed.add_field(name="戰鬥紀錄", value=view.log_text[:1024], inline=False)
         if view.phase == "ended":
@@ -513,10 +510,9 @@ class JuiceBattle(commands.Cog):
             defender = view.fighter_by_id(view.defender_id)
             embed.add_field(
                 name="行動",
-                value=f"攻擊最終值 **{view.pending_attack_total}**\n輪到 **{defender['display_name']}** 選擇防禦或閃避",
+                value=f"輪到 **{defender['display_name']}** 選擇防禦或閃避",
                 inline=False,
             )
-        embed.set_footer(text=f"賭注：{self.default_bet} {common.cake_emoji}")
         return embed
 
     @app_commands.command(name="juice_battle_player", description="更換 Juice Battle 遊玩角色")
@@ -1486,9 +1482,7 @@ class JuiceBattleView(discord.ui.View):
         dice, total = self.cog.roll_stat(attacker["atk"], attacker["atk_offset"])
         self.pending_attack_dice = dice
         self.pending_attack_total = total
-        self.log_text = (
-            f"{attacker['display_name']} 攻擊骰 {dice}+{attacker['atk']}+{attacker['atk_offset']}={total}"
-        )
+        self.log_text = f"{attacker['display_name']} 攻擊 **{total}**"
         self.phase = "defend"
         defender = self.fighter_by_id(self.defender_id)
 
@@ -1545,30 +1539,28 @@ class JuiceBattleView(discord.ui.View):
         defender = self.fighter_by_id(self.defender_id)
         attack_total = self.pending_attack_total or 0
 
-        # 計算傷害
+        # 計算傷害（紀錄只寫最終數值；接續 bot 反擊時會再 append）
+        attack_line = f"{attacker['display_name']} 攻擊 **{attack_total}**"
         if mode == "defend":
-            dice, defense_total = self.cog.roll_stat(defender["defense"], defender["def_offset"])
+            _dice, defense_total = self.cog.roll_stat(defender["defense"], defender["def_offset"])
             damage = max(1, attack_total - defense_total)
             self.log_text = (
-                f"{attacker['display_name']} 攻擊最終值 **{attack_total}**\n"
-                f"{defender['display_name']} 選擇防禦：{dice}+{defender['defense']}+{defender['def_offset']}={defense_total}\n"
-                f"造成 **{damage}** 點傷害"
+                f"{attack_line}\n"
+                f"{defender['display_name']} 防禦 **{defense_total}**，受到 **{damage}** 點傷害"
             )
         else:
-            dice, dodge_total = self.cog.roll_stat(defender["agi"], defender["agi_offset"])
+            _dice, dodge_total = self.cog.roll_stat(defender["agi"], defender["agi_offset"])
             if attack_total >= dodge_total:
                 damage = attack_total
                 self.log_text = (
-                    f"{attacker['display_name']} 攻擊最終值 **{attack_total}**\n"
-                    f"{defender['display_name']} 選擇閃避：{dice}+{defender['agi']}+{defender['agi_offset']}={dodge_total}\n"
-                    f"閃避失敗，受到 **{damage}** 點傷害"
+                    f"{attack_line}\n"
+                    f"{defender['display_name']} 閃避 **{dodge_total}**，失敗，受到 **{damage}** 點傷害"
                 )
             else:
                 damage = 0
                 self.log_text = (
-                    f"{attacker['display_name']} 攻擊最終值 **{attack_total}**\n"
-                    f"{defender['display_name']} 選擇閃避：{dice}+{defender['agi']}+{defender['agi_offset']}={dodge_total}\n"
-                    f"閃避成功，無傷！"
+                    f"{attack_line}\n"
+                    f"{defender['display_name']} 閃避 **{dodge_total}**，成功，無傷！"
                 )
 
         defender["hp"] = max(0, defender["hp"] - damage)
@@ -1615,9 +1607,12 @@ class JuiceBattleView(discord.ui.View):
         dice, total = self.cog.roll_stat(attacker["atk"], attacker["atk_offset"])
         self.pending_attack_dice = dice
         self.pending_attack_total = total
-        self.log_text = (
-            f"{attacker['display_name']} 攻擊骰 {dice}+{attacker['atk']}+{attacker['atk_offset']}={total}"
-        )
+        # vs bot 連段：保留上一動的防禦／閃避結果，再接上本次攻擊
+        attack_line = f"{attacker['display_name']} 攻擊 **{total}**"
+        if self.log_text:
+            self.log_text = f"{self.log_text}\n{attack_line}"
+        else:
+            self.log_text = attack_line
         self.phase = "defend"
         await self.replace_with_fresh_view(interaction)
 
