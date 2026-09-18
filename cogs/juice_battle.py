@@ -844,7 +844,7 @@ class JuiceBattle(commands.Cog):
         # 檢查對手合法性
         if opponent_id == challenger_id:
             await interaction.response.send_message(
-                embed=Embed(title="Juice Battle", description="不能挑戰自己。", color=common.bot_error_color),
+                embed=Embed(title="Juice Battle", description="禁止自殘，要好好愛護自己哦。", color=common.bot_error_color),
                 ephemeral=True,
             )
             return
@@ -932,11 +932,6 @@ class JuiceBattle(commands.Cog):
                     f"請 {opponent.mention} 按下「同意挑戰」開始。"
                 ),
                 color=common.bot_color,
-            )
-            embed.add_field(
-                name=f"{challenger.display_name} 的素質",
-                value=self.format_stat_block(challenger_juice["character_id"], challenger_juice),
-                inline=False,
             )
             view = JuiceBattleChallengeView(
                 cog=self,
