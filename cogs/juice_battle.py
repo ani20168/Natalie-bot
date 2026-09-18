@@ -1669,18 +1669,44 @@ class JuiceBattleView(discord.ui.View):
 
     async def resolve_bot_defense(self, interaction: discord.Interaction | None):
         """
-        Natalie 選擇防禦或閃避並結算，必要時接續 bot 攻擊。
+        Natalie 依 HP 與預期傷害選擇防禦或閃避並結算。
 
         Args:
             interaction (discord.Interaction | None): "按鈕互動或 None"
         """
         defender = self.fighter_by_id(self.defender_id)
         attack_total = self.pending_attack_total or 0
-        # Bot 決策：攻擊最終值 < 1+敏捷+偏移 → 閃避，否則防禦
-        if attack_total < 1 + defender["agi"] + defender["agi_offset"]:
-            await self.apply_defense_choice(interaction, mode="dodge", respond=True)
+
+        # HP 只剩 1：防禦必吃至少 1 傷害會致死，必定閃避
+        if defender["hp"] == 1:
+            mode = "dodge"
         else:
-            await self.apply_defense_choice(interaction, mode="defend", respond=True)
+            # 計算防禦預期傷害（1d6 六種結果平均）
+            defense_base = defender["defense"] + defender["def_offset"]
+            defend_damage_sum = 0
+            for dice in range(1, 7):
+                defense_total = dice + defense_base
+                defend_damage_sum += max(1, attack_total - defense_total)
+            defend_expected = defend_damage_sum / 6
+
+            # 計算閃避預期傷害（失敗時吃滿攻擊最終值）
+            agility_base = defender["agi"] + defender["agi_offset"]
+            dodge_damage_sum = 0
+            for dice in range(1, 7):
+                dodge_total = dice + agility_base
+                if attack_total >= dodge_total:
+                    dodge_damage_sum += attack_total
+            dodge_expected = dodge_damage_sum / 6
+
+            # 選預期傷害較低者；相同則各 50%
+            if defend_expected < dodge_expected:
+                mode = "defend"
+            elif dodge_expected < defend_expected:
+                mode = "dodge"
+            else:
+                mode = random.choice(["defend", "dodge"])
+
+        await self.apply_defense_choice(interaction, mode=mode, respond=True)
 
     async def on_defend(self, interaction: discord.Interaction):
         """
