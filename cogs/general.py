@@ -85,6 +85,7 @@ class ServerItemHouse:
         self.strong_magnet_steal_range = (5000, 10000)
         self.magnet_warmup_seconds = 60
         self.magnet_voice_join_at = {}
+        self.dimension_cloak_bonus_rate = 0.02
         self.gambler_gift_contents = (
             ("blackjack_cheat", 1),
             ("chance_scroll", 3),
@@ -103,8 +104,10 @@ class ServerItemHouse:
         self.status_jade_bracelet = "jade_bracelet"
         self.status_rain_maker = "rain_maker"
         self.status_pickaxe_discount = "pickaxe_discount"
+        self.status_glass_slipper = "glass_slipper"
+        self.status_dimension_cloak = "dimension_cloak"
         self.charge_effect_keys = {self.status_blackjack_cheat, self.status_jade_bracelet}
-        self.charge_count_unit_keys = {self.status_master_thief, self.status_pickaxe_discount}
+        self.charge_count_unit_keys = {self.status_master_thief, self.status_pickaxe_discount, self.status_dimension_cloak}
         self.anti_theft_invalid_title = "你的防盜卡已失效"
         self.anti_theft_expired_reason = "已過期"
         self.anti_theft_milk_reason = "被 {actor_name} 的牛奶消除"
@@ -122,6 +125,8 @@ class ServerItemHouse:
             self.status_jade_bracelet: "玉手鐲",
             self.status_rain_maker: "造雨機",
             self.status_pickaxe_discount: "礦鎬折價卷",
+            self.status_glass_slipper: "灰姑娘的玻璃鞋",
+            self.status_dimension_cloak: "次元斗篷",
         }
         self.items = {
             "anti_theft_3": {
@@ -278,6 +283,21 @@ class ServerItemHouse:
                 "status_key": self.status_pickaxe_discount,
                 "charge_amount": self.pickaxe_discount_buys,
             },
+            "glass_slipper_3": {
+                "name": "灰姑娘的玻璃鞋",
+                "description": "不論自身的蛋糕多寡，都能嘗試搶劫",
+                "duration_days": 3,
+                "use_kind": "self_status",
+                "status_key": self.status_glass_slipper,
+            },
+            "dimension_cloak": {
+                "name": "次元斗篷",
+                "description": "在下一次搶劫成功時，可以另外從對手身上獲得2%的蛋糕",
+                "duration_days": 0,
+                "use_kind": "self_charge",
+                "status_key": self.status_dimension_cloak,
+                "charge_amount": 1,
+            },
         }
 
     def panel_item_guides(self) -> list[dict]:
@@ -295,7 +315,7 @@ class ServerItemHouse:
             elif item.get("use_kind") == "self_charge":
                 charge_amount = int(item.get("charge_amount") or 0)
                 unit = "次" if item.get("status_key") in self.charge_count_unit_keys else "場"
-                kind_label = f"{charge_amount}{unit}"
+                kind_label = "一次性" if charge_amount == 1 else f"{charge_amount}{unit}"
             else:
                 kind_label = "一次性"
             guides.append({

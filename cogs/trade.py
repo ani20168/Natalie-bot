@@ -1266,13 +1266,19 @@ class Trade(commands.Cog):
         robber_cake = int(robber_data.get("cake", 0))
         victim_cake = int(victim_data.get("cake", 0))
 
+        # 自身財力上限：有灰姑娘的玻璃鞋時略過
         if robber_cake > self.robbery_self_max_cake:
-            await interaction.response.send_message(embed=Embed(
-                title=title,
-                description=f"你已經很有錢了！身上超過 **{self.robbery_self_max_cake}** 塊{common.cake_emoji}就不能當小偷喔（目前 **{robber_cake}**）",
-                color=common.bot_error_color,
-            ))
-            return
+            has_glass_slipper = item_house is not None and item_house.has_status_in_data(
+                robber_data,
+                item_house.status_glass_slipper,
+            )
+            if not has_glass_slipper:
+                await interaction.response.send_message(embed=Embed(
+                    title=title,
+                    description=f"你已經很有錢了！身上超過 **{self.robbery_self_max_cake}** 塊{common.cake_emoji}就不能當小偷喔（目前 **{robber_cake}**）",
+                    color=common.bot_error_color,
+                ))
+                return
         if victim_cake < self.robbery_target_min_cake:
             await interaction.response.send_message(embed=Embed(
                 title=title,
@@ -1392,7 +1398,22 @@ class Trade(commands.Cog):
             )
             raise
 
-        message.add_field(name="結果", value=f"得手！從 <@{member.id}> 那裡抱走了 **{steal_amount}** 塊{common.cake_emoji}！", inline=False)
+        # 次元斗篷：搶劫成功時另外拿走對手蛋糕的 2%，失敗不消耗
+        cloak_bonus = 0
+        if item_house is not None and item_house.charge_remaining_in_data(robber_data, item_house.status_dimension_cloak) > 0:
+            cloak_bonus = int(victim_cake * item_house.dimension_cloak_bonus_rate)
+            if cloak_bonus > 0:
+                cloak_bonus = await item_house.transfer_cake(str(member.id), userid, cloak_bonus)
+            if item_house.consume_charge_in_data(robber_data, item_house.status_dimension_cloak):
+                await common.mongo_storage.update_user_fields(
+                    userid,
+                    {item_house.charge_key: robber_data.get(item_house.charge_key, {})},
+                )
+
+        result_text = f"得手！從 <@{member.id}> 那裡抱走了 **{steal_amount}** 塊{common.cake_emoji}！"
+        if cloak_bonus > 0:
+            result_text += f"\n次元斗篷額外獲得 **{cloak_bonus}** 塊{common.cake_emoji}！"
+        message.add_field(name="結果", value=result_text, inline=False)
         await interaction.response.send_message(embed=message)
 
 
