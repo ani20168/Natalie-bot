@@ -878,6 +878,9 @@ class JuiceBattle(commands.Cog):
             embed.add_field(name="你的各角色戰績", value="尚無遊玩紀錄", inline=False)
 
         await interaction.response.send_message(embed=embed)
+
+
+class JuiceBattleCharacterSelect(discord.ui.Select):
     """角色選擇下拉選單。"""
 
     def __init__(self, cog: JuiceBattle):
