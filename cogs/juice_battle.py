@@ -13,7 +13,7 @@ class JuiceBattle(commands.Cog):
         self.bag_size = 99
         self.bag_page_size = 10
         self.challenge_timeout = 120.0
-        self.battle_timeout = 600.0
+        self.battle_timeout = 180.0
         self.bag_view_timeout = 180.0
         self.default_bet = 0
         self.leaderboard_min_rounds = 1
