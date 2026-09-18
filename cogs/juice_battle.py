@@ -36,7 +36,13 @@ class JuiceBattle(commands.Cog):
                 "atk": 3,
                 "defense": 0,
                 "agi": 2,
-                "ability": None,
+                "ability": {
+                    "id": "poison",
+                    "name": "中毒",
+                    "phase": "attack",
+                    "cd": 6,
+                    "description": "本次攻擊成功時，賦予對方中毒：對方攻擊階段開始時 -1HP，持續 3 回合",
+                },
             },
             "dashan": {
                 "name": "大山",
@@ -44,7 +50,13 @@ class JuiceBattle(commands.Cog):
                 "atk": 1,
                 "defense": 3,
                 "agi": -1,
-                "ability": None,
+                "ability": {
+                    "id": "stance_swap",
+                    "name": "調整架式",
+                    "phase": "defend",
+                    "cd": 3,
+                    "description": "本回合攻擊與防禦對調（本次防守＋接著自己的攻擊）",
+                },
             },
             "mike": {
                 "name": "麥坤",
@@ -52,7 +64,13 @@ class JuiceBattle(commands.Cog):
                 "atk": 1,
                 "defense": 0,
                 "agi": 3,
-                "ability": None,
+                "ability": {
+                    "id": "fridge",
+                    "name": "冰箱",
+                    "phase": "defend",
+                    "cd": None,
+                    "description": "若本回合傷害會致死，則傷害無效並改為回復等量生命（每場一次）",
+                },
             },
             "laura": {
                 "name": "蘿拉",
@@ -60,7 +78,13 @@ class JuiceBattle(commands.Cog):
                 "atk": 1,
                 "defense": 2,
                 "agi": 1,
-                "ability": None,
+                "ability": {
+                    "id": "bind",
+                    "name": "束縛",
+                    "phase": "attack",
+                    "cd": 3,
+                    "description": "此次攻擊對手無法選擇閃避",
+                },
             },
         }
         self.weapons = {
@@ -314,7 +338,97 @@ class JuiceBattle(commands.Cog):
             "def_offset": offsets["def_offset"],
             "agi_offset": offsets["agi_offset"],
             "is_bot": is_bot,
+            "skill_cd": 0,
+            "skill_used_once": False,
+            "skill_armed": False,
+            "stance_swap_attack": False,
+            "poison_remaining": 0,
         }
+
+    def character_ability(self, character_id: str) -> dict | None:
+        """
+        取得角色技能定義。
+
+        Args:
+            character_id (str): "lily"
+
+        Returns:
+            ability (dict | None): "{'id': 'poison', 'name': '中毒', 'phase': 'attack', 'cd': 6}"
+        """
+        character = self.characters.get(character_id)
+        if character is None:
+            return None
+        ability = character.get("ability")
+        return ability if isinstance(ability, dict) else None
+
+    def skill_is_ready(self, fighter: dict, phase: str) -> bool:
+        """
+        判斷該階段是否可發動技能。
+
+        Args:
+            fighter (dict): "{'character_id': 'lily', 'skill_cd': 0}"
+            phase (str): "attack"
+
+        Returns:
+            ready (bool): "True"
+        """
+        ability = self.character_ability(fighter["character_id"])
+        if ability is None or ability.get("phase") != phase:
+            return False
+        if ability.get("cd") is None:
+            return not fighter.get("skill_used_once", False)
+        return int(fighter.get("skill_cd", 0)) <= 0
+
+    def consume_armed_skill(self, fighter: dict) -> dict | None:
+        """
+        消耗已發動的技能並進入 CD／一次性標記。
+
+        Args:
+            fighter (dict): "{'skill_armed': True, 'character_id': 'lily'}"
+
+        Returns:
+            ability (dict | None): "消耗的技能定義；未發動則 None"
+        """
+        if not fighter.get("skill_armed"):
+            return None
+        ability = self.character_ability(fighter["character_id"])
+        fighter["skill_armed"] = False
+        if ability is None:
+            return None
+        if ability.get("cd") is None:
+            fighter["skill_used_once"] = True
+        else:
+            fighter["skill_cd"] = int(ability["cd"])
+        return ability
+
+    def attack_roll_stats(self, fighter: dict) -> tuple[int, int]:
+        """
+        取得攻擊擲骰用的基礎值與偏移（含大山架式對調）。
+
+        Args:
+            fighter (dict): "{'atk': 1, 'stance_swap_attack': True}"
+
+        Returns:
+            stats (tuple[int, int]): "(base, offset)"
+        """
+        if fighter.get("stance_swap_attack"):
+            return fighter["defense"], fighter["def_offset"]
+        return fighter["atk"], fighter["atk_offset"]
+
+    def defense_roll_stats(self, fighter: dict, *, stance_swap_defend: bool) -> tuple[int, int]:
+        """
+        取得防禦擲骰用的基礎值與偏移。
+
+        Args:
+            fighter (dict): "{'defense': 3}"
+            stance_swap_defend (bool): "True"
+
+        Returns:
+            stats (tuple[int, int]): "(base, offset)"
+        """
+        if stance_swap_defend:
+            return fighter["atk"], fighter["atk_offset"]
+        return fighter["defense"], fighter["def_offset"]
 
     def build_bot_fighter(self) -> dict:
         """
@@ -569,6 +683,20 @@ class JuiceBattle(commands.Cog):
         """
         embed = Embed(title="Juice Battle", color=common.bot_color)
         for fighter in (view.fighter_a, view.fighter_b):
+            ability = self.character_ability(fighter["character_id"])
+            status_parts = []
+            if fighter.get("poison_remaining", 0) > 0:
+                status_parts.append(f"中毒剩餘 {fighter['poison_remaining']}")
+            if fighter.get("skill_armed"):
+                status_parts.append("技能已發動")
+            if fighter.get("stance_swap_attack"):
+                status_parts.append("架式對調（下次攻擊）")
+            if ability and ability.get("cd") is not None and int(fighter.get("skill_cd", 0)) > 0:
+                status_parts.append(f"{ability['name']} CD {fighter['skill_cd']}")
+            elif ability and ability.get("cd") is None and fighter.get("skill_used_once"):
+                status_parts.append(f"{ability['name']} 已使用")
+            status_text = f"\n狀態：{'／'.join(status_parts)}" if status_parts else ""
+            ability_text = f"\n技能：{ability['name']}" if ability else ""
             embed.add_field(
                 name=f"{fighter['display_name']}（{fighter['character_name']}）",
                 value=(
@@ -576,6 +704,7 @@ class JuiceBattle(commands.Cog):
                     f"攻擊 {fighter['atk']}({fighter['atk_offset']:+d})｜"
                     f"防禦 {fighter['defense']}({fighter['def_offset']:+d})｜"
                     f"敏捷 {fighter['agi']}({fighter['agi_offset']:+d})"
+                    f"{ability_text}{status_text}"
                 ),
                 inline=False,
             )
@@ -586,14 +715,23 @@ class JuiceBattle(commands.Cog):
             embed.add_field(name="結果", value=view.result_text or "戰鬥結束", inline=False)
         elif view.phase == "attack":
             attacker = view.fighter_by_id(view.attacker_id)
-            embed.add_field(name="行動", value=f"輪到 **{attacker['display_name']}** 攻擊", inline=False)
+            action = f"輪到 **{attacker['display_name']}** 攻擊"
+            if attacker.get("skill_armed"):
+                ability = self.character_ability(attacker["character_id"])
+                if ability:
+                    action += f"\n已發動：**{ability['name']}**"
+            embed.add_field(name="行動", value=action, inline=False)
         elif view.phase == "defend":
             defender = view.fighter_by_id(view.defender_id)
-            embed.add_field(
-                name="行動",
-                value=f"輪到 **{defender['display_name']}** 選擇防禦或閃避",
-                inline=False,
-            )
+            if view.pending_bind:
+                action = f"輪到 **{defender['display_name']}** 選擇防禦（被束縛，無法閃避）"
+            else:
+                action = f"輪到 **{defender['display_name']}** 選擇防禦或閃避"
+            if defender.get("skill_armed"):
+                ability = self.character_ability(defender["character_id"])
+                if ability:
+                    action += f"\n已發動：**{ability['name']}**"
+            embed.add_field(name="行動", value=action, inline=False)
         return embed
 
     @app_commands.command(name="juice_battle_player", description="更換 Juice Battle 遊玩角色")
@@ -628,9 +766,11 @@ class JuiceBattle(commands.Cog):
             color=common.bot_color,
         )
         for character_id, character in self.characters.items():
+            ability = character.get("ability")
+            ability_line = f"\n技能：{ability['name']}" if isinstance(ability, dict) else ""
             embed.add_field(
                 name=character["name"],
-                value=f"生命 {character['hp']}｜攻擊 {character['atk']}｜防禦 {character['defense']}｜敏捷 {character['agi']}",
+                value=f"生命 {character['hp']}｜攻擊 {character['atk']}｜防禦 {character['defense']}｜敏捷 {character['agi']}{ability_line}",
                 inline=False,
             )
         view = JuiceBattlePlayerView(cog=self, userid=userid)
@@ -743,9 +883,7 @@ class JuiceBattle(commands.Cog):
                 }
                 async with common.jsonio_lock:
                     await self.set_playing_session(challenger_id, session)
-                # 若 Natalie 先攻，立刻自動攻擊
-                if first["is_bot"]:
-                    await view.run_bot_attack(interaction=None)
+                await view.start_after_initiative(None)
                 return
 
             # 挑戰玩家：檢查對手是否忙碌，送出同意挑戰
@@ -1401,6 +1539,7 @@ class JuiceBattleChallengeView(discord.ui.View):
         async with common.jsonio_lock:
             await self.cog.set_playing_session(self.challenger_id, challenger_session)
             await self.cog.set_playing_session(self.opponent_id, opponent_session)
+        await battle_view.start_after_initiative(None)
         self.stop()
 
     async def on_timeout(self) -> None:
@@ -1475,6 +1614,24 @@ class JuiceBattleDodgeButton(discord.ui.Button):
         await view.on_dodge(interaction)
 
 
+class JuiceBattleSkillButton(discord.ui.Button):
+    """角色技能按鈕（淡紫色／blurple）。"""
+
+    def __init__(self, *, label: str, armed: bool):
+        display = f"{label}（已發動）" if armed else label
+        super().__init__(label=display, style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        發動或取消發動技能。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: JuiceBattleView = self.view  # type: ignore[assignment]
+        await view.on_skill(interaction)
+
+
 class JuiceBattleView(discord.ui.View):
     """回合制戰鬥主介面。"""
 
@@ -1491,6 +1648,8 @@ class JuiceBattleView(discord.ui.View):
         vs_bot: bool,
         pending_attack_total: int | None = None,
         pending_attack_dice: int | None = None,
+        pending_bind: bool = False,
+        pending_poison: bool = False,
         result_text: str | None = None,
     ):
         super().__init__(timeout=cog.battle_timeout)
@@ -1504,6 +1663,8 @@ class JuiceBattleView(discord.ui.View):
         self.vs_bot = vs_bot
         self.pending_attack_total = pending_attack_total
         self.pending_attack_dice = pending_attack_dice
+        self.pending_bind = pending_bind
+        self.pending_poison = pending_poison
         self.result_text = result_text
         self.message: discord.Message | None = None
         self.finished = phase == "ended"
@@ -1537,9 +1698,56 @@ class JuiceBattleView(discord.ui.View):
             return self.fighter_b
         return self.fighter_a
 
+    def append_log(self, line: str):
+        """
+        串接戰鬥紀錄。
+
+        Args:
+            line (str): "中毒傷害"
+        """
+        if self.log_text:
+            self.log_text = f"{self.log_text}\n{line}"
+        else:
+            self.log_text = line
+
+    def prepare_attack_phase(self) -> bool:
+        """
+        進入攻擊階段：攻擊技能 CD-1、中毒跳傷。若中毒致死回傳 True。
+
+        Returns:
+            died (bool): "True 表示攻擊方已因中毒死亡"
+        """
+        attacker = self.fighter_by_id(self.attacker_id)
+        ability = self.cog.character_ability(attacker["character_id"])
+        if ability and ability.get("phase") == "attack" and int(attacker.get("skill_cd", 0)) > 0:
+            attacker["skill_cd"] = int(attacker["skill_cd"]) - 1
+        attacker["skill_armed"] = False
+
+        # 中毒：攻擊階段開始時 -1HP
+        if int(attacker.get("poison_remaining", 0)) > 0:
+            attacker["hp"] = max(0, attacker["hp"] - 1)
+            attacker["poison_remaining"] = int(attacker["poison_remaining"]) - 1
+            self.append_log(
+                f"{attacker['display_name']} 中毒，受到 **1** 點傷害"
+                f"（剩餘 {attacker['poison_remaining']} 回合）"
+            )
+            if attacker["hp"] <= 0:
+                return True
+        return False
+
+    def prepare_defend_phase(self):
+        """
+        進入防守階段：防守技能 CD-1。
+        """
+        defender = self.fighter_by_id(self.defender_id)
+        ability = self.cog.character_ability(defender["character_id"])
+        if ability and ability.get("phase") == "defend" and int(defender.get("skill_cd", 0)) > 0:
+            defender["skill_cd"] = int(defender["skill_cd"]) - 1
+        defender["skill_armed"] = False
+
     def rebuild_buttons(self):
         """
-        依階段重建攻擊／防禦／閃避按鈕。
+        依階段重建攻擊／防禦／閃避／技能按鈕。
         """
         self.clear_items()
         if self.phase == "ended" or self.finished:
@@ -1549,13 +1757,22 @@ class JuiceBattleView(discord.ui.View):
             if attacker.get("is_bot"):
                 return
             self.add_item(JuiceBattleAttackButton())
+            ability = self.cog.character_ability(attacker["character_id"])
+            if ability and ability.get("phase") == "attack":
+                if attacker.get("skill_armed") or self.cog.skill_is_ready(attacker, "attack"):
+                    self.add_item(JuiceBattleSkillButton(label=ability["name"], armed=bool(attacker.get("skill_armed"))))
             return
         if self.phase == "defend":
             defender = self.fighter_by_id(self.defender_id)
             if defender.get("is_bot"):
                 return
             self.add_item(JuiceBattleDefendButton())
-            self.add_item(JuiceBattleDodgeButton())
+            if not self.pending_bind:
+                self.add_item(JuiceBattleDodgeButton())
+            ability = self.cog.character_ability(defender["character_id"])
+            if ability and ability.get("phase") == "defend":
+                if defender.get("skill_armed") or self.cog.skill_is_ready(defender, "defend"):
+                    self.add_item(JuiceBattleSkillButton(label=ability["name"], armed=bool(defender.get("skill_armed"))))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """
@@ -1603,6 +1820,8 @@ class JuiceBattleView(discord.ui.View):
             vs_bot=self.vs_bot,
             pending_attack_total=self.pending_attack_total,
             pending_attack_dice=self.pending_attack_dice,
+            pending_bind=self.pending_bind,
+            pending_poison=self.pending_poison,
             result_text=self.result_text,
         )
         new_view.message = self.message
@@ -1644,6 +1863,33 @@ class JuiceBattleView(discord.ui.View):
                 await self.cog.clear_session(self.fighter_b["user_id"])
         self.stop()
 
+    async def on_skill(self, interaction: discord.Interaction):
+        """
+        發動或取消發動當前階段技能。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        actor = self.fighter_by_id(self.attacker_id if self.phase == "attack" else self.defender_id)
+        ability = self.cog.character_ability(actor["character_id"])
+        if ability is None or ability.get("phase") != self.phase:
+            await interaction.response.send_message(
+                embed=Embed(title="Juice Battle", description="此階段無法使用技能。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        if actor.get("skill_armed"):
+            actor["skill_armed"] = False
+        else:
+            if not self.cog.skill_is_ready(actor, self.phase):
+                await interaction.response.send_message(
+                    embed=Embed(title="Juice Battle", description="技能尚未準備好。", color=common.bot_error_color),
+                    ephemeral=True,
+                )
+                return
+            actor["skill_armed"] = True
+        await self.replace_with_fresh_view(interaction)
+
     async def on_attack(self, interaction: discord.Interaction):
         """
         攻擊方按下攻擊。
@@ -1651,13 +1897,42 @@ class JuiceBattleView(discord.ui.View):
         Args:
             interaction (discord.Interaction): "按鈕互動"
         """
-        # 擲攻擊骰
+        await self.execute_attack(interaction)
+
+    async def execute_attack(self, interaction: discord.Interaction | None):
+        """
+        執行攻擊擲骰並進入防守階段。
+
+        Args:
+            interaction (discord.Interaction | None): "按鈕互動或 None"
+        """
         attacker = self.fighter_by_id(self.attacker_id)
-        dice, total = self.cog.roll_stat(attacker["atk"], attacker["atk_offset"])
-        self.pending_attack_dice = dice
+        ability = self.cog.consume_armed_skill(attacker)
+        self.pending_bind = False
+        self.pending_poison = False
+        skill_note = ""
+        if ability is not None:
+            skill_note = f"（發動 {ability['name']}）"
+            if ability["id"] == "bind":
+                self.pending_bind = True
+            elif ability["id"] == "poison":
+                self.pending_poison = True
+
+        # 擲攻擊骰（架式對調時用防禦值）
+        atk_base, atk_offset = self.cog.attack_roll_stats(attacker)
+        _dice, total = self.cog.roll_stat(atk_base, atk_offset)
+        if attacker.get("stance_swap_attack"):
+            attacker["stance_swap_attack"] = False
+            skill_note = f"{skill_note}（架式對調攻擊）" if skill_note else "（架式對調攻擊）"
+        self.pending_attack_dice = _dice
         self.pending_attack_total = total
-        self.log_text = f"{attacker['display_name']} 攻擊 **{total}**"
+        attack_line = f"{attacker['display_name']} 攻擊 **{total}**{skill_note}"
+        if interaction is None and self.log_text:
+            self.append_log(attack_line)
+        else:
+            self.log_text = attack_line
         self.phase = "defend"
+        self.prepare_defend_phase()
         defender = self.fighter_by_id(self.defender_id)
 
         # 對戰機器人：防守方立刻決策並結算
@@ -1669,7 +1944,7 @@ class JuiceBattleView(discord.ui.View):
 
     async def resolve_bot_defense(self, interaction: discord.Interaction | None):
         """
-        Natalie 依 HP 與預期傷害選擇防禦或閃避並結算。
+        Natalie 依技能／HP／預期傷害選擇防禦或閃避並結算。
 
         Args:
             interaction (discord.Interaction | None): "按鈕互動或 None"
@@ -1677,19 +1952,39 @@ class JuiceBattleView(discord.ui.View):
         defender = self.fighter_by_id(self.defender_id)
         attack_total = self.pending_attack_total or 0
 
-        # HP 只剩 1：防禦必吃至少 1 傷害會致死，必定閃避
-        if defender["hp"] == 1:
+        # 自動發動可用的防守技能（冰箱僅在可能致死時發動）
+        if self.cog.skill_is_ready(defender, "defend"):
+            ability = self.cog.character_ability(defender["character_id"])
+            if ability and ability["id"] == "fridge":
+                if attack_total >= defender["hp"]:
+                    defender["skill_armed"] = True
+            else:
+                defender["skill_armed"] = True
+
+        stance_swap_defend = bool(
+            defender.get("skill_armed")
+            and (self.cog.character_ability(defender["character_id"]) or {}).get("id") == "stance_swap"
+        )
+        fridge_armed = bool(
+            defender.get("skill_armed")
+            and (self.cog.character_ability(defender["character_id"]) or {}).get("id") == "fridge"
+        )
+
+        # 被束縛只能防禦；發動冰箱則選閃避（失敗吃滿傷以觸發回血）
+        if self.pending_bind:
+            mode = "defend"
+        elif fridge_armed:
+            mode = "dodge"
+        elif defender["hp"] == 1:
             mode = "dodge"
         else:
-            # 計算防禦預期傷害（1d6 六種結果平均）
-            defense_base = defender["defense"] + defender["def_offset"]
+            defense_base, defense_offset = self.cog.defense_roll_stats(defender, stance_swap_defend=stance_swap_defend)
             defend_damage_sum = 0
             for dice in range(1, 7):
-                defense_total = dice + defense_base
+                defense_total = dice + defense_base + defense_offset
                 defend_damage_sum += max(1, attack_total - defense_total)
             defend_expected = defend_damage_sum / 6
 
-            # 計算閃避預期傷害（失敗時吃滿攻擊最終值）
             agility_base = defender["agi"] + defender["agi_offset"]
             dodge_damage_sum = 0
             for dice in range(1, 7):
@@ -1698,7 +1993,6 @@ class JuiceBattleView(discord.ui.View):
                     dodge_damage_sum += attack_total
             dodge_expected = dodge_damage_sum / 6
 
-            # 選預期傷害較低者；相同則各 50%
             if defend_expected < dodge_expected:
                 mode = "defend"
             elif dodge_expected < defend_expected:
@@ -1724,6 +2018,12 @@ class JuiceBattleView(discord.ui.View):
         Args:
             interaction (discord.Interaction): "按鈕互動"
         """
+        if self.pending_bind:
+            await interaction.response.send_message(
+                embed=Embed(title="Juice Battle", description="你被束縛，無法閃避。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
         await self.apply_defense_choice(interaction, mode="dodge", respond=True)
 
     async def apply_defense_choice(self, interaction: discord.Interaction | None, *, mode: str, respond: bool):
@@ -1738,47 +2038,73 @@ class JuiceBattleView(discord.ui.View):
         attacker = self.fighter_by_id(self.attacker_id)
         defender = self.fighter_by_id(self.defender_id)
         attack_total = self.pending_attack_total or 0
+        ability = self.cog.consume_armed_skill(defender)
+        stance_swap_defend = ability is not None and ability["id"] == "stance_swap"
+        fridge_armed = ability is not None and ability["id"] == "fridge"
+        skill_note = f"（發動 {ability['name']}）" if ability else ""
 
-        # 計算傷害（紀錄只寫最終數值；接續 bot 反擊時會再 append）
+        # 計算傷害
         attack_line = f"{attacker['display_name']} 攻擊 **{attack_total}**"
         if mode == "defend":
-            _dice, defense_total = self.cog.roll_stat(defender["defense"], defender["def_offset"])
+            def_base, def_offset = self.cog.defense_roll_stats(defender, stance_swap_defend=stance_swap_defend)
+            _dice, defense_total = self.cog.roll_stat(def_base, def_offset)
             damage = max(1, attack_total - defense_total)
-            self.log_text = (
-                f"{attack_line}\n"
-                f"{defender['display_name']} 防禦 **{defense_total}**，受到 **{damage}** 點傷害"
-            )
+            outcome_line = f"{defender['display_name']} 防禦 **{defense_total}**{skill_note}"
         else:
             _dice, dodge_total = self.cog.roll_stat(defender["agi"], defender["agi_offset"])
             if attack_total >= dodge_total:
                 damage = attack_total
-                self.log_text = (
-                    f"{attack_line}\n"
-                    f"{defender['display_name']} 閃避 **{dodge_total}**，失敗，受到 **{damage}** 點傷害"
-                )
+                outcome_line = f"{defender['display_name']} 閃避 **{dodge_total}**{skill_note}，失敗"
             else:
                 damage = 0
-                self.log_text = (
-                    f"{attack_line}\n"
-                    f"{defender['display_name']} 閃避 **{dodge_total}**，成功，無傷！"
-                )
+                outcome_line = f"{defender['display_name']} 閃避 **{dodge_total}**{skill_note}，成功，無傷！"
 
-        defender["hp"] = max(0, defender["hp"] - damage)
+        # 冰箱：致死傷害改為回復
+        if fridge_armed and damage > 0 and defender["hp"] - damage <= 0:
+            heal = damage
+            defender["hp"] = min(defender["max_hp"], defender["hp"] + heal)
+            self.log_text = (
+                f"{attack_line}\n{outcome_line}\n"
+                f"{defender['display_name']} 冰箱發動！傷害無效，回復 **{heal}** 點生命"
+            )
+            damage = 0
+        else:
+            defender["hp"] = max(0, defender["hp"] - damage)
+            if mode == "defend" or damage > 0:
+                self.log_text = f"{attack_line}\n{outcome_line}，受到 **{damage}** 點傷害"
+            else:
+                self.log_text = f"{attack_line}\n{outcome_line}"
+
+        # 調整架式：接著自己的攻擊也對調
+        if stance_swap_defend:
+            defender["stance_swap_attack"] = True
+
+        # 中毒：攻擊成功（傷害 > 0）上毒
+        if self.pending_poison and damage > 0:
+            defender["poison_remaining"] = 3
+            self.append_log(f"{defender['display_name']} 中毒（持續 3 回合）")
+
         self.pending_attack_total = None
         self.pending_attack_dice = None
+        self.pending_bind = False
+        self.pending_poison = False
 
         # 檢查勝負
         if defender["hp"] <= 0:
             await self.finish_battle(winner=attacker, reason="對手生命歸零。", interaction=interaction if respond else None)
             return
 
-        # 攻守互換
+        # 攻守互換並準備下一攻擊階段
         self.attacker_id, self.defender_id = self.defender_id, self.attacker_id
         self.phase = "attack"
-        next_attacker = self.fighter_by_id(self.attacker_id)
+        if self.prepare_attack_phase():
+            dead = self.fighter_by_id(self.attacker_id)
+            winner = self.other_fighter(dead["user_id"])
+            await self.finish_battle(winner=winner, reason="中毒致死。", interaction=interaction if respond else None)
+            return
 
+        next_attacker = self.fighter_by_id(self.attacker_id)
         if next_attacker.get("is_bot"):
-            # 先更新畫面再讓 bot 攻擊
             if respond and interaction is not None and not interaction.response.is_done():
                 new_view = await self.replace_with_fresh_view(interaction)
                 await new_view.run_bot_attack(interaction=None)
@@ -1804,17 +2130,34 @@ class JuiceBattleView(discord.ui.View):
         attacker = self.fighter_by_id(self.attacker_id)
         if not attacker.get("is_bot"):
             return
-        dice, total = self.cog.roll_stat(attacker["atk"], attacker["atk_offset"])
-        self.pending_attack_dice = dice
-        self.pending_attack_total = total
-        # vs bot 連段：保留上一動的防禦／閃避結果，再接上本次攻擊
-        attack_line = f"{attacker['display_name']} 攻擊 **{total}**"
-        if self.log_text:
-            self.log_text = f"{self.log_text}\n{attack_line}"
-        else:
-            self.log_text = attack_line
-        self.phase = "defend"
-        await self.replace_with_fresh_view(interaction)
+
+        # 自動發動攻擊技能
+        if self.cog.skill_is_ready(attacker, "attack"):
+            attacker["skill_armed"] = True
+        await self.execute_attack(interaction)
+
+    async def start_after_initiative(self, interaction: discord.Interaction | None):
+        """
+        先攻結束後進入第一個攻擊階段（含中毒／CD 與 bot 自動攻擊）。
+
+        Args:
+            interaction (discord.Interaction | None): "通常開戰時為 None"
+        """
+        if self.prepare_attack_phase():
+            dead = self.fighter_by_id(self.attacker_id)
+            winner = self.other_fighter(dead["user_id"])
+            await self.finish_battle(winner=winner, reason="中毒致死。", interaction=interaction)
+            return
+        first = self.fighter_by_id(self.attacker_id)
+        if first.get("is_bot"):
+            await self.run_bot_attack(interaction)
+            return
+        if interaction is not None:
+            await self.replace_with_fresh_view(interaction)
+        elif self.message is not None:
+            embed = self.cog.build_battle_embed(self)
+            self.rebuild_buttons()
+            await self.message.edit(embed=embed, view=self)
 
     async def on_timeout(self) -> None:
         """
