@@ -767,7 +767,16 @@ class JuiceBattle(commands.Cog):
         )
         for character_id, character in self.characters.items():
             ability = character.get("ability")
-            ability_line = f"\n技能：{ability['name']}" if isinstance(ability, dict) else ""
+            if isinstance(ability, dict):
+                phase_text = "攻擊階段" if ability.get("phase") == "attack" else "防守階段"
+                cd_value = ability.get("cd")
+                cd_text = f"CD:{cd_value}" if cd_value is not None else "每場一次"
+                ability_line = (
+                    f"\n技能：[{phase_text}({cd_text})] {ability['name']}\n"
+                    f"{ability.get('description', '')}"
+                )
+            else:
+                ability_line = "\n技能：無"
             embed.add_field(
                 name=character["name"],
                 value=f"生命 {character['hp']}｜攻擊 {character['atk']}｜防禦 {character['defense']}｜敏捷 {character['agi']}{ability_line}",
