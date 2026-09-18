@@ -16,6 +16,8 @@ class JuiceBattle(commands.Cog):
         self.battle_timeout = 600.0
         self.bag_view_timeout = 180.0
         self.default_bet = 0
+        self.leaderboard_min_rounds = 1
+        self.leaderboard_top_n = 3
         self.default_character_id = "ownerless"
         self.starter_weapon_id = "wooden_stick"
         self.starter_armor_id = "leather_armor"
@@ -41,7 +43,7 @@ class JuiceBattle(commands.Cog):
                 "hp": 11,
                 "atk": 1,
                 "defense": 3,
-                "agi": 0,
+                "agi": -1,
                 "ability": None,
             },
             "mike": {
@@ -138,6 +140,7 @@ class JuiceBattle(commands.Cog):
             "equipped_weapon_slot": 0,
             "equipped_armor_slot": 1,
             "playing": False,
+            "character_stats": {},
         }
 
     def ensure_juice_battle(self, user_data: dict) -> dict:
@@ -171,6 +174,8 @@ class JuiceBattle(commands.Cog):
             juice_battle["equipped_armor_slot"] = None
         if "playing" not in juice_battle:
             juice_battle["playing"] = False
+        if not isinstance(juice_battle.get("character_stats"), dict):
+            juice_battle["character_stats"] = {}
         user_data["juice_battle"] = juice_battle
         return juice_battle
 
@@ -391,6 +396,82 @@ class JuiceBattle(commands.Cog):
         user_data["juice_battle"]["playing"] = True
         user_data["juice_battle"]["session"] = session
         await common.mongo_storage.replace_user(userid, user_data)
+
+    async def record_character_result(self, fighter: dict, *, won: bool):
+        """
+        依該場使用的角色寫入勝場／場數（機器人略過）。
+
+        Args:
+            fighter (dict): "{'user_id': '4108', 'character_id': 'lily', 'is_bot': False}"
+            won (bool): "True"
+        """
+        if fighter.get("is_bot"):
+            return
+        userid = str(fighter["user_id"])
+        character_id = fighter.get("character_id")
+        if character_id not in self.characters:
+            return
+        user_data = await self.load_user(userid)
+        juice_battle = user_data["juice_battle"]
+        stats_map = juice_battle.setdefault("character_stats", {})
+        entry = stats_map.get(character_id)
+        if not isinstance(entry, dict):
+            entry = {"win": 0, "round": 0}
+        entry["round"] = int(entry.get("round", 0)) + 1
+        if won:
+            entry["win"] = int(entry.get("win", 0)) + 1
+        else:
+            entry["win"] = int(entry.get("win", 0))
+        stats_map[character_id] = entry
+        juice_battle["character_stats"] = stats_map
+        await common.mongo_storage.replace_user(userid, user_data)
+
+    async def record_battle_outcome(self, winner: dict, loser: dict):
+        """
+        同時寫入勝負雙方的角色統計。
+
+        Args:
+            winner (dict): "{'user_id': '4108', 'character_id': 'lily'}"
+            loser (dict): "{'user_id': '4109', 'character_id': 'mike'}"
+        """
+        await self.record_character_result(winner, won=True)
+        await self.record_character_result(loser, won=False)
+
+    def format_win_rate(self, win: int, round_count: int) -> str:
+        """
+        格式化勝率文字。
+
+        Args:
+            win (int): "3"
+            round_count (int): "10"
+
+        Returns:
+            text (str): "30.0%"
+        """
+        if round_count <= 0:
+            return "未知"
+        return f"{(win / round_count):.1%}"
+
+    async def notify_challenge_dm(self, opponent: discord.Member, challenger: discord.abc.User, jump_url: str):
+        """
+        私訊被挑戰者，附上挑戰訊息連結。
+
+        Args:
+            opponent (discord.Member): "被挑戰者"
+            challenger (discord.abc.User): "挑戰者"
+            jump_url (str): "https://discord.com/channels/..."
+        """
+        description = (
+            f"**{challenger.display_name}** 向你發起了 Juice Battle 挑戰！\n"
+            f"請點擊下方連結回到挑戰訊息，並按下「同意挑戰」。"
+        )
+        if jump_url:
+            description += f"\n\n挑戰訊息：{jump_url}"
+        embed = Embed(title="Juice Battle｜挑戰通知", description=description, color=common.bot_color)
+        try:
+            await opponent.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException):
+            pass
 
     def build_bag_embed(self, juice_battle: dict, page: int, discard_confirm_slot: int | None = None) -> Embed:
         """
@@ -707,9 +788,96 @@ class JuiceBattle(commands.Cog):
             await interaction.response.send_message(embed=embed, view=view)
             message = await interaction.original_response()
             view.message = message
+            jump_url = message.jump_url
+            await self.notify_challenge_dm(opponent, challenger, jump_url)
 
+    @app_commands.command(name="juice_battle_leaderboard", description="Juice Battle 各角色勝率排行榜")
+    async def juice_battle_leaderboard(self, interaction: discord.Interaction):
+        """
+        顯示每個角色勝率前三名，以及自己各角色的勝率與場數。
 
-class JuiceBattleCharacterSelect(discord.ui.Select):
+        Args:
+            interaction (discord.Interaction): "slash 互動"
+        """
+        userid = str(interaction.user.id)
+        async with common.jsonio_lock:
+            user_data = await self.load_user(userid)
+            my_stats = dict(user_data["juice_battle"].get("character_stats") or {})
+            await common.mongo_storage.replace_user(userid, user_data)
+
+            # 收集所有玩家的角色統計
+            collection = common.mongo_storage.get_collection("userdata")
+            per_character_players = {character_id: [] for character_id in self.characters}
+            if collection is not None:
+                async for document in collection.find(
+                    {"juice_battle.character_stats": {"$exists": True}},
+                    {"_id": 1, "juice_battle.character_stats": 1},
+                ):
+                    document_id = document.get("_id")
+                    if not isinstance(document_id, str) or not document_id.isdigit():
+                        continue
+                    stats_map = (document.get("juice_battle") or {}).get("character_stats") or {}
+                    if not isinstance(stats_map, dict):
+                        continue
+                    for character_id, entry in stats_map.items():
+                        if character_id not in self.characters or not isinstance(entry, dict):
+                            continue
+                        round_count = int(entry.get("round", 0))
+                        win_count = int(entry.get("win", 0))
+                        if round_count < self.leaderboard_min_rounds:
+                            continue
+                        per_character_players[character_id].append(
+                            {
+                                "user_id": document_id,
+                                "win": win_count,
+                                "round": round_count,
+                                "win_rate": win_count / round_count,
+                            }
+                        )
+
+        embed = Embed(
+            title="Juice Battle｜勝率排行榜",
+            description=f"各角色勝率前 {self.leaderboard_top_n} 名（至少 {self.leaderboard_min_rounds} 場）。",
+            color=common.bot_color,
+        )
+
+        # 每個角色的前三名
+        for character_id, character in self.characters.items():
+            players = per_character_players.get(character_id) or []
+            players.sort(key=lambda item: (item["win_rate"], item["round"]), reverse=True)
+            top_players = players[: self.leaderboard_top_n]
+            if not top_players:
+                embed.add_field(name=character["name"], value="尚無紀錄", inline=False)
+                continue
+            lines = []
+            for index, player in enumerate(top_players):
+                member = interaction.guild.get_member(int(player["user_id"])) if interaction.guild else None
+                user_object = member or self.bot.get_user(int(player["user_id"]))
+                display_name = user_object.display_name if user_object else player["user_id"]
+                lines.append(
+                    f"{index + 1}. {display_name} 勝率:**{player['win_rate']:.1%}** 場數:**{player['round']}**"
+                )
+            embed.add_field(name=character["name"], value="\n".join(lines), inline=False)
+
+        # 自己各角色勝率
+        my_lines = []
+        for character_id, character in self.characters.items():
+            entry = my_stats.get(character_id)
+            if not isinstance(entry, dict):
+                continue
+            round_count = int(entry.get("round", 0))
+            if round_count <= 0:
+                continue
+            win_count = int(entry.get("win", 0))
+            my_lines.append(
+                f"**{character['name']}** 勝率:**{self.format_win_rate(win_count, round_count)}** 場數:**{round_count}**"
+            )
+        if my_lines:
+            embed.add_field(name="你的各角色戰績", value="\n".join(my_lines), inline=False)
+        else:
+            embed.add_field(name="你的各角色戰績", value="尚無遊玩紀錄", inline=False)
+
+        await interaction.response.send_message(embed=embed)
     """角色選擇下拉選單。"""
 
     def __init__(self, cog: JuiceBattle):
@@ -1465,6 +1633,9 @@ class JuiceBattleView(discord.ui.View):
         elif self.message is not None:
             await self.message.edit(embed=embed, view=None)
         async with common.jsonio_lock:
+            if winner is not None:
+                loser = self.other_fighter(winner["user_id"])
+                await self.cog.record_battle_outcome(winner, loser)
             await self.cog.clear_session(self.fighter_a["user_id"])
             if not self.fighter_b.get("is_bot"):
                 await self.cog.clear_session(self.fighter_b["user_id"])
@@ -1635,6 +1806,7 @@ class JuiceBattleView(discord.ui.View):
             except Exception:
                 pass
         async with common.jsonio_lock:
+            await self.cog.record_battle_outcome(winner, loser)
             await self.cog.clear_session(self.fighter_a["user_id"])
             if not self.fighter_b.get("is_bot"):
                 await self.cog.clear_session(self.fighter_b["user_id"])
