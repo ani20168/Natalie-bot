@@ -1375,10 +1375,6 @@ class JuiceBattle(commands.Cog):
                 status_parts.append(f"中毒剩餘 {fighter['poison_remaining']}")
             if fighter.get("skill_armed") and not stance_active:
                 status_parts.append("技能已發動")
-            if ability and ability.get("cd") is not None and int(fighter.get("skill_cd", 0)) > 0:
-                status_parts.append(f"{ability['name']} CD {fighter['skill_cd']}")
-            elif ability and ability.get("cd") is None and fighter.get("skill_used_once"):
-                status_parts.append(f"{ability['name']} 已使用")
             status_text = f"\n狀態：{'／'.join(status_parts)}" if status_parts else ""
             ability_text = f"\n技能：{ability['name']}" if ability else ""
             embed.add_field(
@@ -3224,9 +3220,17 @@ class JuiceBattleDodgeButton(discord.ui.Button):
 class JuiceBattleSkillButton(discord.ui.Button):
     """角色技能按鈕（綠色，與攻擊／防禦／閃避區隔）。"""
 
-    def __init__(self, *, label: str, armed: bool):
+    def __init__(self, *, label: str, armed: bool, disabled: bool = False):
+        """
+        建立挑戰戰技能按鈕。
+
+        Args:
+            label (str): "技能名稱"
+            armed (bool): "是否已發動"
+            disabled (bool): "是否鎖定（CD／已使用）"
+        """
         display = f"{label}（已發動）" if armed else label
-        super().__init__(label=display, style=discord.ButtonStyle.success)
+        super().__init__(label=display, style=discord.ButtonStyle.success, disabled=disabled)
 
     async def callback(self, interaction: discord.Interaction):
         """
@@ -3364,10 +3368,9 @@ class JuiceBattleView(discord.ui.View):
             if attacker.get("is_bot"):
                 return
             self.add_item(JuiceBattleAttackButton())
-            ability = self.cog.character_ability(attacker["character_id"])
-            if ability and ability.get("phase") == "attack":
-                if attacker.get("skill_armed") or self.cog.skill_is_ready(attacker, "attack"):
-                    self.add_item(JuiceBattleSkillButton(label=ability["name"], armed=bool(attacker.get("skill_armed"))))
+            button = self.build_skill_button(attacker, "attack")
+            if button is not None:
+                self.add_item(button)
             return
         if self.phase == "defend":
             defender = self.fighter_by_id(self.defender_id)
@@ -3376,10 +3379,36 @@ class JuiceBattleView(discord.ui.View):
             self.add_item(JuiceBattleDefendButton())
             if not self.pending_bind:
                 self.add_item(JuiceBattleDodgeButton())
-            ability = self.cog.character_ability(defender["character_id"])
-            if ability and ability.get("phase") == "defend":
-                if defender.get("skill_armed") or self.cog.skill_is_ready(defender, "defend"):
-                    self.add_item(JuiceBattleSkillButton(label=ability["name"], armed=bool(defender.get("skill_armed"))))
+            button = self.build_skill_button(defender, "defend")
+            if button is not None:
+                self.add_item(button)
+
+    def build_skill_button(self, fighter: dict, phase: str):
+        """
+        建立挑戰戰技能按鈕；CD／已使用時停用並把資訊寫在按鈕上。
+
+        Args:
+            fighter (dict): "目前行動的玩家"
+            phase (str): "attack 或 defend"
+
+        Returns:
+            button (JuiceBattleSkillButton | None): "可顯示的技能按鈕"
+        """
+        ability = self.cog.character_ability(fighter["character_id"])
+        if ability is None or ability.get("phase") != phase:
+            return None
+        name = ability["name"]
+        armed = bool(fighter.get("skill_armed"))
+        if armed or self.cog.skill_is_ready(fighter, phase):
+            return JuiceBattleSkillButton(label=name, armed=armed)
+        if ability.get("cd") is None:
+            if not fighter.get("skill_used_once"):
+                return None
+            return JuiceBattleSkillButton(label=f"{name}（已使用）", armed=False, disabled=True)
+        cd_left = int(fighter.get("skill_cd", 0))
+        if cd_left <= 0:
+            return None
+        return JuiceBattleSkillButton(label=f"{name}（CD {cd_left}）", armed=False, disabled=True)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """
@@ -4207,7 +4236,7 @@ class JuiceBattleTowerDodgeButton(discord.ui.Button):
 class JuiceBattleTowerSkillButton(discord.ui.Button):
     """爬塔角色、武器或防具技能按鈕。"""
 
-    def __init__(self, *, source: str, label: str, armed: bool):
+    def __init__(self, *, source: str, label: str, armed: bool, disabled: bool = False):
         """
         建立技能按鈕。
 
@@ -4215,9 +4244,10 @@ class JuiceBattleTowerSkillButton(discord.ui.Button):
             source (str): "技能來源"
             label (str): "按鈕顯示文字"
             armed (bool): "是否已發動"
+            disabled (bool): "是否鎖定（例如 CD 中）"
         """
         display = f"{label}（已發動）" if armed else label
-        super().__init__(label=display, style=discord.ButtonStyle.success)
+        super().__init__(label=display, style=discord.ButtonStyle.success, disabled=disabled)
         self.source = source
 
     async def callback(self, interaction: discord.Interaction):
@@ -4459,15 +4489,9 @@ class JuiceBattleTowerView(discord.ui.View):
                 return
             self.add_item(JuiceBattleTowerAttackButton())
             for source in ("character", "weapon"):
-                ability = self.cog.tower_skill_definition(actor, source)
-                if ability and self.cog.tower_skill_is_ready(actor, source, "attack"):
-                    self.add_item(
-                        JuiceBattleTowerSkillButton(
-                            source=source,
-                            label=f"{'角色' if source == 'character' else '武器'}：{ability['name']}",
-                            armed=actor.get("tower_skill_armed") == source,
-                        )
-                    )
+                button = self.build_skill_button(actor, source, "attack")
+                if button is not None:
+                    self.add_item(button)
         elif self.phase == "player_defend":
             defender = self.fighter_by_id(self.pending_target_id or "")
             if defender is None:
@@ -4479,18 +4503,48 @@ class JuiceBattleTowerView(discord.ui.View):
             if not self.pending_bind and not life_conversion_armed:
                 self.add_item(JuiceBattleTowerDodgeButton())
             for source in ("character", "armor", "weapon"):
-                ability = self.cog.tower_skill_definition(defender, source)
-                if ability and self.cog.tower_skill_is_ready(defender, source, "defend"):
-                    self.add_item(
-                        JuiceBattleTowerSkillButton(
-                            source=source,
-                            label=(
-                                f"{'角色' if source == 'character' else '防具' if source == 'armor' else '武器'}："
-                                f"{ability['name']}"
-                            ),
-                            armed=defender.get("tower_skill_armed") == source,
-                        )
-                    )
+                button = self.build_skill_button(defender, source, "defend")
+                if button is not None:
+                    self.add_item(button)
+
+    def build_skill_button(self, fighter: dict, source: str, phase: str):
+        """
+        建立爬塔技能按鈕；CD／已使用時改為停用顯示，避免按鈕消失。
+
+        Args:
+            fighter (dict): "目前行動的玩家"
+            source (str): "character、weapon 或 armor"
+            phase (str): "attack 或 defend"
+
+        Returns:
+            button (JuiceBattleTowerSkillButton | None): "可顯示的技能按鈕"
+        """
+        ability = self.cog.tower_skill_definition(fighter, source)
+        if ability is None or ability.get("phase") != phase:
+            return None
+        source_label = "角色" if source == "character" else "防具" if source == "armor" else "武器"
+        base_label = f"{source_label}：{ability['name']}"
+        armed = fighter.get("tower_skill_armed") == source
+        if armed or self.cog.tower_skill_is_ready(fighter, source, phase):
+            return JuiceBattleTowerSkillButton(source=source, label=base_label, armed=armed)
+        if ability.get("cd") is None:
+            if not fighter.get(f"{source}_skill_used"):
+                return None
+            return JuiceBattleTowerSkillButton(
+                source=source,
+                label=f"{base_label}（已使用）",
+                armed=False,
+                disabled=True,
+            )
+        cd_left = int(fighter.get(f"{source}_skill_cd", 0))
+        if cd_left <= 0:
+            return None
+        return JuiceBattleTowerSkillButton(
+            source=source,
+            label=f"{base_label}（CD {cd_left}）",
+            armed=False,
+            disabled=True,
+        )
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """
@@ -4898,10 +4952,7 @@ class JuiceBattleTowerView(discord.ui.View):
         if self.monster["hp"] <= 0:
             await self.cog.tower_finish_floor(self, self.log_text)
             return
-        self.phase = "resolving"
-        self.rebuild_buttons()
-        if self.message is not None:
-            await self.message.edit(embed=self.build_embed(), view=self)
+        # 不在此清空按鈕，交給 enter_next_player 刷新下一動作者介面
         await self.enter_next_player()
 
     async def run_monster_turn(self):
