@@ -1504,6 +1504,49 @@ a {
   }
 }
 
+.tower-equipment-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px;
+}
+
+.tower-equipment-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.tower-equipment-option input {
+  margin-top: 3px;
+}
+
+.tower-equipment-option span {
+  display: grid;
+  gap: 4px;
+}
+
+.tower-equipment-option small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.tower-floor-pool {
+  margin-top: 12px;
+  padding: 16px;
+  background: var(--bg-panel-soft);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.tower-floor-pool h4 {
+  margin: 0;
+}
+
 @media (max-width: 800px) {
   .layout-app {
     grid-template-columns: 1fr;

@@ -1,8 +1,11 @@
+import asyncio
+import copy
+import random
+
 from discord import app_commands, Embed
 from discord.ext import commands
 from . import common
 import discord
-import random
 
 
 class JuiceBattle(commands.Cog):
@@ -15,9 +18,13 @@ class JuiceBattle(commands.Cog):
         self.challenge_timeout = 120.0
         self.battle_timeout = 180.0
         self.bag_view_timeout = 180.0
+        self.tower_view_timeout = 300.0
+        self.tower_floor_min = 1
+        self.tower_lock = asyncio.Lock()
         self.default_bet = 0
         self.leaderboard_min_rounds = 1
         self.leaderboard_top_n = 3
+        self.tower_leaderboard_top_n = 10
         self.default_character_id = "ownerless"
         self.starter_weapon_id = "wooden_stick"
         self.starter_armor_id = "leather_armor"
@@ -97,6 +104,94 @@ class JuiceBattle(commands.Cog):
                 "ability": None,
                 "starter": True,
             },
+            "long_sword": {
+                "name": "長劍",
+                "hp_offset": 0,
+                "atk_offset": 1,
+                "def_offset": 1,
+                "agi_offset": 0,
+                "ability": None,
+            },
+            "dagger": {
+                "name": "匕首",
+                "hp_offset": 0,
+                "atk_offset": 1,
+                "def_offset": 0,
+                "agi_offset": 1,
+                "ability": None,
+            },
+            "spear": {
+                "name": "長矛",
+                "hp_offset": 0,
+                "atk_offset": 2,
+                "def_offset": 0,
+                "agi_offset": 0,
+                "ability": None,
+            },
+            "small_shield": {
+                "name": "小圓盾",
+                "hp_offset": 1,
+                "atk_offset": 0,
+                "def_offset": 1,
+                "agi_offset": 0,
+                "ability": {
+                    "id": "shield_counter",
+                    "name": "盾反",
+                    "phase": "defend",
+                    "cd": 1,
+                    "description": "本回合防禦值與敵人攻擊值相同時，暈眩對手一回合。",
+                },
+            },
+            "dual_blades": {
+                "name": "雙刀",
+                "hp_offset": 0,
+                "atk_offset": 2,
+                "def_offset": 0,
+                "agi_offset": 1,
+                "ability": None,
+            },
+            "blue_black_dual_blades": {
+                "name": "藍黑雙刀",
+                "hp_offset": 0,
+                "atk_offset": 2,
+                "def_offset": 0,
+                "agi_offset": 2,
+                "ability": {
+                    "id": "starburst",
+                    "name": "星爆氣流斬",
+                    "phase": "attack",
+                    "cd": 4,
+                    "description": "可進行第二次攻擊，第二次攻擊使用閃避骰；絕地反擊時改為三次攻擊。",
+                },
+            },
+            "intern_magic_wand": {
+                "name": "實習生的魔法杖",
+                "hp_offset": 1,
+                "atk_offset": 1,
+                "def_offset": 0,
+                "agi_offset": 1,
+                "ability": {
+                    "id": "slime",
+                    "name": "黏液",
+                    "phase": "attack",
+                    "cd": 2,
+                    "description": "使對方這回合閃避偏移量 -1。",
+                },
+            },
+            "holy_staff": {
+                "name": "聖杖",
+                "hp_offset": 3,
+                "atk_offset": 0,
+                "def_offset": 0,
+                "agi_offset": 0,
+                "ability": {
+                    "id": "holy_light",
+                    "name": "聖光",
+                    "phase": "attack",
+                    "cd": 4,
+                    "description": "我方所有成員回復 3 HP。",
+                },
+            },
         }
         self.armors = {
             "leather_armor": {
@@ -108,7 +203,391 @@ class JuiceBattle(commands.Cog):
                 "ability": None,
                 "starter": True,
             },
+            "metal_armor": {
+                "name": "金屬盔甲",
+                "hp_offset": 2,
+                "atk_offset": 0,
+                "def_offset": 1,
+                "agi_offset": 0,
+                "ability": None,
+            },
+            "thorn_armor": {
+                "name": "荊棘盔甲",
+                "hp_offset": 1,
+                "atk_offset": 1,
+                "def_offset": 0,
+                "agi_offset": 0,
+                "ability": {
+                    "id": "thorn",
+                    "name": "反傷",
+                    "phase": "defend",
+                    "cd": 3,
+                    "description": "本回合受到傷害時，對攻擊者造成所受傷害的 50%。",
+                },
+            },
+            "diamond_armor": {
+                "name": "金剛盔甲",
+                "hp_offset": 1,
+                "atk_offset": 0,
+                "def_offset": 3,
+                "agi_offset": 0,
+                "ability": None,
+            },
+            "cleric_robe": {
+                "name": "聖職者長袍",
+                "hp_offset": 4,
+                "atk_offset": 0,
+                "def_offset": 0,
+                "agi_offset": 0,
+                "ability": {
+                    "id": "life_conversion",
+                    "name": "生命轉換",
+                    "phase": "defend",
+                    "cd": 6,
+                    "description": "本回合只能防禦，承受對方全部攻擊傷害後回復防禦值 HP。",
+                },
+            },
+            "absorption_vest": {
+                "name": "吸收背心",
+                "hp_offset": 2,
+                "atk_offset": 0,
+                "def_offset": -1,
+                "agi_offset": 1,
+                "ability": {
+                    "id": "absorption",
+                    "name": "吸收",
+                    "phase": "passive",
+                    "cd": None,
+                    "description": "受到 1 點傷害的攻擊或狀態傷害無效化。",
+                },
+            },
+            "berserker_armor": {
+                "name": "狂戰鎧甲",
+                "hp_offset": -2,
+                "atk_offset": 1,
+                "def_offset": 0,
+                "agi_offset": 1,
+                "ability": {
+                    "id": "berserk",
+                    "name": "暴走",
+                    "phase": "passive",
+                    "cd": None,
+                    "description": "承受 5 次傷害後，本場戰鬥攻擊偏移量 +3。",
+                },
+            },
+            "ghost_robe": {
+                "name": "幽魂長袍",
+                "hp_offset": 1,
+                "atk_offset": 0,
+                "def_offset": 0,
+                "agi_offset": 3,
+                "ability": {
+                    "id": "ghost",
+                    "name": "幽靈化",
+                    "phase": "defend",
+                    "cd": 6,
+                    "description": "本回合傷害無效化。",
+                },
+            },
+            "berserker_vest": {
+                "name": "狂戰背心",
+                "hp_offset": -4,
+                "atk_offset": 1,
+                "def_offset": 0,
+                "agi_offset": 3,
+                "ability": {
+                    "id": "desperate_counter",
+                    "name": "絕地反擊",
+                    "phase": "passive",
+                    "cd": None,
+                    "description": "生命值為 1 或 2 時，攻擊階段可進行兩次攻擊。",
+                },
+            },
         }
+        self.tower_small_monsters = [
+            {"id": "goblin", "name": "哥布林", "ability": None},
+            {"id": "slime", "name": "史萊姆", "ability": None},
+            {
+                "id": "sticky_slime",
+                "name": "黏液史萊姆",
+                "ability": {
+                    "id": "sticky",
+                    "name": "黏呼呼",
+                    "description": "攻擊造成傷害時，使對方閃避偏移量 -1，持續一回合。",
+                },
+            },
+            {
+                "id": "poison_bubble_bug",
+                "name": "毒泡蟲",
+                "ability": {
+                    "id": "poison_immunity",
+                    "name": "中毒免疫",
+                    "description": "免疫中毒。",
+                },
+            },
+            {"id": "bat", "name": "蝙蝠", "ability": None},
+            {
+                "id": "mushroom",
+                "name": "蘑菇",
+                "ability": {
+                    "id": "growth",
+                    "name": "增值",
+                    "description": "回合開始時回復 1 HP。",
+                },
+            },
+            {"id": "spark", "name": "火花精", "ability": None},
+            {"id": "fat_rat", "name": "肥滋滋老鼠", "ability": None},
+        ]
+        self.tower_boss_monsters = [
+            {
+                "id": "hell_wraith",
+                "name": "地獄厲鬼",
+                "ability": {
+                    "id": "hellfire",
+                    "name": "地獄的業火",
+                    "description": "每次攻擊後攻擊偏移量 +1；自身受到傷害時歸零。",
+                },
+            },
+            {
+                "id": "abyss_jellyfish",
+                "name": "深淵水母",
+                "ability": {
+                    "id": "bind",
+                    "name": "束縛",
+                    "phase": "attack",
+                    "cd": 3,
+                    "description": "此次攻擊對手無法選擇閃避。",
+                },
+            },
+            {
+                "id": "lava_beetle",
+                "name": "熔岩甲蟲",
+                "ability": {
+                    "id": "hardened_shell",
+                    "name": "硬化甲殼",
+                    "phase": "defend",
+                    "cd": 1,
+                    "description": "防禦後，若傷害為 3 以下則傷害無效化。",
+                },
+            },
+            {
+                "id": "meg",
+                "name": "梅格",
+                "ability": {
+                    "id": "sprint",
+                    "name": "大跑",
+                    "phase": "defend",
+                    "cd": 3,
+                    "description": "本回合只能閃避，閃避偏移值變為 2 倍。",
+                },
+            },
+            {
+                "id": "old_jin",
+                "name": "老金",
+                "ability": {
+                    "id": "referee",
+                    "name": "裁判",
+                    "description": "所有擲骰動作擲 2d6，取較大點數。",
+                },
+            },
+            {
+                "id": "jungle_hunter",
+                "name": "叢林獵人",
+                "ability": {
+                    "id": "trap",
+                    "name": "捕獸夾",
+                    "description": "對方防禦或閃避骰點為 1 時，暈眩對方一回合並吃滿傷害。",
+                },
+            },
+        ]
+
+    def equipment_catalog(self) -> list[dict]:
+        """
+        回傳後台與掉落設定使用的完整裝備清單。
+
+        Returns:
+            items (list[dict]): "每個項目包含 item_id、kind、name 與能力資料"
+        """
+        items = []
+        for kind, collection in (("weapon", self.weapons), ("armor", self.armors)):
+            for item_id, template in collection.items():
+                ability = template.get("ability")
+                items.append(
+                    {
+                        "item_id": item_id,
+                        "kind": kind,
+                        "name": template["name"],
+                        "hp_offset": template["hp_offset"],
+                        "atk_offset": template["atk_offset"],
+                        "def_offset": template["def_offset"],
+                        "agi_offset": template["agi_offset"],
+                        "ability": copy.deepcopy(ability) if isinstance(ability, dict) else None,
+                        "starter": bool(template.get("starter")),
+                    }
+                )
+        return items
+
+    def tower_monster_template(self, monster_id: str, *, boss: bool) -> dict | None:
+        """
+        依 ID 取得爬塔怪物定義。
+
+        Args:
+            monster_id (str): "goblin"
+            boss (bool): "是否從特殊怪物池查找"
+
+        Returns:
+            monster (dict | None): "怪物名稱與技能定義"
+        """
+        monsters = self.tower_boss_monsters if boss else self.tower_small_monsters
+        for monster in monsters:
+            if monster["id"] == monster_id:
+                return monster
+        return None
+
+    def build_tower_monster(self, floor: int) -> dict:
+        """
+        依樓層隨機建立一隻爬塔怪物。
+
+        Args:
+            floor (int): "目前樓層，例如 5"
+
+        Returns:
+            monster (dict): "包含名稱、四項數值與戰鬥狀態"
+        """
+        is_boss = floor % 5 == 0
+        monster_pool = self.tower_boss_monsters if is_boss else self.tower_small_monsters
+        template = random.choice(monster_pool)
+        bonus_points = max(0, floor - 1)
+        stats = [10, 0, 0, 0]
+        for _ in range(bonus_points):
+            stats[random.randrange(4)] += 1
+        ability = copy.deepcopy(template.get("ability"))
+        return {
+            "id": template["id"],
+            "name": template["name"],
+            "floor": floor,
+            "hp": stats[0],
+            "max_hp": stats[0],
+            "atk": stats[1],
+            "defense": stats[2],
+            "agi": stats[3],
+            "ability": ability,
+            "is_boss": is_boss,
+            "attack_offset": 0,
+            "skill_cd": 0,
+            "skill_used_once": False,
+            "stun_remaining": 0,
+            "poison_remaining": 0,
+            "dodge_offset": 0,
+            "two_dice": template["id"] == "old_jin",
+            "hardening_armed": False,
+        }
+
+    def tower_roll(self, fighter: dict, base: int, offset: int = 0, *, offset_multiplier: int = 1) -> tuple[int, int, str]:
+        """
+        執行爬塔用擲骰，老金會擲兩顆並取較大值。
+
+        Args:
+            fighter (dict): "玩家或怪物戰鬥狀態"
+            base (int): "角色素質"
+            offset (int): "裝備或技能偏移"
+            offset_multiplier (int): "偏移倍率，例如梅格為 2"
+
+        Returns:
+            result (tuple[int, int, str]): "(採用骰點、總值、骰點說明)"
+        """
+        dice_one = random.randint(1, 6)
+        if fighter.get("two_dice"):
+            dice_two = random.randint(1, 6)
+            dice = max(dice_one, dice_two)
+            dice_text = f"2d6={dice_one}/{dice_two}→{dice}"
+        else:
+            dice = dice_one
+            dice_text = f"1d6={dice}"
+        total = dice + base + (offset * offset_multiplier)
+        return dice, total, dice_text
+
+    def tower_skill_definition(self, fighter: dict, source: str) -> dict | None:
+        """
+        取得爬塔角色、武器或防具技能定義。
+
+        Args:
+            fighter (dict): "玩家戰鬥狀態"
+            source (str): "character、weapon 或 armor"
+
+        Returns:
+            ability (dict | None): "技能資料"
+        """
+        if source == "character":
+            ability = self.character_ability(fighter.get("character_id"))
+        else:
+            ability = fighter.get(f"{source}_ability")
+        return ability if isinstance(ability, dict) else None
+
+    def tower_skill_is_ready(self, fighter: dict, source: str, phase: str) -> bool:
+        """
+        判斷爬塔裝備或角色技能是否可發動。
+
+        Args:
+            fighter (dict): "玩家戰鬥狀態"
+            source (str): "character、weapon 或 armor"
+            phase (str): "attack 或 defend"
+
+        Returns:
+            ready (bool): "技能是否可用"
+        """
+        ability = self.tower_skill_definition(fighter, source)
+        if ability is None or ability.get("phase") != phase:
+            return False
+        if ability.get("cd") is None:
+            return not fighter.get(f"{source}_skill_used", False)
+        return int(fighter.get(f"{source}_skill_cd", 0)) <= 0
+
+    def tower_consume_skill(self, fighter: dict, source: str) -> dict | None:
+        """
+        消耗一個爬塔技能並寫入 CD 或一次性使用狀態。
+
+        Args:
+            fighter (dict): "玩家戰鬥狀態"
+            source (str): "character、weapon 或 armor"
+
+        Returns:
+            ability (dict | None): "消耗的技能資料"
+        """
+        ability = self.tower_skill_definition(fighter, source)
+        if ability is None:
+            return None
+        if ability.get("cd") is None:
+            fighter[f"{source}_skill_used"] = True
+        else:
+            fighter[f"{source}_skill_cd"] = int(ability["cd"])
+        return ability
+
+    def tower_prepare_skill_cooldowns(self, fighter: dict, phase: str):
+        """
+        在爬塔回合開始時遞減該角色指定階段的技能 CD。
+
+        Args:
+            fighter (dict): "玩家或怪物戰鬥狀態"
+            phase (str): "attack 或 defend"
+        """
+        sources = ("character", "weapon") if phase == "attack" else ("character", "armor", "weapon")
+        for source in sources:
+            ability = self.tower_skill_definition(fighter, source)
+            if ability and ability.get("phase") == phase:
+                key = f"{source}_skill_cd"
+                if int(fighter.get(key, 0)) > 0:
+                    fighter[key] = int(fighter[key]) - 1
+
+    def tower_add_hp(self, fighter: dict, amount: int):
+        """
+        讓爬塔戰鬥角色回復生命並限制在生命上限內。
+
+        Args:
+            fighter (dict): "玩家或怪物戰鬥狀態"
+            amount (int): "回復量"
+        """
+        fighter["hp"] = min(fighter["max_hp"], max(0, int(fighter.get("hp", 0)) + amount))
 
     async def cog_load(self):
         """
@@ -165,6 +644,8 @@ class JuiceBattle(commands.Cog):
             "equipped_armor_slot": 1,
             "playing": False,
             "character_stats": {},
+            "tower_progress": None,
+            "tower_records": [],
         }
 
     def ensure_juice_battle(self, user_data: dict) -> dict:
@@ -200,6 +681,10 @@ class JuiceBattle(commands.Cog):
             juice_battle["playing"] = False
         if not isinstance(juice_battle.get("character_stats"), dict):
             juice_battle["character_stats"] = {}
+        if juice_battle.get("tower_progress") is not None and not isinstance(juice_battle.get("tower_progress"), dict):
+            juice_battle["tower_progress"] = None
+        if not isinstance(juice_battle.get("tower_records"), list):
+            juice_battle["tower_records"] = []
         user_data["juice_battle"] = juice_battle
         return juice_battle
 
@@ -323,6 +808,29 @@ class JuiceBattle(commands.Cog):
         else:
             offsets = self.offsets_from_juice(juice_battle)
         max_hp = character["hp"] + offsets["hp_offset"]
+        weapon_id = None
+        armor_id = None
+        weapon_ability = None
+        armor_ability = None
+        if juice_battle is not None:
+            bag = juice_battle.get("bag") or []
+            weapon_slot = juice_battle.get("equipped_weapon_slot")
+            armor_slot = juice_battle.get("equipped_armor_slot")
+            for slot, kind in ((weapon_slot, "weapon"), (armor_slot, "armor")):
+                if not isinstance(slot, int) or slot < 0 or slot >= len(bag):
+                    continue
+                entry = bag[slot]
+                if not isinstance(entry, dict):
+                    continue
+                template = self.item_template(kind, entry.get("item_id"))
+                if template is None:
+                    continue
+                if kind == "weapon":
+                    weapon_id = entry.get("item_id")
+                    weapon_ability = copy.deepcopy(template.get("ability"))
+                else:
+                    armor_id = entry.get("item_id")
+                    armor_ability = copy.deepcopy(template.get("ability"))
         return {
             "user_id": str(user_id),
             "display_name": display_name,
@@ -343,6 +851,22 @@ class JuiceBattle(commands.Cog):
             "skill_armed": False,
             "stance_swap_attack": False,
             "poison_remaining": 0,
+            "weapon_id": weapon_id,
+            "armor_id": armor_id,
+            "weapon_ability": weapon_ability,
+            "armor_ability": armor_ability,
+            "character_skill_cd": 0,
+            "weapon_skill_cd": 0,
+            "armor_skill_cd": 0,
+            "character_skill_used": False,
+            "weapon_skill_used": False,
+            "armor_skill_used": False,
+            "tower_skill_armed": None,
+            "damage_taken_count": 0,
+            "berserk_triggered": False,
+            "stun_remaining": 0,
+            "dodge_offset": 0,
+            "hellfire_offset": 0,
         }
 
     def character_ability(self, character_id: str) -> dict | None:
@@ -633,6 +1157,9 @@ class JuiceBattle(commands.Cog):
                 f"生命偏移 {template['hp_offset']:+d}｜攻擊 {template['atk_offset']:+d}｜"
                 f"防禦 {template['def_offset']:+d}｜敏捷 {template['agi_offset']:+d}"
             )
+            ability = template.get("ability")
+            if isinstance(ability, dict):
+                value += f"\n能力：{ability.get('name', '無')}｜{ability.get('description', '')}"
             embed.add_field(name=f"[{slot_label}] {template['name']}", value=value, inline=False)
         if discard_confirm_slot is not None:
             entry = bag[discard_confirm_slot] if 0 <= discard_confirm_slot < len(bag) else None
@@ -946,10 +1473,574 @@ class JuiceBattle(commands.Cog):
             jump_url = message.jump_url
             await self.notify_challenge_dm(opponent, challenger, jump_url)
 
-    @app_commands.command(name="juice_battle_leaderboard", description="Juice Battle 各角色勝率排行榜")
+    def tower_default_progress(self, member_ids: list[str]) -> dict:
+        """
+        建立一份新的爬塔進度。
+
+        Args:
+            member_ids (list[str]): "隊伍成員 ID，單人時只有一個"
+
+        Returns:
+            progress (dict): "可寫入玩家資料的爬塔快照"
+        """
+        floor = self.tower_floor_min
+        return {
+            "member_ids": [str(member_id) for member_id in member_ids],
+            "member_names": {},
+            "floor": floor,
+            "cleared_floor": 0,
+            "pending_cake": 0,
+            "pending_equipment": [],
+            "member_hp": {},
+            "dead_ids": [],
+            "monster": self.build_tower_monster(floor),
+        }
+
+    async def tower_load_shared_progress(self, member_ids: list[str]) -> dict | None:
+        """
+        從任一隊員資料載入同一組隊伍的爬塔進度。
+
+        Args:
+            member_ids (list[str]): "預期的隊伍成員 ID"
+
+        Returns:
+            progress (dict | None): "找到且成員相同的爬塔進度"
+        """
+        expected_ids = {str(member_id) for member_id in member_ids}
+        for member_id in member_ids:
+            user_data = await self.load_user(str(member_id))
+            progress = user_data["juice_battle"].get("tower_progress")
+            if not isinstance(progress, dict):
+                continue
+            stored_ids = {str(value) for value in progress.get("member_ids") or []}
+            if stored_ids == expected_ids:
+                return copy.deepcopy(progress)
+        return None
+
+    async def tower_find_progress_for_user(self, userid: str) -> dict | None:
+        """
+        讀取玩家目前的未完成爬塔進度。
+
+        Args:
+            userid (str): "410847926236086272"
+
+        Returns:
+            progress (dict | None): "玩家保存的爬塔進度"
+        """
+        user_data = await self.load_user(userid)
+        progress = user_data["juice_battle"].get("tower_progress")
+        return copy.deepcopy(progress) if isinstance(progress, dict) else None
+
+    async def tower_save_progress(self, progress: dict):
+        """
+        將同一份爬塔進度同步寫入所有隊員。
+
+        Args:
+            progress (dict): "要保存的爬塔快照"
+        """
+        member_ids = [str(member_id) for member_id in progress.get("member_ids") or []]
+        for member_id in member_ids:
+            user_data = await self.load_user(member_id)
+            user_data["juice_battle"]["tower_progress"] = copy.deepcopy(progress)
+            await common.mongo_storage.replace_user(member_id, user_data)
+
+    async def tower_set_playing(self, member_ids: list[str], session: dict):
+        """
+        標記爬塔隊伍正在進行中。
+
+        Args:
+            member_ids (list[str]): "隊伍成員 ID"
+            session (dict): "爬塔訊息 session"
+        """
+        for member_id in member_ids:
+            await self.set_playing_session(str(member_id), copy.deepcopy(session))
+
+    async def tower_clear_progress(self, member_ids: list[str]):
+        """
+        清除隊伍爬塔進度、暫存獎勵與進行中鎖定。
+
+        Args:
+            member_ids (list[str]): "隊伍成員 ID"
+        """
+        for member_id in member_ids:
+            user_data = await self.load_user(str(member_id))
+            juice_battle = user_data["juice_battle"]
+            juice_battle["playing"] = False
+            juice_battle.pop("session", None)
+            juice_battle["tower_progress"] = None
+            await common.mongo_storage.replace_user(str(member_id), user_data)
+
+    async def tower_pick_equipment(self, floor: int) -> str | None:
+        """
+        依後台設定抽取指定樓層的裝備。
+
+        Args:
+            floor (int): "剛通關的樓層"
+
+        Returns:
+            item_id (str | None): "抽到的裝備 ID，沒有設定時為 None"
+        """
+        collection = common.mongo_storage.get_collection("juice_battle_tower")
+        document = await collection.find_one({"_id": "settings"})
+        pools = document.get("drop_pools") if isinstance(document, dict) else {}
+        if not isinstance(pools, dict):
+            return None
+        floor_key = str(floor)
+        selected = pools.get(floor_key) if floor_key in pools else pools.get("default")
+        if not isinstance(selected, list):
+            return None
+        valid_ids = {
+            item["item_id"]
+            for item in self.equipment_catalog()
+            if item["item_id"] in selected
+        }
+        choices = [item_id for item_id in selected if item_id in valid_ids]
+        return random.choice(choices) if choices else None
+
+    def normalize_tower_drop_pools(self, raw) -> dict:
+        """
+        正規化爬塔通用與指定樓層掉落池。
+
+        Args:
+            raw: "後台送出的 {'default': [...], '5': [...]}"
+
+        Returns:
+            pools (dict): "只包含合法裝備 ID 與正的 5 倍數樓層"
+        """
+        source = raw if isinstance(raw, dict) else {}
+        valid_ids = {item["item_id"] for item in self.equipment_catalog()}
+        pools = {}
+        for key, values in source.items():
+            key_text = str(key)
+            if key_text != "default":
+                try:
+                    floor = int(key_text)
+                except (TypeError, ValueError):
+                    continue
+                if floor < 5 or floor % 5 != 0:
+                    continue
+                key_text = str(floor)
+            if not isinstance(values, list):
+                continue
+            pools[key_text] = list(dict.fromkeys(str(item_id) for item_id in values if str(item_id) in valid_ids))
+        pools.setdefault("default", [])
+        return pools
+
+    async def tower_admin_payload(self) -> dict:
+        """
+        建立爬塔後台頁面資料。
+
+        Returns:
+            payload (dict): "裝備清單與目前掉落池"
+        """
+        collection = common.mongo_storage.get_collection("juice_battle_tower")
+        document = await collection.find_one({"_id": "settings"})
+        raw_pools = document.get("drop_pools") if isinstance(document, dict) else {}
+        return {
+            "ok": True,
+            "equipment": self.equipment_catalog(),
+            "drop_pools": self.normalize_tower_drop_pools(raw_pools),
+        }
+
+    async def save_tower_settings(self, raw_pools) -> dict:
+        """
+        驗證並保存爬塔裝備掉落設定。
+
+        Args:
+            raw_pools: "後台送出的掉落池字典"
+
+        Returns:
+            payload (dict): "保存後的設定與裝備清單"
+        """
+        pools = self.normalize_tower_drop_pools(raw_pools)
+        collection = common.mongo_storage.get_collection("juice_battle_tower")
+        await collection.replace_one({"_id": "settings"}, {"_id": "settings", "drop_pools": pools}, upsert=True)
+        payload = await self.tower_admin_payload()
+        payload["message"] = "已儲存爬塔裝備掉落設定。"
+        return payload
+
+    def tower_build_party(self, progress: dict, user_data_map: dict[str, dict]) -> list[dict]:
+        """
+        依爬塔進度建立本層玩家戰鬥狀態。
+
+        Args:
+            progress (dict): "目前爬塔快照"
+            user_data_map (dict[str, dict]): "隊員 ID 對應使用者資料"
+
+        Returns:
+            fighters (list[dict]): "玩家戰鬥角色清單"
+        """
+        fighters = []
+        member_ids = [str(member_id) for member_id in progress.get("member_ids") or []]
+        saved_hp = progress.get("member_hp") if isinstance(progress.get("member_hp"), dict) else {}
+        dead_ids = {str(member_id) for member_id in progress.get("dead_ids") or []}
+        member_names = progress.setdefault("member_names", {})
+        for member_id in member_ids:
+            user_data = user_data_map[member_id]
+            juice_battle = user_data["juice_battle"]
+            display_name = str(member_names.get(member_id) or member_id)
+            fighter = self.build_fighter(
+                user_id=member_id,
+                display_name=display_name,
+                character_id=juice_battle["character_id"],
+                juice_battle=juice_battle,
+                is_bot=False,
+            )
+            if member_id in saved_hp:
+                fighter["hp"] = min(fighter["max_hp"], max(0, int(saved_hp[member_id])))
+            if member_id in dead_ids:
+                fighter["hp"] = min(fighter["max_hp"], 3)
+            fighters.append(fighter)
+        return fighters
+
+    def tower_floor_embed(self, progress: dict, *, log_text: str = "") -> Embed:
+        """
+        建立爬塔樓層入口或通關後的資訊 embed。
+
+        Args:
+            progress (dict): "目前爬塔快照"
+            log_text (str): "可選的上一場結果說明"
+
+        Returns:
+            embed (Embed): "樓層資訊"
+        """
+        monster = progress.get("monster") or {}
+        floor = int(progress.get("floor", self.tower_floor_min))
+        ability = monster.get("ability") if isinstance(monster.get("ability"), dict) else None
+        description = f"目前第 **{floor} 層**，遇到 **{monster.get('name', '未知怪物')}**。"
+        if floor == self.tower_floor_min:
+            description += "\n這是第一層，不能逃跑。"
+        else:
+            description += "\n可以挑戰怪物，或帶著目前累積的戰利品逃跑。"
+        if log_text:
+            description += f"\n\n{log_text}"
+        embed = Embed(title="Juice Battle｜爬塔", description=description, color=common.bot_color)
+        embed.add_field(
+            name="怪物資訊",
+            value=(
+                f"生命 **{monster.get('hp', 0)}/{monster.get('max_hp', 0)}**\n"
+                f"攻擊 {monster.get('atk', 0)}｜防禦 {monster.get('defense', 0)}｜敏捷 {monster.get('agi', 0)}"
+            ),
+            inline=False,
+        )
+        if ability:
+            embed.add_field(
+                name=f"技能：{ability.get('name', '被動')}",
+                value=str(ability.get("description") or "—"),
+                inline=False,
+            )
+        pending_equipment = progress.get("pending_equipment") or []
+        pending_names = []
+        for item_id in pending_equipment:
+            template = self.item_template("weapon", item_id) or self.item_template("armor", item_id)
+            pending_names.append(template["name"] if template else str(item_id))
+        pending_text = "、".join(pending_names)
+        embed.add_field(
+            name="本次暫存戰利品",
+            value=f"蛋糕：**{int(progress.get('pending_cake', 0))}** {common.cake_emoji}\n裝備：{pending_text or '無'}",
+            inline=False,
+        )
+        return embed
+
+    def tower_party_names(self, progress: dict) -> list[str]:
+        """
+        取得排行榜與獎勵訊息使用的隊伍名稱。
+
+        Args:
+            progress (dict): "爬塔快照"
+
+        Returns:
+            names (list[str]): "隊員顯示名稱"
+        """
+        member_names = progress.get("member_names") if isinstance(progress.get("member_names"), dict) else {}
+        return [
+            str(member_names.get(str(member_id)) or member_id)
+            for member_id in progress.get("member_ids") or []
+        ]
+
+    async def tower_record_success(self, progress: dict):
+        """
+        為成功逃跑的單人或雙人爬塔寫入最高紀錄。
+
+        Args:
+            progress (dict): "已成功結算的爬塔快照"
+        """
+        member_ids = sorted(str(member_id) for member_id in progress.get("member_ids") or [])
+        record = {
+            "mode": "solo" if len(member_ids) == 1 else "party",
+            "member_ids": member_ids,
+            "floor": int(progress.get("cleared_floor", 0)),
+        }
+        for member_id in member_ids:
+            user_data = await self.load_user(member_id)
+            records = user_data["juice_battle"].get("tower_records")
+            if not isinstance(records, list):
+                records = []
+            replaced = False
+            for old_record in records:
+                old_ids = sorted(str(value) for value in old_record.get("member_ids") or []) if isinstance(old_record, dict) else []
+                if old_ids != member_ids:
+                    continue
+                old_record["floor"] = max(int(old_record.get("floor", 0)), record["floor"])
+                replaced = True
+                break
+            if not replaced:
+                records.append(copy.deepcopy(record))
+            user_data["juice_battle"]["tower_records"] = records
+            await common.mongo_storage.replace_user(member_id, user_data)
+
+    async def tower_grant_rewards(self, progress: dict, recipient_ids: list[str]):
+        """
+        將爬塔暫存獎勵發給隊員並寫入成功紀錄。
+
+        Args:
+            progress (dict): "成功逃跑的爬塔快照"
+            recipient_ids (list[str]): "每件裝備的指定領取者 ID"
+        """
+        member_ids = [str(member_id) for member_id in progress.get("member_ids") or []]
+        user_data_map = {}
+        for member_id in member_ids:
+            user_data_map[member_id] = await self.load_user(member_id)
+            user_data_map[member_id]["cake"] = int(user_data_map[member_id].get("cake", 0)) + int(progress.get("pending_cake", 0))
+        pending_equipment = [str(item_id) for item_id in progress.get("pending_equipment") or []]
+        for item_id, recipient_id in zip(pending_equipment, recipient_ids):
+            target_id = str(recipient_id)
+            if target_id not in user_data_map:
+                target_id = member_ids[0]
+            target_order = [target_id] + [member_id for member_id in member_ids if member_id != target_id]
+            selected_target = None
+            selected_slot = None
+            for candidate_id in target_order:
+                candidate_bag = user_data_map[candidate_id]["juice_battle"]["bag"]
+                candidate_slot = next((index for index, entry in enumerate(candidate_bag) if entry is None), None)
+                if candidate_slot is not None:
+                    selected_target = candidate_id
+                    selected_slot = candidate_slot
+                    break
+            if selected_target is None:
+                continue
+            bag = user_data_map[selected_target]["juice_battle"]["bag"]
+            if selected_slot is not None:
+                kind = "weapon" if item_id in self.weapons else "armor"
+                bag[selected_slot] = {"item_id": item_id, "kind": kind}
+        for member_id, user_data in user_data_map.items():
+            juice_battle = user_data["juice_battle"]
+            juice_battle["playing"] = False
+            juice_battle.pop("session", None)
+            juice_battle["tower_progress"] = None
+            await common.mongo_storage.replace_user(member_id, user_data)
+        await self.tower_record_success(progress)
+
+    async def tower_finish_defeat(self, view: "JuiceBattleTowerView", reason: str):
+        """
+        清除全員死亡或戰鬥逾時的爬塔進度。
+
+        Args:
+            view (JuiceBattleTowerView): "結束中的爬塔戰鬥 View"
+            reason (str): "顯示給玩家的失敗原因"
+        """
+        if view.finished:
+            return
+        view.finished = True
+        view.rebuild_buttons()
+        if view.message is not None:
+            await view.message.edit(
+                embed=Embed(
+                    title="Juice Battle｜爬塔失敗",
+                    description=f"{reason}\n本次爬塔的蛋糕、裝備與進度全部消失。",
+                    color=common.bot_error_color,
+                ),
+                view=None,
+            )
+        await self.tower_clear_progress(view.member_ids)
+        view.stop()
+
+    async def tower_finish_floor(self, view: "JuiceBattleTowerView", log_text: str):
+        """
+        結算一層爬塔戰鬥並顯示下一層入口。
+
+        Args:
+            view (JuiceBattleTowerView): "已擊敗怪物的爬塔戰鬥 View"
+            log_text (str): "本層戰鬥紀錄"
+        """
+        if view.finished:
+            return
+        view.finished = True
+        progress = copy.deepcopy(view.progress)
+        floor = int(progress.get("floor", self.tower_floor_min))
+        progress["cleared_floor"] = floor
+        progress["pending_cake"] = int(progress.get("pending_cake", 0)) + int(round(800 * floor * random.uniform(0.9, 1.1)))
+        if floor % 5 == 0:
+            item_id = await self.tower_pick_equipment(floor)
+            if item_id:
+                progress.setdefault("pending_equipment", []).append(item_id)
+        progress["member_hp"] = {fighter["user_id"]: max(0, int(fighter["hp"])) for fighter in view.fighters}
+        progress["dead_ids"] = [fighter["user_id"] for fighter in view.fighters if fighter["hp"] <= 0]
+        progress["floor"] = floor + 1
+        progress["monster"] = self.build_tower_monster(floor + 1)
+        await self.tower_save_progress(progress)
+        view.stop()
+        next_view = JuiceBattleTowerFloorView(cog=self, progress=progress)
+        next_view.message = view.message
+        await view.message.edit(embed=self.tower_floor_embed(progress, log_text=log_text), view=next_view)
+
+    async def tower_start_battle(self, interaction: discord.Interaction, progress: dict):
+        """
+        從樓層入口建立爬塔戰鬥 View。
+
+        Args:
+            interaction (discord.Interaction): "樓層按鈕互動"
+            progress (dict): "目前爬塔快照"
+        """
+        user_data_map = {}
+        for member_id in progress.get("member_ids") or []:
+            user_data_map[str(member_id)] = await self.load_user(str(member_id))
+        fighters = self.tower_build_party(progress, user_data_map)
+        monster = copy.deepcopy(progress.get("monster") or self.build_tower_monster(int(progress["floor"])))
+        view = JuiceBattleTowerView(
+            cog=self,
+            progress=progress,
+            fighters=fighters,
+            monster=monster,
+        )
+        view.message = interaction.message
+        await interaction.response.edit_message(embed=view.build_embed(), view=view)
+        await view.begin()
+
+    async def tower_escape(self, interaction: discord.Interaction, progress: dict):
+        """
+        處理玩家在樓層入口按下逃跑。
+
+        Args:
+            interaction (discord.Interaction): "逃跑按鈕互動"
+            progress (dict): "目前爬塔快照"
+        """
+        pending_equipment = [str(item_id) for item_id in progress.get("pending_equipment") or []]
+        member_ids = [str(member_id) for member_id in progress.get("member_ids") or []]
+        if len(member_ids) == 1:
+            await self.tower_grant_rewards(progress, [member_ids[0]] * len(pending_equipment))
+            await interaction.response.edit_message(
+                embed=Embed(
+                    title="Juice Battle｜爬塔結算",
+                    description=(
+                        f"已逃跑並取得 **{int(progress.get('pending_cake', 0))}** {common.cake_emoji}。\n"
+                        f"最高通關：第 **{int(progress.get('cleared_floor', 0))}** 層。"
+                    ),
+                    color=common.bot_color,
+                ),
+                view=None,
+            )
+            return
+        view = JuiceBattleTowerRewardView(cog=self, progress=progress, pending_index=0, recipients=[])
+        view.message = interaction.message
+        await interaction.response.edit_message(embed=view.build_embed(), view=view)
+
+    @app_commands.command(name="juice_battle_tower", description="挑戰 Juice Battle 爬塔")
+    @app_commands.describe(teammate="可選隊友，不能是機器人")
+    @app_commands.rename(teammate="隊友")
+    async def juice_battle_tower(self, interaction: discord.Interaction, teammate: discord.Member | None = None):
+        """
+        開始或繼續單人／雙人 Juice Battle 爬塔。
+
+        Args:
+            interaction (discord.Interaction): "slash 互動"
+            teammate (discord.Member | None): "可選的隊友"
+        """
+        userid = str(interaction.user.id)
+        if teammate is not None and (teammate.bot or str(teammate.id) == userid):
+            await interaction.response.send_message(
+                embed=Embed(title="Juice Battle｜爬塔", description="隊友不能是自己或機器人。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        async with self.tower_lock:
+            own_data = await self.load_user(userid)
+            own_juice = own_data["juice_battle"]
+            own_progress = own_juice.get("tower_progress")
+            if own_juice.get("playing"):
+                await interaction.response.send_message(
+                    embed=Embed(
+                        title="Juice Battle｜爬塔",
+                        description=self.playing_block_description(own_juice),
+                        color=common.bot_error_color,
+                    ),
+                    ephemeral=True,
+                )
+                return
+            if isinstance(own_progress, dict):
+                stored_ids = [str(member_id) for member_id in own_progress.get("member_ids") or []]
+                if teammate is None:
+                    if len(stored_ids) > 1 and userid in stored_ids:
+                        teammate = interaction.guild.get_member(
+                            int(next(member_id for member_id in stored_ids if member_id != userid))
+                        ) if interaction.guild else None
+                    member_ids = stored_ids
+                else:
+                    member_ids = [userid, str(teammate.id)]
+                    if set(member_ids) != set(stored_ids):
+                        await interaction.response.send_message(
+                            embed=Embed(title="Juice Battle｜爬塔", description="你目前的進度屬於另一組隊伍。", color=common.bot_error_color),
+                            ephemeral=True,
+                        )
+                        return
+                progress = copy.deepcopy(own_progress)
+            else:
+                member_ids = [userid] if teammate is None else [userid, str(teammate.id)]
+                requested_ids = {str(member_id) for member_id in member_ids}
+                for member_id in member_ids:
+                    member_data = await self.load_user(str(member_id))
+                    existing_progress = member_data["juice_battle"].get("tower_progress")
+                    if not isinstance(existing_progress, dict):
+                        continue
+                    existing_ids = {str(value) for value in existing_progress.get("member_ids") or []}
+                    if existing_ids != requested_ids:
+                        await interaction.response.send_message(
+                            embed=Embed(
+                                title="Juice Battle｜爬塔",
+                                description=f"{member_id} 目前已有其他隊伍的未完成爬塔進度。",
+                                color=common.bot_error_color,
+                            ),
+                            ephemeral=True,
+                        )
+                        return
+                progress = await self.tower_load_shared_progress(member_ids)
+                if progress is None:
+                    progress = self.tower_default_progress(member_ids)
+                for member_id in member_ids:
+                    member_data = await self.load_user(str(member_id))
+                    if member_data["juice_battle"].get("playing"):
+                        await interaction.response.send_message(
+                            embed=Embed(
+                                title="Juice Battle｜爬塔",
+                                description=f"{member_id} 目前正在其他 Juice Battle 中。",
+                                color=common.bot_error_color,
+                            ),
+                            ephemeral=True,
+                        )
+                        return
+            progress.setdefault("member_names", {})[userid] = interaction.user.display_name
+            if teammate is not None:
+                progress["member_names"][str(teammate.id)] = teammate.display_name
+            await self.tower_save_progress(progress)
+
+        view = JuiceBattleTowerFloorView(cog=self, progress=progress)
+        await interaction.response.send_message(embed=self.tower_floor_embed(progress), view=view)
+        message = await interaction.original_response()
+        view.message = message
+        session = {
+            "tower": True,
+            "tower_members": [str(member_id) for member_id in progress.get("member_ids") or []],
+            "guild_id": str(interaction.guild_id) if interaction.guild_id else "@me",
+            "channel_id": str(message.channel.id),
+            "message_id": str(message.id),
+        }
+        async with self.tower_lock:
+            await self.tower_set_playing([str(member_id) for member_id in progress.get("member_ids") or []], session)
+
+    @app_commands.command(name="juice_battle_leaderboard", description="Juice Battle 勝率與爬塔排行榜")
     async def juice_battle_leaderboard(self, interaction: discord.Interaction):
         """
-        顯示每個角色勝率前三名，以及自己各角色的勝率與場數。
+        顯示每個角色勝率前三名、自己的角色戰績與爬塔最高通關紀錄。
 
         Args:
             interaction (discord.Interaction): "slash 互動"
@@ -989,6 +2080,32 @@ class JuiceBattle(commands.Cog):
                                 "win_rate": win_count / round_count,
                             }
                         )
+
+            # 收集並去重成功逃跑的爬塔最高紀錄
+            tower_records = {}
+            if collection is not None:
+                async for document in collection.find(
+                    {"juice_battle.tower_records": {"$exists": True}},
+                    {"_id": 1, "juice_battle.tower_records": 1},
+                ):
+                    records = (document.get("juice_battle") or {}).get("tower_records") or []
+                    if not isinstance(records, list):
+                        continue
+                    for record in records:
+                        if not isinstance(record, dict):
+                            continue
+                        member_ids = sorted(str(member_id) for member_id in record.get("member_ids") or [])
+                        if not member_ids or any(not member_id.isdigit() for member_id in member_ids):
+                            continue
+                        key = "|".join(member_ids)
+                        floor = int(record.get("floor", 0))
+                        old_record = tower_records.get(key)
+                        if old_record is None or floor > int(old_record.get("floor", 0)):
+                            tower_records[key] = {
+                                "member_ids": member_ids,
+                                "floor": floor,
+                                "mode": "solo" if len(member_ids) == 1 else "party",
+                            }
 
         embed = Embed(
             title="Juice Battle｜勝率排行榜",
@@ -1031,6 +2148,27 @@ class JuiceBattle(commands.Cog):
             embed.add_field(name="你的各角色戰績", value="\n".join(my_lines), inline=False)
         else:
             embed.add_field(name="你的各角色戰績", value="尚無遊玩紀錄", inline=False)
+
+        # 爬塔最高通關紀錄
+        tower_lines = []
+        sorted_tower_records = sorted(
+            tower_records.values(),
+            key=lambda record: (int(record["floor"]), record["member_ids"]),
+            reverse=True,
+        )
+        for index, record in enumerate(sorted_tower_records[: self.tower_leaderboard_top_n]):
+            names = []
+            for member_id in record["member_ids"]:
+                member = interaction.guild.get_member(int(member_id)) if interaction.guild else None
+                user_object = member or self.bot.get_user(int(member_id))
+                names.append(user_object.display_name if user_object else member_id)
+            label = names[0] if len(names) == 1 else f"{names[0]} 的隊伍：{'、'.join(names)}"
+            tower_lines.append(f"{index + 1}. {label}｜最高第 **{record['floor']} 層**")
+        embed.add_field(
+            name="爬塔最高通關紀錄",
+            value="\n".join(tower_lines) if tower_lines else "尚無成功逃跑紀錄",
+            inline=False,
+        )
 
         await interaction.response.send_message(embed=embed)
 
@@ -2199,6 +3337,1061 @@ class JuiceBattleView(discord.ui.View):
             await self.cog.clear_session(self.fighter_a["user_id"])
             if not self.fighter_b.get("is_bot"):
                 await self.cog.clear_session(self.fighter_b["user_id"])
+
+
+class JuiceBattleTowerChallengeButton(discord.ui.Button):
+    """爬塔樓層挑戰按鈕。"""
+
+    def __init__(self):
+        """建立挑戰按鈕。"""
+        super().__init__(label="挑戰", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        開始挑戰目前樓層怪物。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: JuiceBattleTowerFloorView = self.view  # type: ignore[assignment]
+        await view.on_challenge(interaction)
+
+
+class JuiceBattleTowerEscapeButton(discord.ui.Button):
+    """爬塔樓層逃跑按鈕。"""
+
+    def __init__(self):
+        """建立逃跑按鈕。"""
+        super().__init__(label="逃跑", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        帶著暫存戰利品離開爬塔。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: JuiceBattleTowerFloorView = self.view  # type: ignore[assignment]
+        await view.on_escape(interaction)
+
+
+class JuiceBattleTowerFloorView(discord.ui.View):
+    """爬塔樓層入口的挑戰／逃跑介面。"""
+
+    def __init__(self, *, cog: JuiceBattle, progress: dict):
+        """
+        建立樓層入口 View。
+
+        Args:
+            cog (JuiceBattle): "Juice Battle cog"
+            progress (dict): "目前爬塔快照"
+        """
+        super().__init__(timeout=cog.tower_view_timeout)
+        self.cog = cog
+        self.progress = copy.deepcopy(progress)
+        self.message: discord.Message | None = None
+        self.add_item(JuiceBattleTowerChallengeButton())
+        if int(self.progress.get("floor", cog.tower_floor_min)) > cog.tower_floor_min:
+            self.add_item(JuiceBattleTowerEscapeButton())
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """
+        只允許爬塔隊員操作樓層介面。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+
+        Returns:
+            allowed (bool): "是否允許操作"
+        """
+        member_ids = {str(member_id) for member_id in self.progress.get("member_ids") or []}
+        if str(interaction.user.id) in member_ids:
+            return True
+        await interaction.response.send_message(
+            embed=Embed(title="Juice Battle｜爬塔", description="只有本層爬塔隊員可以操作。", color=common.bot_error_color),
+            ephemeral=True,
+        )
+        return False
+
+    async def on_challenge(self, interaction: discord.Interaction):
+        """
+        將樓層入口切換成爬塔戰鬥。
+
+        Args:
+            interaction (discord.Interaction): "挑戰按鈕互動"
+        """
+        await self.cog.tower_start_battle(interaction, self.progress)
+        self.stop()
+
+    async def on_escape(self, interaction: discord.Interaction):
+        """
+        結束爬塔並處理暫存獎勵。
+
+        Args:
+            interaction (discord.Interaction): "逃跑按鈕互動"
+        """
+        await self.cog.tower_escape(interaction, self.progress)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        """
+        樓層介面逾時後解除進行中鎖定，但保留進度供下次續爬。
+        """
+        for member_id in self.progress.get("member_ids") or []:
+            await self.cog.clear_session(str(member_id))
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                embed = self.cog.tower_floor_embed(self.progress, log_text="操作逾時，請重新使用指令繼續。")
+                await self.message.edit(embed=embed, view=self)
+            except Exception:
+                pass
+
+
+class JuiceBattleTowerAttackButton(discord.ui.Button):
+    """爬塔玩家攻擊按鈕。"""
+
+    def __init__(self):
+        """建立攻擊按鈕。"""
+        super().__init__(label="攻擊", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        執行爬塔玩家攻擊。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: JuiceBattleTowerView = self.view  # type: ignore[assignment]
+        await view.on_attack(interaction)
+
+
+class JuiceBattleTowerDefendButton(discord.ui.Button):
+    """爬塔玩家防禦按鈕。"""
+
+    def __init__(self):
+        """建立防禦按鈕。"""
+        super().__init__(label="防禦", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        執行爬塔玩家防禦。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: JuiceBattleTowerView = self.view  # type: ignore[assignment]
+        await view.on_defend(interaction)
+
+
+class JuiceBattleTowerDodgeButton(discord.ui.Button):
+    """爬塔玩家閃避按鈕。"""
+
+    def __init__(self):
+        """建立閃避按鈕。"""
+        super().__init__(label="閃避", style=discord.ButtonStyle.secondary)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        執行爬塔玩家閃避。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: JuiceBattleTowerView = self.view  # type: ignore[assignment]
+        await view.on_dodge(interaction)
+
+
+class JuiceBattleTowerSkillButton(discord.ui.Button):
+    """爬塔角色、武器或防具技能按鈕。"""
+
+    def __init__(self, *, source: str, label: str, armed: bool):
+        """
+        建立技能按鈕。
+
+        Args:
+            source (str): "技能來源"
+            label (str): "按鈕顯示文字"
+            armed (bool): "是否已發動"
+        """
+        display = f"{label}（已發動）" if armed else label
+        super().__init__(label=display, style=discord.ButtonStyle.success)
+        self.source = source
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        發動或取消爬塔技能。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: JuiceBattleTowerView = self.view  # type: ignore[assignment]
+        await view.on_skill(interaction, self.source)
+
+
+class JuiceBattleTowerView(discord.ui.View):
+    """多人爬塔的隊伍回合戰鬥介面。"""
+
+    def __init__(self, *, cog: JuiceBattle, progress: dict, fighters: list[dict], monster: dict):
+        """
+        建立爬塔戰鬥 View。
+
+        Args:
+            cog (JuiceBattle): "Juice Battle cog"
+            progress (dict): "爬塔快照"
+            fighters (list[dict]): "玩家戰鬥角色"
+            monster (dict): "怪物戰鬥角色"
+        """
+        super().__init__(timeout=cog.tower_view_timeout)
+        self.cog = cog
+        self.progress = copy.deepcopy(progress)
+        self.fighters = fighters
+        self.monster = monster
+        if self.monster.get("id") == "old_jin":
+            for fighter in self.fighters:
+                fighter["two_dice"] = True
+        self.member_ids = [str(member_id) for member_id in progress.get("member_ids") or []]
+        self.turn_order: list[str] = []
+        self.current_index = 0
+        self.round_number = 1
+        self.phase = "player_attack"
+        self.current_actor_id: str | None = None
+        self.pending_target_id: str | None = None
+        self.pending_attack_total: int | None = None
+        self.pending_attack_dice = ""
+        self.pending_bind = False
+        self.last_attack_damage = 0
+        self.log_text = ""
+        self.finished = False
+        self.message: discord.Message | None = None
+        self.rebuild_buttons()
+
+    def fighter_by_id(self, user_id: str) -> dict | None:
+        """
+        依 ID 取得隊員戰鬥狀態。
+
+        Args:
+            user_id (str): "玩家或怪物 ID"
+
+        Returns:
+            fighter (dict | None): "找到的隊員"
+        """
+        for fighter in self.fighters:
+            if str(fighter["user_id"]) == str(user_id):
+                return fighter
+        return None
+
+    def append_log(self, text: str):
+        """
+        將爬塔戰鬥紀錄接到目前紀錄後方。
+
+        Args:
+            text (str): "一行戰鬥紀錄"
+        """
+        if self.log_text:
+            self.log_text = f"{self.log_text}\n{text}"
+        else:
+            self.log_text = text
+        self.log_text = self.log_text[-3500:]
+
+    def current_actor(self) -> dict | None:
+        """
+        取得目前等待操作的玩家。
+
+        Returns:
+            fighter (dict | None): "目前玩家"
+        """
+        if self.current_actor_id is None:
+            return None
+        return self.fighter_by_id(self.current_actor_id)
+
+    def living_fighters(self) -> list[dict]:
+        """
+        取得目前仍存活的隊員。
+
+        Returns:
+            fighters (list[dict]): "HP 大於 0 的隊員"
+        """
+        return [fighter for fighter in self.fighters if fighter["hp"] > 0]
+
+    def build_embed(self) -> Embed:
+        """
+        依爬塔戰鬥狀態建立 embed。
+
+        Returns:
+            embed (Embed): "爬塔戰鬥資訊"
+        """
+        floor = int(self.progress.get("floor", 1))
+        embed = Embed(
+            title=f"Juice Battle｜爬塔第 {floor} 層",
+            description=f"第 **{self.round_number}** 回合",
+            color=common.bot_color,
+        )
+        monster_ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else None
+        monster_status = []
+        if self.monster.get("stun_remaining", 0) > 0:
+            monster_status.append("暈眩")
+        if self.monster.get("hellfire_offset", 0) > 0:
+            monster_status.append(f"業火攻擊偏移 +{self.monster['hellfire_offset']}")
+        if self.monster.get("poison_remaining", 0) > 0:
+            monster_status.append(f"中毒 {self.monster['poison_remaining']}")
+        monster_text = (
+            f"生命 **{self.monster['hp']}/{self.monster['max_hp']}**\n"
+            f"攻擊 {self.monster['atk']}({self.monster.get('attack_offset', 0):+d})｜"
+            f"防禦 {self.monster['defense']}｜敏捷 {self.monster['agi']}"
+        )
+        if monster_ability:
+            monster_text += f"\n技能：{monster_ability.get('name', '被動')}"
+        if monster_status:
+            monster_text += f"\n狀態：{'／'.join(monster_status)}"
+        embed.add_field(name=f"怪物｜{self.monster['name']}", value=monster_text, inline=False)
+        for fighter in self.fighters:
+            status = []
+            if fighter.get("stun_remaining", 0) > 0:
+                status.append("暈眩")
+            if fighter.get("poison_remaining", 0) > 0:
+                status.append(f"中毒 {fighter['poison_remaining']}")
+            if fighter.get("berserk_triggered"):
+                status.append("暴走")
+            armed_source = fighter.get("tower_skill_armed")
+            if armed_source:
+                ability = self.cog.tower_skill_definition(fighter, armed_source)
+                if ability:
+                    status.append(f"已發動：{ability['name']}")
+            status_text = f"\n狀態：{'／'.join(status)}" if status else ""
+            embed.add_field(
+                name=f"{fighter['display_name']}（{fighter['character_name']}）",
+                value=(
+                    f"HP **{fighter['hp']}/{fighter['max_hp']}**\n"
+                    f"攻擊 {fighter['atk']}({fighter.get('atk_offset', 0) + fighter.get('berserk_offset', 0):+d})｜"
+                    f"防禦 {fighter['defense']}({fighter.get('def_offset', 0):+d})｜"
+                    f"敏捷 {fighter['agi']}({fighter.get('agi_offset', 0) + fighter.get('dodge_offset', 0):+d})"
+                    f"{status_text}"
+                ),
+                inline=False,
+            )
+        if self.log_text:
+            embed.add_field(name="戰鬥紀錄", value=self.log_text[-1024:], inline=False)
+        action_text = "戰鬥處理中"
+        if self.phase == "player_attack" and self.current_actor() is not None:
+            action_text = f"輪到 **{self.current_actor()['display_name']}** 攻擊"
+        elif self.phase == "player_defend" and self.pending_target_id:
+            defender = self.fighter_by_id(self.pending_target_id)
+            action_text = f"輪到 **{defender['display_name']}** 選擇防禦或閃避"
+            if self.pending_bind:
+                action_text += "（被束縛，不能閃避）"
+        embed.add_field(name="行動", value=action_text, inline=False)
+        return embed
+
+    def rebuild_buttons(self):
+        """
+        依目前戰鬥階段重建爬塔操作按鈕。
+        """
+        self.clear_items()
+        if self.finished:
+            return
+        if self.phase == "player_attack":
+            actor = self.current_actor()
+            if actor is None:
+                return
+            self.add_item(JuiceBattleTowerAttackButton())
+            for source in ("character", "weapon"):
+                ability = self.cog.tower_skill_definition(actor, source)
+                if ability and self.cog.tower_skill_is_ready(actor, source, "attack"):
+                    self.add_item(
+                        JuiceBattleTowerSkillButton(
+                            source=source,
+                            label=f"{'角色' if source == 'character' else '武器'}：{ability['name']}",
+                            armed=actor.get("tower_skill_armed") == source,
+                        )
+                    )
+        elif self.phase == "player_defend":
+            defender = self.fighter_by_id(self.pending_target_id or "")
+            if defender is None:
+                return
+            self.add_item(JuiceBattleTowerDefendButton())
+            life_conversion_armed = defender.get("tower_skill_armed") == "armor" and (
+                self.cog.tower_skill_definition(defender, "armor") or {}
+            ).get("id") == "life_conversion"
+            if not self.pending_bind and not life_conversion_armed:
+                self.add_item(JuiceBattleTowerDodgeButton())
+            for source in ("character", "armor", "weapon"):
+                ability = self.cog.tower_skill_definition(defender, source)
+                if ability and self.cog.tower_skill_is_ready(defender, source, "defend"):
+                    self.add_item(
+                        JuiceBattleTowerSkillButton(
+                            source=source,
+                            label=(
+                                f"{'角色' if source == 'character' else '防具' if source == 'armor' else '武器'}："
+                                f"{ability['name']}"
+                            ),
+                            armed=defender.get("tower_skill_armed") == source,
+                        )
+                    )
+
+    async def begin(self):
+        """
+        擲先攻骰並開始第一個玩家回合。
+        """
+        initiative = []
+        for fighter in self.fighters:
+            _dice, total, dice_text = self.cog.tower_roll(
+                fighter,
+                fighter["agi"],
+                fighter.get("agi_offset", 0),
+            )
+            initiative.append((total, fighter["user_id"], dice_text))
+        initiative.sort(key=lambda item: item[0], reverse=True)
+        self.turn_order = [str(item[1]) for item in initiative]
+        initiative_text = "｜".join(
+            f"{self.fighter_by_id(user_id)['display_name']} {dice_text}+敏捷={total}"
+            for total, user_id, dice_text in initiative
+        )
+        self.append_log(f"先攻：{initiative_text}")
+        await self.enter_next_player()
+
+    async def enter_next_player(self):
+        """
+        找到下一位存活玩家，或切換到怪物回合。
+        """
+        while self.current_index < len(self.turn_order):
+            user_id = self.turn_order[self.current_index]
+            self.current_index += 1
+            fighter = self.fighter_by_id(user_id)
+            if fighter is None or fighter["hp"] <= 0:
+                continue
+            self.current_actor_id = user_id
+            self.phase = "player_attack"
+            self.prepare_player_turn(fighter)
+            if fighter["hp"] > 0 and fighter.get("stun_remaining", 0) <= 0:
+                self.rebuild_buttons()
+                if self.message is not None:
+                    await self.message.edit(embed=self.build_embed(), view=self)
+                return
+            if fighter["hp"] <= 0:
+                self.append_log(f"{fighter['display_name']} 因狀態傷害倒下。")
+            else:
+                self.append_log(f"{fighter['display_name']} 暈眩，跳過本次攻擊。")
+            if fighter.get("stun_remaining", 0) > 0:
+                fighter["stun_remaining"] = max(0, fighter["stun_remaining"] - 1)
+        await self.run_monster_turn()
+
+    def prepare_player_turn(self, fighter: dict):
+        """
+        處理玩家攻擊回合開始時的 CD、中毒與暈眩狀態。
+
+        Args:
+            fighter (dict): "本回合玩家"
+        """
+        self.cog.tower_prepare_skill_cooldowns(fighter, "attack")
+        fighter["tower_skill_armed"] = None
+        fighter["dodge_offset"] = 0
+        if int(fighter.get("poison_remaining", 0)) > 0:
+            damage = self.apply_damage(fighter, 1)
+            fighter["poison_remaining"] = max(0, int(fighter["poison_remaining"]) - 1)
+            self.append_log(
+                f"{fighter['display_name']} 中毒，受到 **{damage}** 點傷害（剩餘 {fighter['poison_remaining']} 回合）"
+            )
+
+    def apply_damage(self, target: dict, damage: int, *, count_damage: bool = True) -> int:
+        """
+        套用爬塔傷害並處理吸收、暴走與地獄業火重置。
+
+        Args:
+            target (dict): "受到傷害的角色"
+            damage (int): "原始傷害"
+            count_damage (bool): "是否計入狂戰鎧甲承受次數"
+
+        Returns:
+            actual_damage (int): "實際扣除的生命值"
+        """
+        damage = max(0, int(damage))
+        armor_ability = target.get("armor_ability") if isinstance(target.get("armor_ability"), dict) else {}
+        if damage == 1 and armor_ability.get("id") == "absorption":
+            return 0
+        if target.get("ghost_armed"):
+            target["ghost_armed"] = False
+            return 0
+        actual_damage = min(damage, max(0, int(target.get("hp", 0))))
+        target["hp"] = max(0, int(target.get("hp", 0)) - actual_damage)
+        if actual_damage > 0 and count_damage:
+            target["damage_taken_count"] = int(target.get("damage_taken_count", 0)) + 1
+            if armor_ability.get("id") == "berserk" and target["damage_taken_count"] >= 5:
+                target["berserk_triggered"] = True
+                target["berserk_offset"] = 3
+            if target.get("id") == "hell_wraith":
+                target["hellfire_offset"] = 0
+                target["attack_offset"] = 0
+        return actual_damage
+
+    def monster_skill_ready(self, phase: str) -> bool:
+        """
+        判斷目前怪物技能是否能在指定階段使用。
+
+        Args:
+            phase (str): "attack 或 defend"
+
+        Returns:
+            ready (bool): "是否可使用"
+        """
+        ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
+        return ability.get("phase") == phase and int(self.monster.get("skill_cd", 0)) <= 0
+
+    def monster_consume_skill(self):
+        """
+        消耗目前怪物的 CD 技能。
+        """
+        ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
+        if ability.get("cd") is not None:
+            self.monster["skill_cd"] = int(ability["cd"])
+
+    def choose_monster_defense(self, attack_total: int, bound: bool) -> str:
+        """
+        依怪物能力與預期傷害選擇防禦或閃避。
+
+        Args:
+            attack_total (int): "玩家攻擊總值"
+            bound (bool): "是否被角色束縛"
+
+        Returns:
+            mode (str): "defend 或 dodge"
+        """
+        ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
+        if self.monster.get("stun_remaining", 0) > 0:
+            return "stunned"
+        if bound:
+            return "defend"
+        if self.monster_skill_ready("defend") and ability.get("id") == "sprint":
+            self.monster["sprint_armed"] = True
+            self.monster_consume_skill()
+            return "dodge"
+        defense_expected = sum(max(1, attack_total - (dice + self.monster["defense"])) for dice in range(1, 7)) / 6
+        agility_expected = sum(
+            attack_total if attack_total >= dice + self.monster["agi"] else 0
+            for dice in range(1, 7)
+        ) / 6
+        return "defend" if defense_expected <= agility_expected else "dodge"
+
+    def resolve_player_attack(self, attacker: dict, *, use_dodge_roll: bool, bound: bool) -> str:
+        """
+        結算玩家對怪物的一次攻擊。
+
+        Args:
+            attacker (dict): "攻擊玩家"
+            use_dodge_roll (bool): "是否用敏捷骰攻擊"
+            bound (bool): "本次是否禁止怪物閃避"
+
+        Returns:
+            result (str): "攻擊結果文字"
+        """
+        if use_dodge_roll:
+            dice, attack_total, dice_text = self.cog.tower_roll(
+                attacker,
+                attacker["agi"],
+                attacker.get("agi_offset", 0),
+            )
+            attack_label = f"閃避骰 {dice_text}"
+        else:
+            base = attacker["defense"] if attacker.get("stance_swap_attack") else attacker["atk"]
+            offset = attacker.get("def_offset", 0) if attacker.get("stance_swap_attack") else attacker.get("atk_offset", 0)
+            offset += int(attacker.get("berserk_offset", 0))
+            dice, attack_total, dice_text = self.cog.tower_roll(attacker, base, offset)
+            attack_label = dice_text
+        if attacker.get("stance_swap_attack"):
+            attacker["stance_swap_attack"] = False
+        mode = self.choose_monster_defense(attack_total, bound)
+        if mode == "stunned":
+            damage = self.apply_damage(self.monster, attack_total)
+            self.last_attack_damage = damage
+            result = f"{attacker['display_name']} {attack_label} 攻擊 **{attack_total}**，怪物暈眩，無法防禦，造成 **{damage}** 傷害"
+        elif mode == "defend":
+            self.monster["sprint_armed"] = False
+            _defense_dice, defense_total, defense_text = self.cog.tower_roll(
+                self.monster,
+                self.monster["defense"],
+                0,
+            )
+            damage = max(1, attack_total - defense_total)
+            ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
+            if ability.get("id") == "hardened_shell" and self.monster_skill_ready("defend"):
+                self.monster_consume_skill()
+                self.monster["hardening_armed"] = True
+            if self.monster.get("hardening_armed") and damage <= 3:
+                damage = 0
+                self.monster["hardening_armed"] = False
+                hardening_text = "，硬化甲殼使傷害無效"
+            else:
+                hardening_text = ""
+            actual_damage = self.apply_damage(self.monster, damage)
+            self.last_attack_damage = actual_damage
+            result = (
+                f"{attacker['display_name']} {attack_label} 攻擊 **{attack_total}**，"
+                f"怪物防禦 {defense_text}+素質 = **{defense_total}**，受到 **{actual_damage}** 傷害{hardening_text}"
+            )
+        else:
+            dodge_offset = int(self.monster.get("dodge_offset", 0))
+            if self.monster.get("sprint_armed"):
+                dodge_offset *= 2
+            _dodge_dice, dodge_total, dodge_text = self.cog.tower_roll(
+                self.monster,
+                self.monster["agi"],
+                dodge_offset,
+            )
+            if attack_total >= dodge_total:
+                damage = self.apply_damage(self.monster, attack_total)
+                self.last_attack_damage = damage
+                result = (
+                    f"{attacker['display_name']} {attack_label} 攻擊 **{attack_total}**，"
+                    f"怪物閃避 {dodge_text}+素質 = **{dodge_total}**，失敗，受到 **{damage}** 傷害"
+                )
+            else:
+                self.last_attack_damage = 0
+                result = (
+                    f"{attacker['display_name']} {attack_label} 攻擊 **{attack_total}**，"
+                    f"怪物閃避 {dodge_text}+素質 = **{dodge_total}**，成功，無傷"
+                )
+            self.monster["sprint_armed"] = False
+        return result
+
+    async def on_skill(self, interaction: discord.Interaction, source: str):
+        """
+        發動或取消目前玩家的爬塔技能。
+
+        Args:
+            interaction (discord.Interaction): "技能按鈕互動"
+            source (str): "character、weapon 或 armor"
+        """
+        actor = self.current_actor() if self.phase == "player_attack" else self.fighter_by_id(self.pending_target_id or "")
+        if actor is None:
+            return
+        phase = "attack" if self.phase == "player_attack" else "defend"
+        ability = self.cog.tower_skill_definition(actor, source)
+        if ability is None or ability.get("phase") != phase:
+            await interaction.response.send_message(
+                embed=Embed(title="Juice Battle｜爬塔", description="此階段無法使用這個技能。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        if actor.get("tower_skill_armed") == source:
+            actor["tower_skill_armed"] = None
+        else:
+            if not self.cog.tower_skill_is_ready(actor, source, phase):
+                await interaction.response.send_message(
+                    embed=Embed(title="Juice Battle｜爬塔", description="技能尚未準備好。", color=common.bot_error_color),
+                    ephemeral=True,
+                )
+                return
+            actor["tower_skill_armed"] = source
+        self.rebuild_buttons()
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def on_attack(self, interaction: discord.Interaction):
+        """
+        結算目前玩家的一回合攻擊。
+
+        Args:
+            interaction (discord.Interaction): "攻擊按鈕互動"
+        """
+        await interaction.response.defer()
+        attacker = self.current_actor()
+        if attacker is None:
+            return
+        armed_source = attacker.get("tower_skill_armed")
+        ability = self.cog.tower_consume_skill(attacker, armed_source) if armed_source else None
+        attacker["tower_skill_armed"] = None
+        attacker["pending_poison"] = False
+        attack_count = 1
+        second_attack_uses_dodge = False
+        bind = False
+        if ability:
+            if ability["id"] == "starburst":
+                attack_count = 2
+                second_attack_uses_dodge = True
+            elif ability["id"] == "bind":
+                bind = True
+            elif ability["id"] == "poison":
+                attacker["pending_poison"] = True
+            elif ability["id"] == "slime":
+                self.monster["dodge_offset"] = int(self.monster.get("dodge_offset", 0)) - 1
+            elif ability["id"] == "holy_light":
+                for fighter in self.living_fighters():
+                    self.cog.tower_add_hp(fighter, 3)
+                self.append_log("聖光發動，所有存活隊員回復 **3 HP**。")
+        armor_ability = attacker.get("armor_ability") if isinstance(attacker.get("armor_ability"), dict) else {}
+        if armor_ability.get("id") == "desperate_counter" and attacker["hp"] in (1, 2):
+            attack_count = max(attack_count, 3 if ability and ability.get("id") == "starburst" else 2)
+            second_attack_uses_dodge = bool(ability and ability.get("id") == "starburst")
+        results = []
+        for attack_index in range(attack_count):
+            result = self.resolve_player_attack(
+                attacker,
+                use_dodge_roll=second_attack_uses_dodge and attack_index > 0,
+                bound=bind and attack_index == 0,
+            )
+            results.append(result)
+            if self.monster["hp"] <= 0:
+                break
+            if attacker.get("pending_poison") and self.last_attack_damage > 0:
+                if self.monster.get("id") != "poison_bubble_bug":
+                    self.monster["poison_remaining"] = 3
+                    results.append("怪物中毒（持續 3 回合）。")
+                attacker["pending_poison"] = False
+        attacker["pending_poison"] = False
+        self.log_text = "\n".join(results)
+        if self.monster["hp"] <= 0:
+            await self.cog.tower_finish_floor(self, self.log_text)
+            return
+        await self.enter_next_player()
+
+    async def run_monster_turn(self):
+        """
+        執行怪物回合並等待被選中隊員防禦或閃避。
+        """
+        living = self.living_fighters()
+        if not living:
+            await self.cog.tower_finish_defeat(self, "所有我方成員都已死亡。")
+            return
+        if int(self.monster.get("poison_remaining", 0)) > 0:
+            poison_damage = self.apply_damage(self.monster, 1)
+            self.monster["poison_remaining"] = max(0, int(self.monster["poison_remaining"]) - 1)
+            self.append_log(
+                f"{self.monster['name']} 中毒，受到 **{poison_damage}** 點傷害"
+                f"（剩餘 {self.monster['poison_remaining']} 回合）"
+            )
+            if self.monster["hp"] <= 0:
+                await self.cog.tower_finish_floor(self, self.log_text)
+                return
+        if self.monster.get("id") == "mushroom":
+            self.cog.tower_add_hp(self.monster, 1)
+            self.append_log("蘑菇的增值發動，怪物回復 **1 HP**。")
+        if int(self.monster.get("skill_cd", 0)) > 0:
+            self.monster["skill_cd"] = int(self.monster["skill_cd"]) - 1
+        target = random.choice(living)
+        self.pending_target_id = target["user_id"]
+        ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
+        self.pending_bind = False
+        if ability.get("id") == "bind" and self.monster_skill_ready("attack"):
+            self.monster_consume_skill()
+            self.pending_bind = True
+        _attack_dice, attack_total, attack_dice_text = self.cog.tower_roll(
+            self.monster,
+            self.monster["atk"],
+            self.monster.get("attack_offset", 0),
+        )
+        self.pending_attack_total = attack_total
+        self.pending_attack_dice = attack_dice_text
+        self.phase = "player_defend"
+        target["dodge_offset"] = -1 if self.monster.get("id") == "sticky_slime" else 0
+        if self.monster.get("id") == "hell_wraith":
+            self.monster["hellfire_offset"] = int(self.monster.get("hellfire_offset", 0)) + 1
+            self.monster["attack_offset"] = self.monster["hellfire_offset"]
+        self.rebuild_buttons()
+        if self.message is not None:
+            await self.message.edit(embed=self.build_embed(), view=self)
+
+    async def resolve_player_defense(self, mode: str, interaction: discord.Interaction):
+        """
+        結算被怪物選中的玩家防禦或閃避。
+
+        Args:
+            mode (str): "defend 或 dodge"
+            interaction (discord.Interaction): "防守按鈕互動"
+        """
+        defender = self.fighter_by_id(self.pending_target_id or "")
+        if defender is None or self.pending_attack_total is None:
+            return
+        if mode == "dodge" and self.pending_bind:
+            await interaction.response.send_message(
+                embed=Embed(title="Juice Battle｜爬塔", description="你被束縛，無法閃避。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        armed_source = defender.get("tower_skill_armed")
+        ability = self.cog.tower_consume_skill(defender, armed_source) if armed_source else None
+        defender["tower_skill_armed"] = None
+        attack_total = int(self.pending_attack_total)
+        damage = 0
+        log_parts = [f"{self.monster['name']} 攻擊 {attack_total}（{self.pending_attack_dice}）"]
+        defense_dice = 0
+        defense_total = 0
+        if mode == "dodge":
+            defense_dice, dodge_total, dodge_text = self.cog.tower_roll(
+                defender,
+                defender["agi"],
+                defender.get("agi_offset", 0) + defender.get("dodge_offset", 0),
+            )
+            if attack_total >= dodge_total:
+                damage = attack_total
+                log_parts.append(f"{defender['display_name']} 閃避 {dodge_text}+敏捷 = {dodge_total}，失敗")
+            else:
+                log_parts.append(f"{defender['display_name']} 閃避 {dodge_text}+敏捷 = {dodge_total}，成功")
+        else:
+            stance_swap = bool(ability and ability.get("id") == "stance_swap")
+            if stance_swap:
+                defense_base = defender["atk"]
+                defense_offset = defender.get("atk_offset", 0)
+            else:
+                defense_base = defender["defense"]
+                defense_offset = defender.get("def_offset", 0)
+            defense_dice, defense_total, defense_text = self.cog.tower_roll(defender, defense_base, defense_offset)
+            if ability and ability.get("id") == "life_conversion":
+                damage = attack_total
+            else:
+                damage = max(1, attack_total - defense_total)
+            log_parts.append(f"{defender['display_name']} 防禦 {defense_text}+素質 = {defense_total}")
+            if ability and ability.get("id") == "shield_counter" and defense_total == attack_total:
+                self.monster["stun_remaining"] = 1
+                log_parts.append("盾反成功，怪物暈眩一回合")
+            if stance_swap:
+                defender["stance_swap_attack"] = True
+        trap = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
+        trap_triggered = trap.get("id") == "trap" and defense_dice == 1
+        if trap_triggered:
+            damage = attack_total
+            defender["stun_remaining"] = 1
+            log_parts.append("捕獸夾骰出 1，暈眩生效並吃滿傷害")
+        ghost = bool(ability and ability.get("id") == "ghost")
+        if ghost:
+            defender["ghost_armed"] = True
+        actual_damage = self.apply_damage(defender, damage)
+        if ghost:
+            log_parts.append("幽靈化發動，傷害無效")
+        else:
+            log_parts.append(f"受到 **{actual_damage}** 點傷害")
+        if ability and ability.get("id") == "fridge" and actual_damage > 0 and defender["hp"] <= 0:
+            defender["hp"] = min(defender["max_hp"], defender["hp"] + actual_damage)
+            log_parts.append(f"冰箱發動，回復 **{actual_damage} HP**")
+        if ability and ability.get("id") == "life_conversion" and defender["hp"] > 0:
+            self.cog.tower_add_hp(defender, defense_total)
+            log_parts.append(f"生命轉換回復 **{defense_total} HP**")
+        armor_ability = defender.get("armor_ability") if isinstance(defender.get("armor_ability"), dict) else {}
+        if armor_ability.get("id") == "thorn" and actual_damage > 0 and defender["hp"] > 0:
+            reflect = actual_damage // 2
+            reflected = self.apply_damage(self.monster, reflect)
+            log_parts.append(f"反傷造成 **{reflected}** 點傷害")
+        defender["dodge_offset"] = 0
+        self.log_text = "｜".join(log_parts)
+        self.pending_attack_total = None
+        self.pending_attack_dice = ""
+        self.pending_bind = False
+        if not self.living_fighters():
+            await self.cog.tower_finish_defeat(self, "所有我方成員都已死亡。")
+            return
+        if self.monster["hp"] <= 0:
+            await self.cog.tower_finish_floor(self, self.log_text)
+            return
+        self.round_number += 1
+        self.current_index = 0
+        await self.enter_next_player()
+        if interaction.response.is_done():
+            return
+        await interaction.response.edit_message(embed=self.build_embed(), view=self)
+
+    async def on_defend(self, interaction: discord.Interaction):
+        """
+        玩家選擇防禦。
+
+        Args:
+            interaction (discord.Interaction): "防禦按鈕互動"
+        """
+        await interaction.response.defer()
+        await self.resolve_player_defense("defend", interaction)
+
+    async def on_dodge(self, interaction: discord.Interaction):
+        """
+        玩家選擇閃避。
+
+        Args:
+            interaction (discord.Interaction): "閃避按鈕互動"
+        """
+        if self.pending_bind:
+            await interaction.response.send_message(
+                embed=Embed(title="Juice Battle｜爬塔", description="你被束縛，無法閃避。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        await interaction.response.defer()
+        await self.resolve_player_defense("dodge", interaction)
+
+    async def on_timeout(self) -> None:
+        """
+        父 View 逾時時判定本次爬塔失敗。
+        """
+        if self.finished:
+            return
+        await self.cog.tower_finish_defeat(self, "戰鬥操作逾時。")
+
+
+class JuiceBattleTowerClaimButton(discord.ui.Button):
+    """爬塔裝備領取者按鈕。"""
+
+    def __init__(self, *, member_id: str, label: str):
+        """
+        建立裝備領取者按鈕。
+
+        Args:
+            member_id (str): "領取者 ID"
+            label (str): "按鈕顯示文字"
+        """
+        super().__init__(label=label, style=discord.ButtonStyle.primary)
+        self.member_id = member_id
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        指定目前裝備的領取者。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: JuiceBattleTowerRewardView = self.view  # type: ignore[assignment]
+        await view.on_claim(interaction, self.member_id)
+
+
+class JuiceBattleTowerRewardView(discord.ui.View):
+    """雙人爬塔的裝備領取介面。"""
+
+    def __init__(self, *, cog: JuiceBattle, progress: dict, pending_index: int, recipients: list[str]):
+        """
+        建立裝備領取 View。
+
+        Args:
+            cog (JuiceBattle): "Juice Battle cog"
+            progress (dict): "爬塔快照"
+            pending_index (int): "目前處理的裝備索引"
+            recipients (list[str]): "已指定的領取者"
+        """
+        super().__init__(timeout=cog.tower_view_timeout)
+        self.cog = cog
+        self.progress = copy.deepcopy(progress)
+        self.pending_index = pending_index
+        self.recipients = list(recipients)
+        self.message: discord.Message | None = None
+        self.claimed = False
+        self.rebuild_buttons()
+
+    def item_name(self) -> str:
+        """
+        取得目前待領取裝備名稱。
+
+        Returns:
+            name (str): "裝備名稱"
+        """
+        item_id = (self.progress.get("pending_equipment") or [])[self.pending_index]
+        template = self.cog.item_template("weapon", item_id) or self.cog.item_template("armor", item_id)
+        return template["name"] if template else str(item_id)
+
+    def build_embed(self) -> Embed:
+        """
+        建立裝備領取選擇 embed。
+
+        Returns:
+            embed (Embed): "裝備領取資訊"
+        """
+        total = len(self.progress.get("pending_equipment") or [])
+        return Embed(
+            title="Juice Battle｜領取爬塔裝備",
+            description=(
+                f"請指定第 **{self.pending_index + 1}/{total}** 件裝備的領取者：**{self.item_name()}**。\n"
+                f"蛋糕：**{int(self.progress.get('pending_cake', 0))}** {common.cake_emoji}"
+            ),
+            color=common.bot_color,
+        )
+
+    def rebuild_buttons(self):
+        """
+        依隊員重建裝備領取按鈕。
+        """
+        self.clear_items()
+        names = self.progress.get("member_names") if isinstance(self.progress.get("member_names"), dict) else {}
+        for member_id in self.progress.get("member_ids") or []:
+            label = str(names.get(str(member_id)) or member_id)
+            self.add_item(JuiceBattleTowerClaimButton(member_id=str(member_id), label=f"{label}領取"))
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """
+        只允許爬塔隊員指定裝備領取者。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+
+        Returns:
+            allowed (bool): "是否允許操作"
+        """
+        if str(interaction.user.id) in {str(member_id) for member_id in self.progress.get("member_ids") or []}:
+            return True
+        await interaction.response.send_message(
+            embed=Embed(title="Juice Battle｜爬塔", description="只有本次隊員可以指定裝備。", color=common.bot_error_color),
+            ephemeral=True,
+        )
+        return False
+
+    async def on_claim(self, interaction: discord.Interaction, recipient_id: str):
+        """
+        記錄一件裝備的領取者，並進入下一件或結算。
+
+        Args:
+            interaction (discord.Interaction): "領取按鈕互動"
+            recipient_id (str): "指定領取者 ID"
+        """
+        if self.claimed:
+            await interaction.response.send_message(
+                embed=Embed(title="Juice Battle｜爬塔", description="這件裝備已經有人指定領取。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        self.claimed = True
+        self.recipients.append(str(recipient_id))
+        total = len(self.progress.get("pending_equipment") or [])
+        if self.pending_index + 1 < total:
+            next_view = JuiceBattleTowerRewardView(
+                cog=self.cog,
+                progress=self.progress,
+                pending_index=self.pending_index + 1,
+                recipients=self.recipients,
+            )
+            next_view.message = self.message
+            await interaction.response.edit_message(embed=next_view.build_embed(), view=next_view)
+            self.stop()
+            return
+        await self.cog.tower_grant_rewards(self.progress, self.recipients)
+        await interaction.response.edit_message(
+            embed=Embed(
+                title="Juice Battle｜爬塔結算",
+                description=(
+                    f"已成功逃跑並取得 **{int(self.progress.get('pending_cake', 0))}** {common.cake_emoji}。\n"
+                    f"最高通關：第 **{int(self.progress.get('cleared_floor', 0))}** 層。\n"
+                    "裝備已依選擇發放。"
+                ),
+                color=common.bot_color,
+            ),
+            view=None,
+        )
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        """
+        領取介面逾時時將未指定裝備交給隊伍第一位成員。
+        """
+        if self.claimed:
+            return
+        self.claimed = True
+        member_ids = [str(member_id) for member_id in self.progress.get("member_ids") or []]
+        while len(self.recipients) < len(self.progress.get("pending_equipment") or []):
+            self.recipients.append(member_ids[0])
+        await self.cog.tower_grant_rewards(self.progress, self.recipients)
+        if self.message is not None:
+            try:
+                await self.message.edit(
+                    embed=Embed(
+                        title="Juice Battle｜爬塔結算",
+                        description="領取操作逾時，未指定的裝備已交給隊伍發起者；蛋糕與最高樓層紀錄已結算。",
+                        color=common.bot_color,
+                    ),
+                    view=None,
+                )
+            except Exception:
+                pass
 
 
 async def setup(client: commands.Bot):

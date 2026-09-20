@@ -90,6 +90,7 @@ class MongoStorage:
             "shop_grant": "shop_grant",
             "shop_settings": "shop_settings",
             "mining_encounter": "mining_encounter",
+            "juice_battle_tower": "juice_battle_tower",
         }
         self.user_global_dataset = {"userdata", "mining"}
         self.single_document_dataset = {"odds"}

@@ -153,6 +153,7 @@ class WebPanel:
         self.permission_shop_edit_description = "shop_edit_description"
         self.permission_shop_admin = "shop_admin"
         self.permission_encounter_admin = "encounter_admin"
+        self.permission_juice_battle_tower_admin = "juice_battle_tower_admin"
         self.permission_catalog = [
             {
                 "key": "auction",
@@ -199,6 +200,17 @@ class WebPanel:
                         "key": self.permission_encounter_admin,
                         "label": "後台管理",
                         "description": "可以進入挖礦奇遇後台，編輯任務、劇情與獎勵機率",
+                    },
+                ],
+            },
+            {
+                "key": "juice_battle",
+                "label": "Juice Battle",
+                "permissions": [
+                    {
+                        "key": self.permission_juice_battle_tower_admin,
+                        "label": "爬塔後台",
+                        "description": "設定 Juice Battle 爬塔各樓層的裝備掉落池",
                     },
                 ],
             },
@@ -285,6 +297,25 @@ class WebPanel:
         app.add_api_route("/api/encounter/settings", self.encounter_settings_update, methods=["POST"], name="encounter_settings_update")
         app.add_api_route("/api/encounter/quest", self.encounter_quest_save, methods=["POST"], name="encounter_quest_save")
         app.add_api_route("/api/encounter/quest/delete", self.encounter_quest_delete, methods=["POST"], name="encounter_quest_delete")
+        app.add_api_route(
+            "/juice-battle/tower/admin",
+            self.juice_battle_tower_admin_page,
+            methods=["GET"],
+            response_class=HTMLResponse,
+            name="juice_battle_tower_admin",
+        )
+        app.add_api_route(
+            "/api/juice-battle/tower/admin",
+            self.juice_battle_tower_admin_data,
+            methods=["GET"],
+            name="juice_battle_tower_admin_data",
+        )
+        app.add_api_route(
+            "/api/juice-battle/tower/settings",
+            self.juice_battle_tower_settings_update,
+            methods=["POST"],
+            name="juice_battle_tower_settings_update",
+        )
         app.add_api_websocket_route("/ws/auction", self.auction_socket, name="auction_socket")
         return app
 
@@ -1140,6 +1171,82 @@ class WebPanel:
         result = await house.set_fee_settings(fee_percent, vip_fee_percent, svip_fee_percent)
         return JSONResponse(result)
 
+    async def juice_battle_tower_admin_page(self, request: Request):
+        """
+        Juice Battle 爬塔掉落後台頁面。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response: 後台頁面、拒絕頁或導向
+        """
+        reject, context = await self.load_panel_context(request, "/juice-battle/tower/admin")
+        if reject is not None:
+            return reject
+        if not context["permissions"].get(self.permission_juice_battle_tower_admin):
+            return RedirectResponse(url="/panel", status_code=302)
+        context["title"] = "Juice Battle 爬塔後台"
+        context["active_nav"] = "juice_battle"
+        return self.templates.TemplateResponse(request, "juice_battle_admin.html", context)
+
+    async def juice_battle_tower_api_context(self, request: Request):
+        """
+        共用爬塔後台 API 的登入與權限檢查。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            result (tuple): "(response_or_none, context, juice_battle_cog)"
+        """
+        reject, context = await self.load_panel_context(request, "/juice-battle/tower/admin")
+        if reject is not None:
+            if isinstance(reject, RedirectResponse):
+                return JSONResponse({"ok": False, "error": "請先登入"}, status_code=401), None, None
+            return JSONResponse({"ok": False, "error": "你不在偽造妹妹伺服器中"}, status_code=403), None, None
+        if not context["permissions"].get(self.permission_juice_battle_tower_admin):
+            return JSONResponse({"ok": False, "error": "你沒有 Juice Battle 爬塔後台權限"}, status_code=403), None, None
+        cog = self.bot.get_cog("JuiceBattle")
+        if cog is None:
+            return JSONResponse({"ok": False, "error": "Juice Battle 尚未就緒"}, status_code=503), None, None
+        return None, context, cog
+
+    async def juice_battle_tower_admin_data(self, request: Request):
+        """
+        讀取爬塔裝備掉落後台資料。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "目前掉落池與裝備清單"
+        """
+        reject, context, cog = await self.juice_battle_tower_api_context(request)
+        if reject is not None:
+            return reject
+        return JSONResponse(await cog.tower_admin_payload())
+
+    async def juice_battle_tower_settings_update(self, request: Request):
+        """
+        保存爬塔通用與指定樓層裝備掉落池。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "保存後的掉落設定"
+        """
+        reject, context, cog = await self.juice_battle_tower_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            drop_pools = body.get("drop_pools")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "掉落設定格式錯誤"}, status_code=400)
+        return JSONResponse(await cog.save_tower_settings(drop_pools))
+
     async def encounter_admin_page(self, request: Request):
         """
         挖礦奇遇後台頁。
@@ -1340,6 +1447,9 @@ class WebPanel:
         context["show_shop_nav"] = bool(context["permissions"].get(self.permission_shop_visit))
         context["show_shop_admin"] = bool(context["permissions"].get(self.permission_shop_admin))
         context["show_encounter_admin"] = bool(context["permissions"].get(self.permission_encounter_admin))
+        context["show_juice_battle_admin"] = bool(
+            context["permissions"].get(self.permission_juice_battle_tower_admin)
+        )
         return None, context
 
     def safe_next_path(self, path: str | None, default: str = "/panel") -> str:

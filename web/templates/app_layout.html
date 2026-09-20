@@ -12,6 +12,9 @@
     {% if show_encounter_admin %}
     <a href="/encounter/admin" class="sidebar-link{% if active_nav == 'encounter' %} is-active{% endif %}">挖礦奇遇後台</a>
     {% endif %}
+    {% if show_juice_battle_admin %}
+    <a href="/juice-battle/tower/admin" class="sidebar-link{% if active_nav == 'juice_battle' %} is-active{% endif %}">Juice Battle 爬塔後台</a>
+    {% endif %}
     {% if show_permission_nav %}
     <a href="/permissions" class="sidebar-link{% if active_nav == 'permissions' %} is-active{% endif %}">權限控制</a>
     {% endif %}
