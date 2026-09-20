@@ -3911,7 +3911,7 @@ class JuiceBattleTowerView(discord.ui.View):
                 inline=False,
             )
         if self.log_text:
-            embed.add_field(name="戰鬥紀錄", value=self.log_text[:1024], inline=False)
+            embed.add_field(name="戰鬥紀錄", value=self.log_text[-1024:], inline=False)
         action_text = "本層已通關" if self.finished else "戰鬥處理中"
         if not self.finished and self.phase == "player_attack" and self.current_actor() is not None:
             actor = self.current_actor()
@@ -4357,7 +4357,7 @@ class JuiceBattleTowerView(discord.ui.View):
                     results.append("怪物中毒（持續 3 回合）。")
                 attacker["pending_poison"] = False
         attacker["pending_poison"] = False
-        self.log_text = "\n".join(results)
+        self.append_log("\n".join(results))
         if self.monster["hp"] <= 0:
             await self.cog.tower_finish_floor(self, self.log_text)
             return
@@ -4406,7 +4406,7 @@ class JuiceBattleTowerView(discord.ui.View):
             self.monster["hellfire_offset"] = int(self.monster.get("hellfire_offset", 0)) + 1
             self.monster["attack_offset"] = self.monster["hellfire_offset"]
         skill_note = f"（發動 {ability['name']}）" if self.pending_bind else ""
-        self.log_text = f"{self.monster['name']} 攻擊 **{attack_total}**{skill_note}"
+        self.append_log(f"{self.monster['name']} 攻擊 **{attack_total}**{skill_note}")
         self.rebuild_buttons()
         if self.message is not None:
             await self.message.edit(embed=self.build_embed(), view=self)
@@ -4504,7 +4504,7 @@ class JuiceBattleTowerView(discord.ui.View):
             reflected = self.apply_damage(self.monster, reflect)
             log_parts.append(f"反傷造成 **{reflected}** 點傷害")
         defender["dodge_offset"] = 0
-        self.log_text = "\n".join(log_parts)
+        self.append_log("\n".join(log_parts[1:]))
         self.pending_attack_total = None
         self.pending_attack_dice = ""
         self.pending_bind = False
