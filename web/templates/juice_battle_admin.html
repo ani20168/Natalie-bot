@@ -7,23 +7,33 @@
   </div>
 </div>
 
-<section class="shop-admin-card">
-  <div class="encounter-card-head">
-    <h3>通用掉落池</h3>
-  </div>
-  <p class="encounter-hint">5、10、15 等樓層沒有專屬設定時，會從這裡勾選的裝備中平均抽取。全部取消勾選代表不掉落裝備。</p>
-  <div class="tower-pool-summary" id="tower-default-summary">尚未選擇裝備。</div>
-  <button type="button" class="btn btn-outline btn-sm" id="tower-default-open">選擇裝備</button>
-</section>
+<div class="tower-admin-layout">
+  <section class="shop-admin-card tower-admin-active">
+    <div class="encounter-card-head">
+      <h3>進行中的爬塔</h3>
+    </div>
+    <p class="encounter-hint">顯示目前尚未清空進度的爬塔隊伍。強制結束會清空進度、解除進行中鎖定，並盡力把 Discord 訊息標成已結束。</p>
+    <div id="tower-active-runs"></div>
+  </section>
 
-<section class="shop-admin-card">
-  <div class="encounter-card-head">
-    <h3>指定樓層掉落池</h3>
-    <button type="button" class="btn btn-outline btn-sm" id="tower-floor-add">新增樓層</button>
-  </div>
-  <p class="encounter-hint">可設定正的 5 倍數樓層，例如 5、10、15。指定樓層即使沒有勾選任何裝備，也不會回退到通用掉落池。</p>
-  <div id="tower-floor-pools"></div>
-</section>
+  <section class="shop-admin-card tower-admin-default">
+    <div class="encounter-card-head">
+      <h3>通用掉落池</h3>
+    </div>
+    <p class="encounter-hint">5、10、15 等樓層沒有專屬設定時，會從這裡勾選的裝備中平均抽取。全部取消勾選代表不掉落裝備。</p>
+    <div class="tower-pool-summary" id="tower-default-summary">尚未選擇裝備。</div>
+    <button type="button" class="btn btn-outline btn-sm" id="tower-default-open">選擇裝備</button>
+  </section>
+
+  <section class="shop-admin-card tower-admin-floors">
+    <div class="encounter-card-head">
+      <h3>指定樓層掉落池</h3>
+      <button type="button" class="btn btn-outline btn-sm" id="tower-floor-add">新增樓層</button>
+    </div>
+    <p class="encounter-hint">可設定正的 5 倍數樓層，例如 5、10、15。指定樓層即使沒有勾選任何裝備，也不會回退到通用掉落池。</p>
+    <div id="tower-floor-pools"></div>
+  </section>
+</div>
 {% endblock %}
 
 {% block extra_script %}
@@ -76,8 +86,10 @@
   (function () {
     var equipment = [];
     var pools = { default: [] };
+    var activeRuns = [];
     var defaultSummary = document.getElementById("tower-default-summary");
     var floorsBox = document.getElementById("tower-floor-pools");
+    var activeRunsBox = document.getElementById("tower-active-runs");
     var toastBox = document.getElementById("tower-settings-toast");
     var addButton = document.getElementById("tower-floor-add");
     var defaultOpenButton = document.getElementById("tower-default-open");
@@ -96,6 +108,7 @@
     var draftSelection = [];
     var floorDraftSelection = [];
     var settingsSaving = false;
+    var forceEnding = false;
     var toastHideTimer = null;
     var toastOutTimer = null;
 
@@ -174,7 +187,7 @@
       }
     }
 
-    function updateDraftItemSelection(event, target) {
+    function updateDraftItemSelection(event, target, countBox, listBox) {
       var input = event.target;
       if (!input || input.type !== "checkbox") return;
       var itemId = input.getAttribute("data-item-id");
@@ -183,6 +196,13 @@
         target.push(itemId);
       } else if (!input.checked && index >= 0) {
         target.splice(index, 1);
+      }
+      // 取消勾選後移開焦點，避免 focus-within 殘留選取外觀
+      if (!input.checked) input.blur();
+      if (countBox && listBox) {
+        var visibleCount = listBox.querySelectorAll(".tower-equipment-option").length;
+        countBox.textContent = "顯示 " + visibleCount + " / " + equipment.length +
+          " 件，已選 " + target.length + " 件";
       }
     }
 
@@ -222,6 +242,37 @@
           escapeHtml(floor) + "\">移除</button>" +
           "</div></div>" +
           "<div class=\"tower-pool-summary\">" + poolSummary(floor) + "</div></section>";
+      }).join("");
+    }
+
+    function renderActiveRuns() {
+      if (!activeRunsBox) return;
+      if (!activeRuns.length) {
+        activeRunsBox.innerHTML = "<p class=\"encounter-empty\">目前沒有進行中的爬塔。</p>";
+        return;
+      }
+      activeRunsBox.innerHTML = activeRuns.map(function (run) {
+        var members = (run.members || []).map(function (member) {
+          return escapeHtml(member.name || member.user_id);
+        }).join("、");
+        var statusText = run.playing ? "戰鬥進行中" : "有進度（未在操作）";
+        var linkHtml = run.session_url
+          ? "<a class=\"tower-active-link\" href=\"" + escapeHtml(run.session_url) +
+            "\" target=\"_blank\" rel=\"noopener noreferrer\">前往訊息</a>"
+          : "";
+        return "<section class=\"tower-active-run\" data-team-key=\"" + escapeHtml(run.team_key || "") + "\">" +
+          "<div class=\"tower-active-run-main\">" +
+          "<div class=\"tower-active-run-title\">第 " + escapeHtml(String(run.floor || 1)) + " 層" +
+          "<span class=\"tower-active-run-meta\">已通關 " +
+          escapeHtml(String(run.cleared_floor || 0)) + " 層｜" + escapeHtml(statusText) + "</span></div>" +
+          "<div class=\"tower-active-run-members\">隊伍：" + members + "</div>" +
+          "<div class=\"tower-active-run-monster\">目前怪物：" +
+          escapeHtml(run.monster_name || "未知怪物") + "</div>" +
+          "</div>" +
+          "<div class=\"tower-active-run-actions\">" + linkHtml +
+          "<button type=\"button\" class=\"btn btn-danger btn-sm tower-force-end\" data-team-key=\"" +
+          escapeHtml(run.team_key || "") + "\">強制結束</button>" +
+          "</div></section>";
       }).join("");
     }
 
@@ -276,8 +327,13 @@
         }
         equipment = data.equipment || equipment;
         pools = data.drop_pools || { default: [] };
+        if (Array.isArray(data.active_runs)) {
+          activeRuns = data.active_runs;
+          activeRunsSnapshot = JSON.stringify(activeRuns);
+        }
         renderDefault();
         renderFloors();
+        renderActiveRuns();
         showToast(true, data.message || "已儲存設定");
         return true;
       } catch (error) {
@@ -317,10 +373,10 @@
     });
 
     equipmentList.addEventListener("change", function (event) {
-      updateDraftItemSelection(event, draftSelection);
+      updateDraftItemSelection(event, draftSelection, equipmentCount, equipmentList);
     });
     floorEquipmentList.addEventListener("change", function (event) {
-      updateDraftItemSelection(event, floorDraftSelection);
+      updateDraftItemSelection(event, floorDraftSelection, floorCount, floorEquipmentList);
     });
     equipmentSearch.addEventListener("input", function () {
       renderEquipmentList(equipmentList, equipmentCount, draftSelection, equipmentSearch.value);
@@ -371,6 +427,77 @@
       if (button) openEquipmentDialog(button.getAttribute("data-floor"));
     });
 
+    activeRunsBox.addEventListener("click", async function (event) {
+      var button = event.target.closest(".tower-force-end");
+      if (!button || forceEnding) return;
+      var teamKey = button.getAttribute("data-team-key") || "";
+      var run = activeRuns.find(function (entry) { return entry.team_key === teamKey; });
+      if (!run) {
+        showToast(false, "找不到這支隊伍");
+        return;
+      }
+      var memberNames = (run.members || []).map(function (member) {
+        return member.name || member.user_id;
+      }).join("、");
+      if (!window.confirm("確定強制結束這次爬塔？\n隊伍：" + memberNames + "\n目前第 " + run.floor + " 層\n進度會被清空。")) {
+        return;
+      }
+      forceEnding = true;
+      button.disabled = true;
+      try {
+        var response = await fetch("/api/juice-battle/tower/force-end", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ member_ids: run.member_ids || [] })
+        });
+        var data = await response.json();
+        if (!data.ok) {
+          showToast(false, data.error || "強制結束失敗");
+          button.disabled = false;
+          return;
+        }
+        if (Array.isArray(data.active_runs)) {
+          activeRuns = data.active_runs;
+          activeRunsSnapshot = JSON.stringify(activeRuns);
+        }
+        if (data.drop_pools) pools = data.drop_pools;
+        if (data.equipment) equipment = data.equipment;
+        renderActiveRuns();
+        renderDefault();
+        renderFloors();
+        showToast(true, data.message || "已強制結束");
+      } catch (error) {
+        showToast(false, "強制結束失敗，請稍後再試");
+        button.disabled = false;
+      } finally {
+        forceEnding = false;
+      }
+    });
+
+    var activeRunsLoading = false;
+    var activeRunsSnapshot = "";
+
+    async function refreshActiveRuns() {
+      if (activeRunsLoading || forceEnding) return;
+      activeRunsLoading = true;
+      try {
+        var response = await fetch("/api/juice-battle/tower/admin", { credentials: "same-origin" });
+        var data = await response.json();
+        if (!data.ok) return;
+        var nextRuns = data.active_runs || [];
+        var nextSnapshot = JSON.stringify(nextRuns);
+        if (nextSnapshot === activeRunsSnapshot) return;
+        activeRuns = nextRuns;
+        activeRunsSnapshot = nextSnapshot;
+        renderActiveRuns();
+      } catch (error) {
+        // 輪詢失敗時保持現有列表，避免打斷操作
+      } finally {
+        activeRunsLoading = false;
+      }
+    }
+
     async function loadAdmin() {
       try {
         var response = await fetch("/api/juice-battle/tower/admin", { credentials: "same-origin" });
@@ -381,14 +508,18 @@
         }
         equipment = data.equipment || [];
         pools = data.drop_pools || { default: [] };
+        activeRuns = data.active_runs || [];
+        activeRunsSnapshot = JSON.stringify(activeRuns);
         renderDefault();
         renderFloors();
+        renderActiveRuns();
       } catch (error) {
         showToast(false, "載入失敗，請稍後再試");
       }
     }
 
     loadAdmin();
+    setInterval(refreshActiveRuns, 3000);
   })();
 </script>
 {% endblock %}

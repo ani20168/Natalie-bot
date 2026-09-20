@@ -21,6 +21,7 @@ class JuiceBattle(commands.Cog):
         self.tower_view_timeout = 300.0
         self.tower_floor_min = 1
         self.tower_lock = asyncio.Lock()
+        self.tower_aborted_teams = set()
         self.default_bet = 0
         self.leaderboard_min_rounds = 1
         self.leaderboard_top_n = 3
@@ -1116,6 +1117,66 @@ class JuiceBattle(commands.Cog):
         except (discord.Forbidden, discord.HTTPException):
             pass
 
+    async def notify_tower_invite_dm(self, teammate: discord.abc.User, inviter: discord.abc.User, jump_url: str):
+        """
+        私訊被邀請的隊友，附上爬塔邀請訊息連結。
+
+        Args:
+            teammate (discord.abc.User): "被邀請隊友"
+            inviter (discord.abc.User): "發起者"
+            jump_url (str): "https://discord.com/channels/..."
+        """
+        description = (
+            f"**{inviter.display_name}** 邀請你一起挑戰 Juice Battle 爬塔！\n"
+            f"請點擊下方連結回到邀請訊息，並按下「同意爬塔」。"
+        )
+        if jump_url:
+            description += f"\n\n邀請訊息：{jump_url}"
+        embed = Embed(title="Juice Battle｜爬塔邀請", description=description, color=common.bot_color)
+        try:
+            await teammate.send(embed=embed)
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+
+    async def tower_begin_session(self, interaction: discord.Interaction, progress: dict, *, edit_message: bool):
+        """
+        送出或更新爬塔樓層／戰鬥訊息，並標記隊伍進行中。
+
+        Args:
+            interaction (discord.Interaction): "slash 或按鈕互動"
+            progress (dict): "要開始的爬塔快照"
+            edit_message (bool): "True 時編輯原訊息（邀請同意後）"
+        """
+        view = self.tower_restore_battle(progress)
+        if view is None:
+            if progress.get("battle") is not None:
+                progress["battle"] = None
+                await self.tower_save_progress(progress)
+            view = JuiceBattleTowerFloorView(cog=self, progress=progress)
+            embed = self.tower_floor_embed(progress)
+        else:
+            embed = view.build_embed()
+            embed.description = "已恢復本場戰鬥，請從目前回合繼續操作。"
+        if edit_message:
+            await interaction.response.edit_message(embed=embed, view=view)
+            message = interaction.message
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
+            message = await interaction.original_response()
+        view.message = message
+        session = {
+            "tower": True,
+            "tower_members": [str(member_id) for member_id in progress.get("member_ids") or []],
+            "guild_id": str(interaction.guild_id) if interaction.guild_id else "@me",
+            "channel_id": str(message.channel.id),
+            "message_id": str(message.id),
+        }
+        async with self.tower_lock:
+            await self.tower_set_playing(
+                [str(member_id) for member_id in progress.get("member_ids") or []],
+                session,
+            )
+
     def build_bag_embed(self, juice_battle: dict, page: int, discard_confirm_slot: int | None = None) -> Embed:
         """
         建立裝備背包 embed。
@@ -1489,6 +1550,7 @@ class JuiceBattle(commands.Cog):
             progress (dict): "可寫入玩家資料的爬塔快照"
         """
         floor = self.tower_floor_min
+        self.tower_aborted_teams.discard(self.tower_team_key(member_ids))
         return {
             "member_ids": [str(member_id) for member_id in member_ids],
             "member_names": {},
@@ -1545,6 +1607,8 @@ class JuiceBattle(commands.Cog):
             progress (dict): "要保存的爬塔快照"
         """
         member_ids = [str(member_id) for member_id in progress.get("member_ids") or []]
+        if self.tower_is_aborted(member_ids):
+            return
         for member_id in member_ids:
             user_data = await self.load_user(member_id)
             user_data["juice_battle"]["tower_progress"] = copy.deepcopy(progress)
@@ -1641,6 +1705,175 @@ class JuiceBattle(commands.Cog):
             juice_battle["tower_progress"] = None
             await common.mongo_storage.replace_user(str(member_id), user_data)
 
+    def tower_team_key(self, member_ids) -> frozenset:
+        """
+        將隊員 ID 轉成可用來比對隊伍的 key。
+
+        Args:
+            member_ids: "['4108', '4109']"
+
+        Returns:
+            key (frozenset): "frozenset({'4108', '4109'})"
+        """
+        return frozenset(str(member_id) for member_id in (member_ids or []) if str(member_id))
+
+    def tower_is_aborted(self, member_ids) -> bool:
+        """
+        判斷隊伍是否已被後台強制結束。
+
+        Args:
+            member_ids: "['4108']"
+
+        Returns:
+            aborted (bool): "True"
+        """
+        key = self.tower_team_key(member_ids)
+        return bool(key) and key in self.tower_aborted_teams
+
+    async def tower_reject_if_aborted(self, interaction: discord.Interaction, member_ids) -> bool:
+        """
+        若隊伍已被強制結束，回覆提示並拒絕操作。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+            member_ids: "['4108']"
+
+        Returns:
+            rejected (bool): "已被拒絕時為 True"
+        """
+        if not self.tower_is_aborted(member_ids):
+            return False
+        embed = Embed(
+            title="Juice Battle｜爬塔",
+            description="這次爬塔已被管理員強制結束。",
+            color=common.bot_error_color,
+        )
+        if interaction.response.is_done():
+            await interaction.followup.send(embed=embed, ephemeral=True)
+        else:
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+        return True
+
+    async def tower_list_active_runs(self) -> list[dict]:
+        """
+        掃描資料庫，列出目前尚未清空的爬塔隊伍。
+
+        Returns:
+            runs (list[dict]): "[{'member_ids': [...], 'floor': 3, ...}]"
+        """
+        collection = common.mongo_storage.get_collection("userdata")
+        if collection is None:
+            return []
+        runs_by_key = {}
+        cursor = collection.find(
+            {"juice_battle.tower_progress": {"$type": "object"}},
+            {
+                "_id": 1,
+                "juice_battle.tower_progress": 1,
+                "juice_battle.session": 1,
+                "juice_battle.playing": 1,
+            },
+        )
+        async for document in cursor:
+            juice_battle = document.get("juice_battle") or {}
+            progress = juice_battle.get("tower_progress")
+            if not isinstance(progress, dict):
+                continue
+            member_ids = [str(member_id) for member_id in progress.get("member_ids") or []]
+            if not member_ids:
+                continue
+            key = self.tower_team_key(member_ids)
+            if key in runs_by_key:
+                continue
+            member_names = progress.get("member_names") if isinstance(progress.get("member_names"), dict) else {}
+            members = []
+            for member_id in member_ids:
+                members.append({
+                    "user_id": member_id,
+                    "name": str(member_names.get(member_id) or member_id),
+                })
+            monster = progress.get("monster") if isinstance(progress.get("monster"), dict) else {}
+            session = juice_battle.get("session") if isinstance(juice_battle.get("session"), dict) else {}
+            runs_by_key[key] = {
+                "team_key": ",".join(sorted(key)),
+                "member_ids": member_ids,
+                "members": members,
+                "floor": int(progress.get("floor", self.tower_floor_min)),
+                "cleared_floor": int(progress.get("cleared_floor", 0)),
+                "monster_name": str(monster.get("name") or "未知怪物"),
+                "playing": bool(juice_battle.get("playing")),
+                "session_url": self.session_jump_url(session) if session.get("tower") else None,
+            }
+        runs = list(runs_by_key.values())
+        runs.sort(key=lambda entry: (-int(entry["floor"]), entry["team_key"]))
+        return runs
+
+    async def tower_force_end_run(self, member_ids: list[str]) -> dict:
+        """
+        後台強制結束指定隊伍的爬塔，並清空進度。
+
+        Args:
+            member_ids (list[str]): "['4108', '4109']"
+
+        Returns:
+            payload (dict): "{'ok': True, 'message': '...'}"
+        """
+        normalized_ids = [str(member_id) for member_id in member_ids if str(member_id)]
+        key = self.tower_team_key(normalized_ids)
+        if not key:
+            return {"ok": False, "error": "缺少隊伍成員"}
+
+        # 先標記中止，避免舊 View 再把進度寫回
+        self.tower_aborted_teams.add(key)
+        session = None
+        found = False
+        async with self.tower_lock:
+            for member_id in sorted(key):
+                user_data = await self.load_user(member_id)
+                progress = user_data["juice_battle"].get("tower_progress")
+                if not isinstance(progress, dict):
+                    continue
+                progress_key = self.tower_team_key(progress.get("member_ids") or [])
+                if progress_key != key:
+                    continue
+                found = True
+                current_session = user_data["juice_battle"].get("session")
+                if isinstance(current_session, dict) and current_session.get("tower"):
+                    session = current_session
+            if not found:
+                self.tower_aborted_teams.discard(key)
+                return {"ok": False, "error": "找不到這支隊伍的爬塔進度"}
+            await self.tower_clear_progress(list(key))
+
+        # 盡力把 Discord 訊息標成已強制結束
+        if isinstance(session, dict):
+            channel_id = session.get("channel_id")
+            message_id = session.get("message_id")
+            if channel_id is not None and message_id is not None:
+                channel = self.bot.get_channel(int(channel_id))
+                if channel is None:
+                    try:
+                        channel = await self.bot.fetch_channel(int(channel_id))
+                    except Exception:
+                        channel = None
+                if channel is not None:
+                    try:
+                        message = await channel.fetch_message(int(message_id))
+                        await message.edit(
+                            embed=Embed(
+                                title="Juice Battle｜爬塔",
+                                description="這次爬塔已被管理員強制結束，進度已清空。",
+                                color=common.bot_error_color,
+                            ),
+                            view=None,
+                        )
+                    except Exception:
+                        pass
+
+        payload = await self.tower_admin_payload()
+        payload["message"] = "已強制結束這次爬塔。"
+        return payload
+
     async def tower_pick_equipment(self, floor: int) -> str | None:
         """
         依後台設定抽取指定樓層的裝備。
@@ -1702,7 +1935,7 @@ class JuiceBattle(commands.Cog):
         建立爬塔後台頁面資料。
 
         Returns:
-            payload (dict): "裝備清單與目前掉落池"
+            payload (dict): "裝備清單、掉落池與進行中爬塔"
         """
         collection = common.mongo_storage.get_collection("juice_battle_tower")
         document = await collection.find_one({"_id": "settings"})
@@ -1711,6 +1944,7 @@ class JuiceBattle(commands.Cog):
             "ok": True,
             "equipment": self.equipment_catalog(),
             "drop_pools": self.normalize_tower_drop_pools(raw_pools),
+            "active_runs": await self.tower_list_active_runs(),
         }
 
     async def save_tower_settings(self, raw_pools) -> dict:
@@ -2036,7 +2270,7 @@ class JuiceBattle(commands.Cog):
     @app_commands.rename(teammate="隊友")
     async def juice_battle_tower(self, interaction: discord.Interaction, teammate: discord.Member | None = None):
         """
-        開始或繼續單人／雙人 Juice Battle 爬塔。
+        開始或繼續單人／雙人 Juice Battle 爬塔；雙人需隊友同意。
 
         Args:
             interaction (discord.Interaction): "slash 互動"
@@ -2049,6 +2283,7 @@ class JuiceBattle(commands.Cog):
                 ephemeral=True,
             )
             return
+
         async with self.tower_lock:
             own_data = await self.load_user(userid)
             own_juice = own_data["juice_battle"]
@@ -2063,19 +2298,38 @@ class JuiceBattle(commands.Cog):
                     ephemeral=True,
                 )
                 return
+
+            # 決定隊伍成員與進度
             if isinstance(own_progress, dict):
                 stored_ids = [str(member_id) for member_id in own_progress.get("member_ids") or []]
                 if teammate is None:
                     if len(stored_ids) > 1 and userid in stored_ids:
-                        teammate = interaction.guild.get_member(
-                            int(next(member_id for member_id in stored_ids if member_id != userid))
-                        ) if interaction.guild else None
+                        other_id = next(member_id for member_id in stored_ids if member_id != userid)
+                        if interaction.guild is not None:
+                            teammate = interaction.guild.get_member(int(other_id))
+                        if teammate is None:
+                            try:
+                                teammate = await interaction.client.fetch_user(int(other_id))
+                            except Exception:
+                                await interaction.response.send_message(
+                                    embed=Embed(
+                                        title="Juice Battle｜爬塔",
+                                        description="找不到你的爬塔隊友，請稍後再試。",
+                                        color=common.bot_error_color,
+                                    ),
+                                    ephemeral=True,
+                                )
+                                return
                     member_ids = stored_ids
                 else:
                     member_ids = [userid, str(teammate.id)]
                     if set(member_ids) != set(stored_ids):
                         await interaction.response.send_message(
-                            embed=Embed(title="Juice Battle｜爬塔", description="你目前的進度屬於另一組隊伍。", color=common.bot_error_color),
+                            embed=Embed(
+                                title="Juice Battle｜爬塔",
+                                description="你目前的進度屬於另一組隊伍。",
+                                color=common.bot_error_color,
+                            ),
                             ephemeral=True,
                         )
                         return
@@ -2093,54 +2347,67 @@ class JuiceBattle(commands.Cog):
                         await interaction.response.send_message(
                             embed=Embed(
                                 title="Juice Battle｜爬塔",
-                                description=f"{member_id} 目前已有其他隊伍的未完成爬塔進度。",
+                                description=f"<@{member_id}> 目前已有其他隊伍的未完成爬塔進度。",
                                 color=common.bot_error_color,
                             ),
                             ephemeral=True,
                         )
                         return
                 progress = await self.tower_load_shared_progress(member_ids)
-                if progress is None:
-                    progress = self.tower_default_progress(member_ids)
+
+            # 雙人：送出邀請，等隊友同意後再開始
+            if len(member_ids) > 1:
+                if teammate is None:
+                    await interaction.response.send_message(
+                        embed=Embed(
+                            title="Juice Battle｜爬塔",
+                            description="雙人爬塔需要指定隊友。",
+                            color=common.bot_error_color,
+                        ),
+                        ephemeral=True,
+                    )
+                    return
                 for member_id in member_ids:
                     member_data = await self.load_user(str(member_id))
                     if member_data["juice_battle"].get("playing"):
                         await interaction.response.send_message(
                             embed=Embed(
                                 title="Juice Battle｜爬塔",
-                                description=f"{member_id} 目前正在其他 Juice Battle 中。",
+                                description=f"<@{member_id}> 目前正在其他 Juice Battle 中。",
                                 color=common.bot_error_color,
                             ),
                             ephemeral=True,
                         )
                         return
+                embed = Embed(
+                    title="Juice Battle｜爬塔邀請",
+                    description=(
+                        f"{interaction.user.mention} 邀請 {teammate.mention} 一起爬塔！\n"
+                        f"請 {teammate.mention} 按下「同意爬塔」開始。"
+                    ),
+                    color=common.bot_color,
+                )
+                view = JuiceBattleTowerInviteView(
+                    cog=self,
+                    inviter_id=userid,
+                    teammate_id=str(teammate.id),
+                    inviter_name=interaction.user.display_name,
+                    teammate_name=teammate.display_name,
+                    existing_progress=copy.deepcopy(progress) if isinstance(progress, dict) else None,
+                )
+                await interaction.response.send_message(embed=embed, view=view)
+                message = await interaction.original_response()
+                view.message = message
+                await self.notify_tower_invite_dm(teammate, interaction.user, message.jump_url)
+                return
+
+            # 單人：直接開始或繼續
+            if progress is None:
+                progress = self.tower_default_progress(member_ids)
             progress.setdefault("member_names", {})[userid] = interaction.user.display_name
-            if teammate is not None:
-                progress["member_names"][str(teammate.id)] = teammate.display_name
             await self.tower_save_progress(progress)
 
-        view = self.tower_restore_battle(progress)
-        if view is None:
-            if progress.get("battle") is not None:
-                progress["battle"] = None
-                await self.tower_save_progress(progress)
-            view = JuiceBattleTowerFloorView(cog=self, progress=progress)
-            embed = self.tower_floor_embed(progress)
-        else:
-            embed = view.build_embed()
-            embed.description = "已恢復本場戰鬥，請從目前回合繼續操作。"
-        await interaction.response.send_message(embed=embed, view=view)
-        message = await interaction.original_response()
-        view.message = message
-        session = {
-            "tower": True,
-            "tower_members": [str(member_id) for member_id in progress.get("member_ids") or []],
-            "guild_id": str(interaction.guild_id) if interaction.guild_id else "@me",
-            "channel_id": str(message.channel.id),
-            "message_id": str(message.id),
-        }
-        async with self.tower_lock:
-            await self.tower_set_playing([str(member_id) for member_id in progress.get("member_ids") or []], session)
+        await self.tower_begin_session(interaction, progress, edit_message=False)
 
     @app_commands.command(name="juice_battle_leaderboard", description="Juice Battle 勝率與爬塔排行榜")
     async def juice_battle_leaderboard(self, interaction: discord.Interaction):
@@ -3444,6 +3711,146 @@ class JuiceBattleView(discord.ui.View):
                 await self.cog.clear_session(self.fighter_b["user_id"])
 
 
+class JuiceBattleTowerInviteView(discord.ui.View):
+    """雙人爬塔邀請，需隊友同意後才開始。"""
+
+    def __init__(
+        self,
+        *,
+        cog: JuiceBattle,
+        inviter_id: str,
+        teammate_id: str,
+        inviter_name: str,
+        teammate_name: str,
+        existing_progress: dict | None,
+    ):
+        """
+        建立爬塔邀請 View。
+
+        Args:
+            cog (JuiceBattle): "Juice Battle cog"
+            inviter_id (str): "發起者 ID"
+            teammate_id (str): "被邀請隊友 ID"
+            inviter_name (str): "發起者顯示名稱"
+            teammate_name (str): "隊友顯示名稱"
+            existing_progress (dict | None): "續爬進度；新開局為 None"
+        """
+        super().__init__(timeout=cog.challenge_timeout)
+        self.cog = cog
+        self.inviter_id = inviter_id
+        self.teammate_id = teammate_id
+        self.inviter_name = inviter_name
+        self.teammate_name = teammate_name
+        self.existing_progress = copy.deepcopy(existing_progress) if isinstance(existing_progress, dict) else None
+        self.message: discord.Message | None = None
+        self.accepted = False
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """
+        僅被邀請的隊友可按同意。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+
+        Returns:
+            allowed (bool): "是否允許操作"
+        """
+        if str(interaction.user.id) == self.teammate_id:
+            return True
+        await interaction.response.send_message(
+            embed=Embed(title="Juice Battle｜爬塔", description="只有被邀請的隊友可以同意。", color=common.bot_error_color),
+            ephemeral=True,
+        )
+        return False
+
+    @discord.ui.button(label="同意爬塔", style=discord.ButtonStyle.success)
+    async def accept_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """
+        隊友同意後建立或恢復爬塔進度並開始。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+            button (discord.ui.Button): "同意爬塔"
+        """
+        if self.accepted:
+            return
+        member_ids = [self.inviter_id, self.teammate_id]
+        async with self.cog.tower_lock:
+            for member_id in member_ids:
+                member_data = await self.cog.load_user(member_id)
+                if member_data["juice_battle"].get("playing"):
+                    await interaction.response.send_message(
+                        embed=Embed(
+                            title="Juice Battle｜爬塔",
+                            description=f"<@{member_id}> 目前正在其他 Juice Battle 中。",
+                            color=common.bot_error_color,
+                        ),
+                        ephemeral=True,
+                    )
+                    return
+                existing_progress = member_data["juice_battle"].get("tower_progress")
+                if not isinstance(existing_progress, dict):
+                    continue
+                existing_ids = {str(value) for value in existing_progress.get("member_ids") or []}
+                if existing_ids != set(member_ids):
+                    await interaction.response.send_message(
+                        embed=Embed(
+                            title="Juice Battle｜爬塔",
+                            description=f"<@{member_id}> 目前已有其他隊伍的未完成爬塔進度。",
+                            color=common.bot_error_color,
+                        ),
+                        ephemeral=True,
+                    )
+                    return
+
+            if self.existing_progress is not None:
+                progress = await self.cog.tower_load_shared_progress(member_ids)
+                if progress is None:
+                    await interaction.response.send_message(
+                        embed=Embed(
+                            title="Juice Battle｜爬塔",
+                            description="這組隊伍的爬塔進度已不存在，請重新發起邀請。",
+                            color=common.bot_error_color,
+                        ),
+                        ephemeral=True,
+                    )
+                    return
+            else:
+                progress = await self.cog.tower_load_shared_progress(member_ids)
+                if progress is None:
+                    progress = self.cog.tower_default_progress(member_ids)
+
+            progress.setdefault("member_names", {})
+            progress["member_names"][self.inviter_id] = self.inviter_name
+            progress["member_names"][self.teammate_id] = interaction.user.display_name
+            await self.cog.tower_save_progress(progress)
+            self.accepted = True
+            button.disabled = True
+
+        await self.cog.tower_begin_session(interaction, progress, edit_message=True)
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        """
+        邀請逾時後取消按鈕。
+        """
+        if self.accepted:
+            return
+        for child in self.children:
+            child.disabled = True
+        if self.message is None:
+            return
+        embed = Embed(
+            title="Juice Battle｜爬塔邀請",
+            description=f"{self.inviter_name} 對 {self.teammate_name} 的爬塔邀請已逾時取消。",
+            color=common.bot_error_color,
+        )
+        try:
+            await self.message.edit(embed=embed, view=self)
+        except Exception:
+            pass
+
+
 class JuiceBattleTowerChallengeButton(discord.ui.Button):
     """爬塔樓層挑戰按鈕。"""
 
@@ -3510,6 +3917,8 @@ class JuiceBattleTowerFloorView(discord.ui.View):
             allowed (bool): "是否允許操作"
         """
         member_ids = {str(member_id) for member_id in self.progress.get("member_ids") or []}
+        if await self.cog.tower_reject_if_aborted(interaction, member_ids):
+            return False
         if str(interaction.user.id) in member_ids:
             return True
         await interaction.response.send_message(
@@ -3601,6 +4010,8 @@ class JuiceBattleTowerNextFloorView(discord.ui.View):
             allowed (bool): "是否為本次爬塔隊員"
         """
         member_ids = {str(member_id) for member_id in self.progress.get("member_ids") or []}
+        if await self.cog.tower_reject_if_aborted(interaction, member_ids):
+            return False
         if str(interaction.user.id) in member_ids:
             return True
         await interaction.response.send_message(
@@ -4000,6 +4411,8 @@ class JuiceBattleTowerView(discord.ui.View):
                 ephemeral=True,
             )
             return False
+        if await self.cog.tower_reject_if_aborted(interaction, self.member_ids):
+            return False
         actor = (
             self.current_actor()
             if self.phase == "player_attack"
@@ -4163,30 +4576,48 @@ class JuiceBattleTowerView(discord.ui.View):
 
     def choose_monster_defense(self, attack_total: int, bound: bool) -> str:
         """
-        依怪物能力與預期傷害選擇防禦或閃避。
+        依預期傷害選擇防禦或閃避（決策比照挑戰 Natalie）。
 
         Args:
             attack_total (int): "玩家攻擊總值"
             bound (bool): "是否被角色束縛"
 
         Returns:
-            mode (str): "defend 或 dodge"
+            mode (str): "defend、dodge 或 stunned"
         """
         ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
         if self.monster.get("stun_remaining", 0) > 0:
             return "stunned"
         if bound:
             return "defend"
+        # 大跑就緒時強制閃避（對應 Natalie 發動冰箱時選閃避）
         if self.monster_skill_ready("defend") and ability.get("id") == "sprint":
             self.monster["sprint_armed"] = True
             self.monster_consume_skill()
             return "dodge"
-        defense_expected = sum(max(1, attack_total - (dice + self.monster["defense"])) for dice in range(1, 7)) / 6
-        agility_expected = sum(
-            attack_total if attack_total >= dice + self.monster["agi"] else 0
-            for dice in range(1, 7)
-        ) / 6
-        return "defend" if defense_expected <= agility_expected else "dodge"
+        if int(self.monster.get("hp", 0)) == 1:
+            return "dodge"
+
+        defense_base = int(self.monster.get("defense", 0))
+        defend_damage_sum = 0
+        for dice in range(1, 7):
+            defense_total = dice + defense_base
+            defend_damage_sum += max(1, attack_total - defense_total)
+        defend_expected = defend_damage_sum / 6
+
+        agility_base = int(self.monster.get("agi", 0)) + int(self.monster.get("dodge_offset", 0))
+        dodge_damage_sum = 0
+        for dice in range(1, 7):
+            dodge_total = dice + agility_base
+            if attack_total >= dodge_total:
+                dodge_damage_sum += attack_total
+        dodge_expected = dodge_damage_sum / 6
+
+        if defend_expected < dodge_expected:
+            return "defend"
+        if dodge_expected < defend_expected:
+            return "dodge"
+        return random.choice(["defend", "dodge"])
 
     def resolve_player_attack(self, attacker: dict, *, use_dodge_roll: bool, bound: bool) -> str:
         """
@@ -4219,6 +4650,7 @@ class JuiceBattleTowerView(discord.ui.View):
         if mode == "stunned":
             damage = self.apply_damage(self.monster, attack_total)
             self.last_attack_damage = damage
+            self.monster["stun_remaining"] = max(0, int(self.monster.get("stun_remaining", 0)) - 1)
             result = (
                 f"{attacker['display_name']} {attack_label} **{attack_total}**，"
                 f"怪物暈眩，無法防禦，造成 **{damage}** 傷害"
@@ -4232,15 +4664,13 @@ class JuiceBattleTowerView(discord.ui.View):
             )
             damage = max(1, attack_total - defense_total)
             ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
+            hardening_text = ""
             if ability.get("id") == "hardened_shell" and self.monster_skill_ready("defend"):
                 self.monster_consume_skill()
-                self.monster["hardening_armed"] = True
-            if self.monster.get("hardening_armed") and damage <= 3:
-                damage = 0
-                self.monster["hardening_armed"] = False
-                hardening_text = "，硬化甲殼使傷害無效"
-            else:
-                hardening_text = ""
+                if damage <= 3:
+                    damage = 0
+                    hardening_text = "，硬化甲殼使傷害無效"
+            self.monster["hardening_armed"] = False
             actual_damage = self.apply_damage(self.monster, damage)
             self.last_attack_damage = actual_damage
             result = (
@@ -4249,12 +4679,11 @@ class JuiceBattleTowerView(discord.ui.View):
             )
         else:
             dodge_offset = int(self.monster.get("dodge_offset", 0))
-            if self.monster.get("sprint_armed"):
-                dodge_offset *= 2
             _dodge_dice, dodge_total, dodge_text = self.cog.tower_roll(
                 self.monster,
                 self.monster["agi"],
                 dodge_offset,
+                offset_multiplier=2 if self.monster.get("sprint_armed") else 1,
             )
             if attack_total >= dodge_total:
                 damage = self.apply_damage(self.monster, attack_total)
@@ -4358,6 +4787,8 @@ class JuiceBattleTowerView(discord.ui.View):
                 attacker["pending_poison"] = False
         attacker["pending_poison"] = False
         self.log_text = "\n".join(results)
+        # 黏液只影響本次攻擊的閃避結算
+        self.monster["dodge_offset"] = 0
         if self.monster["hp"] <= 0:
             await self.cog.tower_finish_floor(self, self.log_text)
             return
@@ -4405,12 +4836,14 @@ class JuiceBattleTowerView(discord.ui.View):
         self.pending_attack_total = attack_total
         self.pending_attack_dice = attack_dice_text
         self.phase = "player_defend"
-        target["dodge_offset"] = -1 if self.monster.get("id") == "sticky_slime" else 0
+        # 對齊挑戰玩家：進入防守階段時防守技能 CD-1
+        self.cog.tower_prepare_skill_cooldowns(target, "defend")
+        target["tower_skill_armed"] = None
         if self.monster.get("id") == "hell_wraith":
             self.monster["hellfire_offset"] = int(self.monster.get("hellfire_offset", 0)) + 1
             self.monster["attack_offset"] = self.monster["hellfire_offset"]
         skill_note = f"（發動 {ability['name']}）" if self.pending_bind else ""
-        self.log_text = f"{self.monster['name']} 攻擊 **{attack_total}**{skill_note}"
+        self.append_log(f"{self.monster['name']} 攻擊 **{attack_total}**{skill_note}")
         self.rebuild_buttons()
         if self.message is not None:
             await self.message.edit(embed=self.build_embed(), view=self)
@@ -4488,26 +4921,40 @@ class JuiceBattleTowerView(discord.ui.View):
             damage = attack_total
             defender["stun_remaining"] = 1
             log_parts.append("捕獸夾骰出 1，暈眩生效並吃滿傷害")
-        ghost = bool(ability and ability.get("id") == "ghost")
-        if ghost:
-            defender["ghost_armed"] = True
-        actual_damage = self.apply_damage(defender, damage)
-        if ghost:
-            log_parts.append("幽靈化發動，傷害無效")
+
+        # 冰箱：致死傷害無效並改為等量回復（與挑戰玩家相同）
+        fridge_armed = bool(ability and ability.get("id") == "fridge")
+        if fridge_armed and damage > 0 and int(defender["hp"]) - damage <= 0:
+            heal = damage
+            defender["hp"] = min(int(defender["max_hp"]), int(defender["hp"]) + heal)
+            log_parts.append(f"{defender['display_name']} 冰箱發動！傷害無效，回復 **{heal}** 點生命")
+            actual_damage = 0
         else:
-            log_parts.append(f"受到 **{actual_damage}** 點傷害")
-        if ability and ability.get("id") == "fridge" and actual_damage > 0 and defender["hp"] <= 0:
-            defender["hp"] = min(defender["max_hp"], defender["hp"] + actual_damage)
-            log_parts.append(f"冰箱發動，回復 **{actual_damage} HP**")
+            ghost = bool(ability and ability.get("id") == "ghost")
+            if ghost:
+                defender["ghost_armed"] = True
+            actual_damage = self.apply_damage(defender, damage)
+            if ghost:
+                log_parts.append("幽靈化發動，傷害無效")
+            else:
+                log_parts.append(f"受到 **{actual_damage}** 點傷害")
+
         if ability and ability.get("id") == "life_conversion" and defender["hp"] > 0:
             self.cog.tower_add_hp(defender, defense_total)
             log_parts.append(f"生命轉換回復 **{defense_total} HP**")
-        armor_ability = defender.get("armor_ability") if isinstance(defender.get("armor_ability"), dict) else {}
-        if armor_ability.get("id") == "thorn" and actual_damage > 0 and defender["hp"] > 0:
+        # 反傷需發動荊棘盔甲技能，不是穿著就觸發
+        if ability and ability.get("id") == "thorn" and actual_damage > 0 and defender["hp"] > 0:
             reflect = actual_damage // 2
             reflected = self.apply_damage(self.monster, reflect)
             log_parts.append(f"反傷造成 **{reflected}** 點傷害")
-        defender["dodge_offset"] = 0
+        # 黏呼呼：造成傷害後才上閃避減益，持續到該玩家下次攻擊回合
+        if (
+            self.monster.get("id") == "sticky_slime"
+            and actual_damage > 0
+            and defender["hp"] > 0
+        ):
+            defender["dodge_offset"] = -1
+            log_parts.append(f"{defender['display_name']} 被黏液黏住，閃避偏移 -1")
         self.log_text = "\n".join(log_parts)
         self.pending_attack_total = None
         self.pending_attack_dice = ""
@@ -4672,6 +5119,8 @@ class JuiceBattleTowerRewardView(discord.ui.View):
             allowed (bool): "是否允許操作"
         """
         if str(interaction.user.id) in {str(member_id) for member_id in self.progress.get("member_ids") or []}:
+            if await self.cog.tower_reject_if_aborted(interaction, self.progress.get("member_ids") or []):
+                return False
             return True
         await interaction.response.send_message(
             embed=Embed(title="Juice Battle｜爬塔", description="只有本次隊員可以指定裝備。", color=common.bot_error_color),

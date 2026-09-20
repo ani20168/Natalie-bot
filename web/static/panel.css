@@ -1510,6 +1510,26 @@ a {
   gap: 8px;
 }
 
+.tower-admin-layout {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+  margin-top: 16px;
+}
+
+.tower-admin-layout .shop-admin-card {
+  max-width: none;
+  margin-top: 0;
+  width: 100%;
+  min-width: 0;
+}
+
+.tower-admin-active,
+.tower-admin-floors {
+  min-height: 200px;
+}
+
 .tower-pool-summary {
   display: grid;
   gap: 4px;
@@ -1550,10 +1570,9 @@ a {
   transition: border-color 0.18s ease, background-color 0.18s ease;
 }
 
-.tower-equipment-option:hover,
-.tower-equipment-option:focus-within {
-  background: var(--accent-dim);
-  border-color: var(--accent);
+.tower-equipment-option:hover {
+  background: rgba(255, 255, 255, 0.03);
+  border-color: rgba(0, 223, 235, 0.35);
 }
 
 .tower-equipment-option:has(input:checked) {
@@ -1562,14 +1581,8 @@ a {
   box-shadow: 0 0 0 1px var(--accent), 0 0 14px rgba(0, 223, 235, 0.14);
 }
 
-.tower-equipment-option:has(input:checked)::after {
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  content: "✓";
-  color: var(--accent);
-  font-size: 1.1rem;
-  font-weight: 800;
+.tower-equipment-option:has(input:checked):hover {
+  background: rgba(0, 223, 235, 0.28);
 }
 
 .tower-equipment-option input {
@@ -1612,8 +1625,7 @@ a {
   pointer-events: none;
 }
 
-.tower-equipment-option:hover .tower-equipment-tooltip,
-.tower-equipment-option:focus-within .tower-equipment-tooltip {
+.tower-equipment-option:hover .tower-equipment-tooltip {
   opacity: 1;
   visibility: visible;
   transform: translateY(0);
@@ -1625,6 +1637,75 @@ a {
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 10px;
+}
+
+.tower-active-run {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 10px;
+  padding: 14px 16px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.tower-active-run:first-child {
+  margin-top: 0;
+}
+
+.tower-active-run-main {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.tower-active-run-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px 12px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.tower-active-run-meta,
+.tower-active-run-members,
+.tower-active-run-monster {
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+.tower-active-run-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.tower-active-link {
+  color: var(--accent);
+  font-size: 0.88rem;
+  text-decoration: none;
+}
+
+.tower-active-link:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 800px) {
+  .tower-active-run {
+    flex-direction: column;
+  }
+
+  .tower-active-run-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
 }
 
 .tower-floor-pool h4 {

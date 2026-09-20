@@ -316,6 +316,12 @@ class WebPanel:
             methods=["POST"],
             name="juice_battle_tower_settings_update",
         )
+        app.add_api_route(
+            "/api/juice-battle/tower/force-end",
+            self.juice_battle_tower_force_end,
+            methods=["POST"],
+            name="juice_battle_tower_force_end",
+        )
         app.add_api_websocket_route("/ws/auction", self.auction_socket, name="auction_socket")
         return app
 
@@ -1246,6 +1252,28 @@ class WebPanel:
         except Exception:
             return JSONResponse({"ok": False, "error": "掉落設定格式錯誤"}, status_code=400)
         return JSONResponse(await cog.save_tower_settings(drop_pools))
+
+    async def juice_battle_tower_force_end(self, request: Request):
+        """
+        後台強制結束指定隊伍的爬塔進度。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "結束結果與最新進行中列表"
+        """
+        reject, context, cog = await self.juice_battle_tower_api_context(request)
+        if reject is not None:
+            return reject
+        try:
+            body = await request.json()
+            member_ids = body.get("member_ids")
+        except Exception:
+            return JSONResponse({"ok": False, "error": "請求格式錯誤"}, status_code=400)
+        if not isinstance(member_ids, list):
+            return JSONResponse({"ok": False, "error": "缺少隊伍成員"}, status_code=400)
+        return JSONResponse(await cog.tower_force_end_run(member_ids))
 
     async def encounter_admin_page(self, request: Request):
         """
