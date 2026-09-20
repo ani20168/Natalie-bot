@@ -18,7 +18,8 @@ class JuiceBattle(commands.Cog):
         self.challenge_timeout = 120.0
         self.battle_timeout = 180.0
         self.bag_view_timeout = 180.0
-        self.tower_view_timeout = 300.0
+        self.tower_view_timeout = 1200.0
+        self.tower_button_unlock_delay = 1.0
         self.tower_floor_min = 1
         self.tower_lock = asyncio.Lock()
         self.tower_aborted_teams = set()
@@ -1222,6 +1223,37 @@ class JuiceBattle(commands.Cog):
                 [str(member_id) for member_id in progress.get("member_ids") or []],
                 session,
             )
+        if isinstance(view, JuiceBattleTowerFloorView):
+            self.schedule_tower_button_unlock(view)
+
+    def schedule_tower_button_unlock(self, view: discord.ui.View):
+        """
+        排程解除爬塔按鈕鎖定，避免剛出現就誤觸。
+
+        Args:
+            view (discord.ui.View): "要解鎖的介面"
+        """
+        asyncio.create_task(self.unlock_tower_buttons_later(view))
+
+    async def unlock_tower_buttons_later(self, view: discord.ui.View):
+        """
+        延遲後啟用 View 上的按鈕並刷新訊息。
+
+        Args:
+            view (discord.ui.View): "要解鎖的介面"
+        """
+        await asyncio.sleep(self.tower_button_unlock_delay)
+        if view.is_finished():
+            return
+        for child in view.children:
+            child.disabled = False
+        message = getattr(view, "message", None)
+        if message is None:
+            return
+        try:
+            await message.edit(view=view)
+        except Exception:
+            return
 
     def build_bag_embed(self, juice_battle: dict, page: int, discard_confirm_slot: int | None = None) -> Embed:
         """
@@ -2311,6 +2343,7 @@ class JuiceBattle(commands.Cog):
         view = JuiceBattleTowerRewardView(cog=self, progress=progress, pending_index=0, recipients=[])
         view.message = interaction.message
         await interaction.response.edit_message(embed=view.build_embed(), view=view)
+        self.schedule_tower_button_unlock(view)
 
     @app_commands.command(name="juice_battle_tower", description="挑戰 Juice Battle 爬塔")
     @app_commands.describe(teammate="可選隊友，不能是機器人")
@@ -3902,8 +3935,8 @@ class JuiceBattleTowerChallengeButton(discord.ui.Button):
     """爬塔樓層挑戰按鈕。"""
 
     def __init__(self):
-        """建立挑戰按鈕。"""
-        super().__init__(label="挑戰", style=discord.ButtonStyle.danger)
+        """建立挑戰按鈕（初始鎖定防誤觸）。"""
+        super().__init__(label="挑戰", style=discord.ButtonStyle.danger, disabled=True)
 
     async def callback(self, interaction: discord.Interaction):
         """
@@ -3920,8 +3953,8 @@ class JuiceBattleTowerEscapeButton(discord.ui.Button):
     """爬塔樓層逃跑按鈕。"""
 
     def __init__(self):
-        """建立逃跑按鈕。"""
-        super().__init__(label="逃跑", style=discord.ButtonStyle.secondary)
+        """建立逃跑按鈕（初始鎖定防誤觸）。"""
+        super().__init__(label="逃跑", style=discord.ButtonStyle.secondary, disabled=True)
 
     async def callback(self, interaction: discord.Interaction):
         """
@@ -4087,6 +4120,7 @@ class JuiceBattleTowerNextFloorView(discord.ui.View):
             embed=self.cog.tower_floor_embed(self.progress),
             view=next_view,
         )
+        self.cog.schedule_tower_button_unlock(next_view)
         self.stop()
 
     async def on_timeout(self) -> None:
@@ -4232,6 +4266,7 @@ class JuiceBattleTowerView(discord.ui.View):
         self.last_attack_damage = 0
         self.log_text = ""
         self.finished = False
+        self.timed_out = False
         self.message: discord.Message | None = None
         self.rebuild_buttons()
 
@@ -4352,17 +4387,31 @@ class JuiceBattleTowerView(discord.ui.View):
             if fighter.get("berserk_triggered"):
                 status.append("暴走")
             armed_source = fighter.get("tower_skill_armed")
-            if armed_source:
-                ability = self.cog.tower_skill_definition(fighter, armed_source)
-                if ability:
-                    status.append(f"已發動：{ability['name']}")
+            armed_ability = self.cog.tower_skill_definition(fighter, armed_source) if armed_source else None
+            stance_active = bool(fighter.get("stance_swap_attack")) or (
+                armed_ability is not None and armed_ability.get("id") == "stance_swap"
+            )
+            if armed_ability and not stance_active:
+                status.append(f"已發動：{armed_ability['name']}")
+            elif stance_active:
+                status.append("架式對調中")
             status_text = f"\n狀態：{'／'.join(status)}" if status else ""
+            if stance_active:
+                display_atk = fighter["defense"]
+                display_def = fighter["atk"]
+                display_atk_offset = int(fighter.get("def_offset", 0)) + int(fighter.get("berserk_offset", 0))
+                display_def_offset = int(fighter.get("atk_offset", 0))
+            else:
+                display_atk = fighter["atk"]
+                display_def = fighter["defense"]
+                display_atk_offset = int(fighter.get("atk_offset", 0)) + int(fighter.get("berserk_offset", 0))
+                display_def_offset = int(fighter.get("def_offset", 0))
             embed.add_field(
                 name=f"{fighter['display_name']}（{fighter['character_name']}）",
                 value=(
                     f"HP **{fighter['hp']}/{fighter['max_hp']}**\n"
-                    f"攻擊 {fighter['atk']}({fighter.get('atk_offset', 0) + fighter.get('berserk_offset', 0):+d})｜"
-                    f"防禦 {fighter['defense']}({fighter.get('def_offset', 0):+d})｜"
+                    f"攻擊 {display_atk}({display_atk_offset:+d})｜"
+                    f"防禦 {display_def}({display_def_offset:+d})｜"
                     f"敏捷 {fighter['agi']}({fighter.get('agi_offset', 0) + fighter.get('dodge_offset', 0):+d})"
                     f"{status_text}"
                 ),
@@ -4370,7 +4419,12 @@ class JuiceBattleTowerView(discord.ui.View):
             )
         if self.log_text:
             embed.add_field(name="戰鬥紀錄", value=self.log_text[:1024], inline=False)
-        action_text = "本層已通關" if self.finished else "戰鬥處理中"
+        if self.timed_out:
+            action_text = "操作逾時"
+        elif self.finished:
+            action_text = "本層已通關"
+        else:
+            action_text = "戰鬥處理中"
         if not self.finished and self.phase == "player_attack" and self.current_actor() is not None:
             actor = self.current_actor()
             action_text = f"輪到 **{actor['display_name']}** 攻擊"
@@ -4799,6 +4853,7 @@ class JuiceBattleTowerView(discord.ui.View):
         attack_count = 1
         second_attack_uses_dodge = False
         bind = False
+        results = []
         if ability:
             if ability["id"] == "starburst":
                 attack_count = 2
@@ -4810,14 +4865,18 @@ class JuiceBattleTowerView(discord.ui.View):
             elif ability["id"] == "slime":
                 self.monster["dodge_offset"] = int(self.monster.get("dodge_offset", 0)) - 1
             elif ability["id"] == "holy_light":
+                # 只補存活隊員，不能救活已倒下的人
+                heal_parts = []
                 for fighter in self.living_fighters():
+                    before_hp = int(fighter.get("hp", 0))
                     self.cog.tower_add_hp(fighter, 3)
-                self.append_log("聖光發動，所有存活隊員回復 **3 HP**。")
+                    gained = int(fighter.get("hp", 0)) - before_hp
+                    heal_parts.append(f"{fighter['display_name']} +{gained}")
+                results.append(f"聖光發動，存活隊員回復：**{'／'.join(heal_parts)}**")
         armor_ability = attacker.get("armor_ability") if isinstance(attacker.get("armor_ability"), dict) else {}
         if armor_ability.get("id") == "desperate_counter" and attacker["hp"] in (1, 2):
             attack_count = max(attack_count, 3 if ability and ability.get("id") == "starburst" else 2)
             second_attack_uses_dodge = bool(ability and ability.get("id") == "starburst")
-        results = []
         for attack_index in range(attack_count):
             result = self.resolve_player_attack(
                 attacker,
@@ -5050,6 +5109,7 @@ class JuiceBattleTowerView(discord.ui.View):
         if self.finished:
             return
         self.finished = True
+        self.timed_out = True
         await self.save_battle_state()
         self.rebuild_buttons()
 
@@ -5081,7 +5141,7 @@ class JuiceBattleTowerClaimButton(discord.ui.Button):
             member_id (str): "領取者 ID"
             label (str): "按鈕顯示文字"
         """
-        super().__init__(label=label, style=discord.ButtonStyle.primary)
+        super().__init__(label=label, style=discord.ButtonStyle.primary, disabled=True)
         self.member_id = member_id
 
     async def callback(self, interaction: discord.Interaction):
@@ -5205,6 +5265,7 @@ class JuiceBattleTowerRewardView(discord.ui.View):
             )
             next_view.message = self.message
             await interaction.response.edit_message(embed=next_view.build_embed(), view=next_view)
+            self.cog.schedule_tower_button_unlock(next_view)
             self.stop()
             return
         await self.cog.tower_grant_rewards(self.progress, self.recipients)
