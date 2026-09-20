@@ -288,6 +288,12 @@ class WebPanel:
         app.add_api_route("/api/shop/buy-listing", self.shop_buy_listing, methods=["POST"], name="shop_buy_listing")
         app.add_api_route("/api/shop/quick-sell", self.shop_quick_sell, methods=["POST"], name="shop_quick_sell")
         app.add_api_route("/api/shop/skill-pickaxes", self.shop_skill_pickaxes, methods=["GET"], name="shop_skill_pickaxes")
+        app.add_api_route(
+            "/api/shop/juice-battle-equipment",
+            self.shop_juice_battle_equipment,
+            methods=["GET"],
+            name="shop_juice_battle_equipment",
+        )
         app.add_api_route("/api/shop/description", self.shop_description, methods=["POST"], name="shop_description")
         app.add_api_route("/api/shop/history", self.shop_history, methods=["GET"], name="shop_history_api")
         app.add_api_route("/api/shop/my-orders", self.shop_my_orders, methods=["GET"], name="shop_my_orders_api")
@@ -878,6 +884,31 @@ class WebPanel:
             return JSONResponse({"ok": False, "error": "這個商品不是技能礦鎬"}, status_code=400)
         return JSONResponse(
             {"ok": True, "items": await house.list_skill_pickaxes_for_product(context["user_id"], product)}
+        )
+
+    async def shop_juice_battle_equipment(self, request: Request, product_id: str = ""):
+        """
+        列出使用者背包中符合此商品的 Juice Battle 裝備。
+
+        Args:
+            request (Request): FastAPI request
+            product_id (str): "juice_battle_equipment:weapon:long_sword"
+
+        Returns:
+            response (JSONResponse): "{'ok': True, 'items': []}"
+        """
+        reject, context, house = await self.shop_api_context(request)
+        if reject is not None:
+            return reject
+        if not product_id:
+            return JSONResponse({"ok": False, "error": "缺少商品"}, status_code=400)
+        product = await house.get_product(product_id)
+        if product is None:
+            return JSONResponse({"ok": False, "error": "找不到這個商品"}, status_code=404)
+        if product.get("kind") != house.kind_juice_battle_equipment:
+            return JSONResponse({"ok": False, "error": "這個商品不是 Juice Battle 裝備"}, status_code=400)
+        return JSONResponse(
+            {"ok": True, "items": await house.list_juice_battle_equipment_for_product(context["user_id"], product)}
         )
 
     async def shop_buy_order(self, request: Request):

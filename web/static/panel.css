@@ -1260,6 +1260,32 @@ a {
   white-space: pre-line;
 }
 
+.shop-order-offsets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin: 8px 0 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+.shop-offset-hp {
+  color: #22c55e;
+}
+
+.shop-offset-atk {
+  color: #ef4444;
+}
+
+.shop-offset-def {
+  color: #3b82f6;
+}
+
+.shop-offset-agi {
+  color: #eab308;
+}
+
 .shop-pickaxe-option {
   display: flex;
   gap: 10px;

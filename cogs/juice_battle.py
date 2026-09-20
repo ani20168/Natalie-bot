@@ -711,6 +711,54 @@ class JuiceBattle(commands.Cog):
             return self.armors.get(item_id)
         return None
 
+    def equipment_stat_offsets(self, entry: dict) -> dict | None:
+        """
+        取得背包裝備的四項偏移；優先用實例欄位，否則用模板。
+
+        Args:
+            entry (dict): "{'item_id': 'long_sword', 'kind': 'weapon'}"
+
+        Returns:
+            offsets (dict | None): "{'hp_offset': 0, 'atk_offset': 1, 'def_offset': 1, 'agi_offset': 0}"
+        """
+        if not isinstance(entry, dict):
+            return None
+        template = self.item_template(entry.get("kind"), entry.get("item_id"))
+        if template is None:
+            return None
+        offsets = {}
+        for key in ("hp_offset", "atk_offset", "def_offset", "agi_offset"):
+            if key in entry and entry[key] is not None:
+                offsets[key] = int(entry[key])
+            else:
+                offsets[key] = int(template.get(key, 0))
+        return offsets
+
+    def serialize_equipment_instance(self, entry: dict) -> dict | None:
+        """
+        複製一件可交易裝備實例（含偏移快照）。
+
+        Args:
+            entry (dict): "{'item_id': 'long_sword', 'kind': 'weapon'}"
+
+        Returns:
+            instance (dict | None): "{'item_id': 'long_sword', 'hp_offset': 0}"
+        """
+        offsets = self.equipment_stat_offsets(entry)
+        if offsets is None:
+            return None
+        template = self.item_template(entry.get("kind"), entry.get("item_id"))
+        if template is None or template.get("starter"):
+            return None
+        return {
+            "item_id": str(entry.get("item_id")),
+            "kind": str(entry.get("kind")),
+            "hp_offset": offsets["hp_offset"],
+            "atk_offset": offsets["atk_offset"],
+            "def_offset": offsets["def_offset"],
+            "agi_offset": offsets["agi_offset"],
+        }
+
     def offsets_from_juice(self, juice_battle: dict) -> dict:
         """
         依目前裝備計算四種偏移量。
@@ -728,15 +776,13 @@ class JuiceBattle(commands.Cog):
             if slot is None or slot < 0 or slot >= len(bag):
                 continue
             entry = bag[slot]
-            if not isinstance(entry, dict):
+            entry_offsets = self.equipment_stat_offsets(entry) if isinstance(entry, dict) else None
+            if entry_offsets is None:
                 continue
-            template = self.item_template(entry.get("kind"), entry.get("item_id"))
-            if template is None:
-                continue
-            offsets["hp_offset"] += template["hp_offset"]
-            offsets["atk_offset"] += template["atk_offset"]
-            offsets["def_offset"] += template["def_offset"]
-            offsets["agi_offset"] += template["agi_offset"]
+            offsets["hp_offset"] += entry_offsets["hp_offset"]
+            offsets["atk_offset"] += entry_offsets["atk_offset"]
+            offsets["def_offset"] += entry_offsets["def_offset"]
+            offsets["agi_offset"] += entry_offsets["agi_offset"]
         return offsets
 
     def format_stat_block(self, character_id: str, juice_battle: dict) -> str:

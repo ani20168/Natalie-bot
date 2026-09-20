@@ -24,14 +24,17 @@ class ShopHouse:
         self.lock = asyncio.Lock()
         self.category_server = "server"
         self.category_mining = "mining"
+        self.category_juice_battle = "juice_battle"
         self.category_labels = {
             self.category_server: "伺服器道具",
             self.category_mining: "挖礦遊戲",
+            self.category_juice_battle: "Juice Battle",
         }
         self.kind_mining_collection = "mining_collection"
         self.kind_animation_color = "animation_color_pass"
         self.kind_skill_pickaxe = "skill_pickaxe"
         self.kind_server_item = "server_item"
+        self.kind_juice_battle_equipment = "juice_battle_equipment"
         self.product_animation_color_id = "server_item:animation_color"
         self.product_animation_color_name = "動態顏色身份組使用權"
         self.grant_animation_color_id = "animation_color"
@@ -420,6 +423,39 @@ class ShopHouse:
             },
         }
 
+    def build_juice_battle_equipment_product(self, item: dict, sort_order: int) -> dict:
+        """
+        組出 Juice Battle 裝備商品文件。
+
+        Args:
+            item (dict): "{'item_id': 'long_sword', 'kind': 'weapon', 'name': '長劍'}"
+            sort_order (int): "1"
+
+        Returns:
+            product (dict): "{'product_id': 'juice_battle_equipment:weapon:long_sword'}"
+        """
+        item_id = str(item.get("item_id") or "")
+        kind = str(item.get("kind") or "")
+        product_id = f"{self.kind_juice_battle_equipment}:{kind}:{item_id}"
+        ability = item.get("ability") if isinstance(item.get("ability"), dict) else None
+        description = ""
+        if ability:
+            description = f"{ability.get('name') or ''}：{ability.get('description') or ''}".strip("：")
+        return {
+            "_id": product_id,
+            "product_id": product_id,
+            "category": self.category_juice_battle,
+            "name": item.get("name") or item_id,
+            "description": description,
+            "kind": self.kind_juice_battle_equipment,
+            "payload": {"item_id": item_id, "equipment_kind": kind},
+            "sort_order": sort_order,
+            "flags": {
+                "sell_owner_only": False,
+                "unlimited_stock": False,
+            },
+        }
+
     def server_item_id_of(self, product: dict) -> str:
         """
         取出伺服器道具 ID。
@@ -467,6 +503,11 @@ class ShopHouse:
                     sort_order += 1
             for template in mining_cog.skill_pickaxe_shop:
                 seeds.append(self.build_skill_pickaxe_product(template, sort_order))
+                sort_order += 1
+        juice_cog = self.bot.get_cog("JuiceBattle")
+        if juice_cog is not None:
+            for item in juice_cog.equipment_catalog():
+                seeds.append(self.build_juice_battle_equipment_product(item, sort_order))
                 sort_order += 1
         for product in seeds:
             await collection.update_one(
@@ -556,6 +597,214 @@ class ShopHouse:
         """
         payload = product.get("payload") if isinstance(product.get("payload"), dict) else {}
         return str(payload.get("template") or product.get("name") or "")
+
+    def juice_battle_equipment_payload(self, product: dict) -> tuple[str, str]:
+        """
+        取出 Juice Battle 裝備商品的種類與 ID。
+
+        Args:
+            product (dict): "{'payload': {'item_id': 'long_sword', 'equipment_kind': 'weapon'}}"
+
+        Returns:
+            payload (tuple): "('weapon', 'long_sword')"
+        """
+        payload = product.get("payload") if isinstance(product.get("payload"), dict) else {}
+        return str(payload.get("equipment_kind") or ""), str(payload.get("item_id") or "")
+
+    def juice_battle_offsets_public(self, instance: dict | None) -> dict | None:
+        """
+        轉成商店顯示用的偏移數值。
+
+        Args:
+            instance (dict | None): "{'hp_offset': 1}"
+
+        Returns:
+            offsets (dict | None): "{'hp': 1, 'atk': 0, 'def': 0, 'agi': 1}"
+        """
+        if not isinstance(instance, dict):
+            return None
+        return {
+            "hp": int(instance.get("hp_offset", 0) or 0),
+            "atk": int(instance.get("atk_offset", 0) or 0),
+            "def": int(instance.get("def_offset", 0) or 0),
+            "agi": int(instance.get("agi_offset", 0) or 0),
+        }
+
+    async def load_juice_battle_user(self, user_id: str):
+        """
+        讀取 Juice Battle 使用者資料。
+
+        Args:
+            user_id (str): "410847926236086272"
+
+        Returns:
+            state (tuple): "(juice_cog, user_data)"
+        """
+        juice_cog = self.bot.get_cog("JuiceBattle")
+        if juice_cog is None:
+            raise ValueError("Juice Battle 尚未就緒")
+        user_data = await juice_cog.load_user(str(user_id))
+        return juice_cog, user_data
+
+    async def list_juice_battle_equipment_for_product(self, user_id: str, product: dict) -> list[dict]:
+        """
+        列出背包中符合此商品的 Juice Battle 裝備。
+
+        Args:
+            user_id (str): "410847926236086272"
+            product (dict): "{'kind': 'juice_battle_equipment'}"
+
+        Returns:
+            items (list): "[{'slot': 2, 'offsets': {'hp': 0}}]"
+        """
+        equipment_kind, item_id = self.juice_battle_equipment_payload(product)
+        juice_cog, user_data = await self.load_juice_battle_user(user_id)
+        juice_battle = user_data["juice_battle"]
+        bag = juice_battle.get("bag") or []
+        items = []
+        for index, entry in enumerate(bag):
+            if not isinstance(entry, dict):
+                continue
+            if str(entry.get("kind") or "") != equipment_kind:
+                continue
+            if str(entry.get("item_id") or "") != item_id:
+                continue
+            instance = juice_cog.serialize_equipment_instance(entry)
+            if instance is None:
+                continue
+            equipped = juice_battle.get("equipped_weapon_slot") == index or juice_battle.get("equipped_armor_slot") == index
+            items.append(
+                {
+                    "slot": index,
+                    "slot_label": index + 1,
+                    "item_id": item_id,
+                    "kind": equipment_kind,
+                    "offsets": self.juice_battle_offsets_public(instance),
+                    "equipped": bool(equipped),
+                }
+            )
+        return items
+
+    async def count_juice_battle_equipment(self, user_id: str, product: dict) -> int:
+        """
+        統計背包中某 Juice Battle 裝備數量。
+
+        Args:
+            user_id (str): "410847926236086272"
+            product (dict): "{'payload': {'item_id': 'long_sword'}}"
+
+        Returns:
+            count (int): "2"
+        """
+        return len(await self.list_juice_battle_equipment_for_product(user_id, product))
+
+    async def has_empty_juice_battle_slot(self, user_id: str) -> bool:
+        """
+        Juice Battle 背包是否還有空格。
+
+        Args:
+            user_id (str): "410847926236086272"
+
+        Returns:
+            ok (bool): "True"
+        """
+        juice_cog, user_data = await self.load_juice_battle_user(user_id)
+        bag = user_data["juice_battle"].get("bag") or []
+        return any(entry is None for entry in bag)
+
+    async def take_juice_battle_equipment(self, user_id: str, product: dict, slot: int) -> dict | None:
+        """
+        從 Juice Battle 背包取出指定裝備。
+
+        Args:
+            user_id (str): "410847926236086272"
+            product (dict): "{'payload': {'item_id': 'long_sword'}}"
+            slot (int): "2"
+
+        Returns:
+            instance (dict | None): "{'item_id': 'long_sword', 'hp_offset': 0}"
+        """
+        equipment_kind, item_id = self.juice_battle_equipment_payload(product)
+        juice_cog, user_data = await self.load_juice_battle_user(user_id)
+        juice_battle = user_data["juice_battle"]
+        if juice_battle.get("playing"):
+            return None
+        bag = juice_battle.get("bag") or []
+        if slot < 0 or slot >= len(bag):
+            return None
+        entry = bag[slot]
+        if not isinstance(entry, dict):
+            return None
+        if str(entry.get("kind") or "") != equipment_kind or str(entry.get("item_id") or "") != item_id:
+            return None
+        instance = juice_cog.serialize_equipment_instance(entry)
+        if instance is None:
+            return None
+        if juice_battle.get("equipped_weapon_slot") == slot:
+            juice_battle["equipped_weapon_slot"] = None
+        if juice_battle.get("equipped_armor_slot") == slot:
+            juice_battle["equipped_armor_slot"] = None
+        bag[slot] = None
+        juice_battle["bag"] = bag
+        await common.mongo_storage.replace_user(str(user_id), user_data)
+        return instance
+
+    async def return_juice_battle_equipment(self, user_id: str, instance: dict) -> bool:
+        """
+        把 Juice Battle 裝備放回背包第一個空格。
+
+        Args:
+            user_id (str): "410847926236086272"
+            instance (dict): "{'item_id': 'long_sword'}"
+
+        Returns:
+            ok (bool): "True"
+        """
+        juice_cog, user_data = await self.load_juice_battle_user(user_id)
+        juice_battle = user_data["juice_battle"]
+        bag = juice_battle.get("bag") or []
+        empty_index = next((index for index, entry in enumerate(bag) if entry is None), None)
+        if empty_index is None:
+            return False
+        restored = juice_cog.serialize_equipment_instance(instance)
+        if restored is None:
+            return False
+        bag[empty_index] = restored
+        juice_battle["bag"] = bag
+        await common.mongo_storage.replace_user(str(user_id), user_data)
+        return True
+
+    async def deliver_juice_battle_equipment(self, user_id: str, instance: dict) -> bool:
+        """
+        把 Juice Battle 裝備交給買家。
+
+        Args:
+            user_id (str): "410847926236086272"
+            instance (dict): "{'item_id': 'long_sword', 'hp_offset': 0}"
+
+        Returns:
+            ok (bool): "True"
+        """
+        return await self.return_juice_battle_equipment(user_id, instance)
+
+    def juice_battle_offset_lines(self, offsets) -> list:
+        """
+        商店賣單用的偏移量文字列。
+
+        Args:
+            offsets: "{'hp': 1, 'atk': 0, 'def': 0, 'agi': 1}"
+
+        Returns:
+            lines (list): "['生命 +1', '攻擊 +0']"
+        """
+        if not isinstance(offsets, dict):
+            return []
+        return [
+            f"生命 {int(offsets.get('hp', 0) or 0):+d}",
+            f"攻擊 {int(offsets.get('atk', 0) or 0):+d}",
+            f"防禦 {int(offsets.get('def', 0) or 0):+d}",
+            f"閃避 {int(offsets.get('agi', 0) or 0):+d}",
+        ]
 
     def copy_pickaxe_instance(self, entry: dict) -> dict:
         """
@@ -972,6 +1221,8 @@ class ShopHouse:
             return await self.get_collection_count(user_id, self.collection_name_of(product))
         if product.get("kind") == self.kind_skill_pickaxe:
             return await self.count_skill_pickaxes(user_id, self.skill_pickaxe_template_of(product))
+        if product.get("kind") == self.kind_juice_battle_equipment:
+            return await self.count_juice_battle_equipment(user_id, product)
         if product.get("kind") == self.kind_server_item:
             item_house = self.server_item_house()
             if item_house is None:
@@ -1137,8 +1388,9 @@ class ShopHouse:
         user_id = str(order.get("user_id") or "")
         instance = order.get("item_instance") if isinstance(order.get("item_instance"), dict) else None
         skills = instance.get("skills") if instance is not None and isinstance(instance.get("skills"), dict) else {}
-        skill_lines = self.skill_pickaxe_public_lines(skills) if instance is not None else []
+        skill_lines = self.skill_pickaxe_public_lines(skills) if instance is not None and "skills" in (instance or {}) else []
         skill_keys = [key for key, value in skills.items() if value]
+        offsets = self.juice_battle_offsets_public(instance) if instance is not None and "item_id" in instance else None
         remark = str(order.get("remark") or "").strip()
         return {
             "order_id": int(order.get("order_id") or 0),
@@ -1149,6 +1401,8 @@ class ShopHouse:
             "is_mine": user_id == str(viewer_id),
             "skill_lines": skill_lines,
             "skill_keys": skill_keys,
+            "offsets": offsets,
+            "has_offsets": offsets is not None,
             "remark": remark,
         }
 
@@ -1194,6 +1448,7 @@ class ShopHouse:
         need_mining = False
         need_animation = False
         need_server_item = False
+        need_juice_battle = False
         for product in products:
             kind = product.get("kind")
             if kind in (self.kind_mining_collection, self.kind_skill_pickaxe):
@@ -1202,6 +1457,8 @@ class ShopHouse:
                 need_animation = True
             if kind == self.kind_server_item:
                 need_server_item = True
+            if kind == self.kind_juice_battle_equipment:
+                need_juice_battle = True
         mining_cog = None
         user_mining = None
         if need_mining:
@@ -1217,6 +1474,13 @@ class ShopHouse:
         if item_house is not None:
             server_user = await item_house.load_user(user_id)
             server_bag = item_house.normalize_bag(server_user)
+        juice_bag = None
+        if need_juice_battle:
+            try:
+                _juice_cog, juice_user = await self.load_juice_battle_user(user_id)
+                juice_bag = juice_user["juice_battle"].get("bag") or []
+            except ValueError:
+                juice_bag = []
         owned_map = {}
         for product in products:
             product_id = product["product_id"]
@@ -1236,6 +1500,16 @@ class ShopHouse:
                 count = 0
                 for entry in (user_mining or {}).get("pickaxe_bag") or []:
                     if mining_cog.is_skill_pickaxe_entry(entry) and str(entry.get("template") or "") == template:
+                        count += 1
+                owned_map[product_id] = count
+                continue
+            if product.get("kind") == self.kind_juice_battle_equipment:
+                equipment_kind, item_id = self.juice_battle_equipment_payload(product)
+                count = 0
+                for entry in juice_bag or []:
+                    if not isinstance(entry, dict):
+                        continue
+                    if str(entry.get("kind") or "") == equipment_kind and str(entry.get("item_id") or "") == item_id:
                         count += 1
                 owned_map[product_id] = count
                 continue
@@ -1368,6 +1642,7 @@ class ShopHouse:
                 "can_edit_description": bool(permissions.get("shop_edit_description")),
                 "unlimited_stock": bool((product.get("flags") or {}).get("unlimited_stock")),
                 "is_skill_pickaxe": product.get("kind") == self.kind_skill_pickaxe,
+                "is_juice_battle_equipment": product.get("kind") == self.kind_juice_battle_equipment,
             },
             "buy_orders": [self.order_to_public(order, viewer_id) for order in buy_orders],
             "my_buy_orders": [self.order_to_public(order, viewer_id) for order in my_buy_orders],
@@ -1428,6 +1703,11 @@ class ShopHouse:
                 reserved_cake = parsed_price * parsed_quantity
                 if not await self.has_empty_pickaxe_slot(user_id):
                     return {"ok": False, "error": "挖礦背包沒有空位，無法求購"}
+            if product.get("kind") == self.kind_juice_battle_equipment:
+                parsed_quantity = 1
+                reserved_cake = parsed_price * parsed_quantity
+                if not await self.has_empty_juice_battle_slot(user_id):
+                    return {"ok": False, "error": "Juice Battle 背包沒有空位，無法求購"}
             if product.get("kind") == self.kind_server_item:
                 item_house = self.server_item_house()
                 if item_house is None or not await item_house.can_receive(user_id, self.server_item_id_of(product)):
@@ -1528,6 +1808,15 @@ class ShopHouse:
                 item_instance = await self.take_skill_pickaxe(user_id, self.skill_pickaxe_template_of(product), slot)
                 if item_instance is None:
                     return {"ok": False, "error": "找不到這把礦鎬，或它不符合此商品"}
+            elif product.get("kind") == self.kind_juice_battle_equipment:
+                parsed_quantity = 1
+                try:
+                    slot = int(bag_slot)
+                except (TypeError, ValueError):
+                    return {"ok": False, "error": "請選擇要上架的裝備"}
+                item_instance = await self.take_juice_battle_equipment(user_id, product, slot)
+                if item_instance is None:
+                    return {"ok": False, "error": "找不到這件裝備，或目前無法上架（對戰中／初始裝不可賣）"}
             elif not await self.reserve_item(user_id, product, parsed_quantity):
                 owned = await self.get_owned_count(user_id, product)
                 owned_text = self.owned_label(owned)
@@ -1580,11 +1869,16 @@ class ShopHouse:
                     return {"ok": False, "error": "這筆賣單缺少礦鎬資料"}
                 if not await self.return_skill_pickaxe(user_id, instance):
                     return {"ok": False, "error": "挖礦背包已滿，請先空出一格再下架"}
+            elif product.get("kind") == self.kind_juice_battle_equipment:
+                if instance is None:
+                    return {"ok": False, "error": "這筆賣單缺少裝備資料"}
+                if not await self.return_juice_battle_equipment(user_id, instance):
+                    return {"ok": False, "error": "Juice Battle 背包已滿，請先空出一格再下架"}
             await collection.update_one(
                 {"_id": str(order_id)},
                 {"$set": {"status": self.order_status_cancelled, "quantity": 0, "closed_at": self.now_iso()}},
             )
-            if product.get("kind") != self.kind_skill_pickaxe:
+            if product.get("kind") not in (self.kind_skill_pickaxe, self.kind_juice_battle_equipment):
                 await self.release_item(user_id, product, quantity)
         return {"ok": True}
 
@@ -1761,6 +2055,8 @@ class ShopHouse:
             buyer_extra = ["商品已發放到你的帳戶。"]
             if product.get("kind") == self.kind_skill_pickaxe:
                 buyer_extra.append("已放入挖礦背包。")
+            elif product.get("kind") == self.kind_juice_battle_equipment:
+                buyer_extra.append("已放入 Juice Battle 背包。")
             elif product.get("kind") == self.kind_animation_color:
                 buyer_extra.append("已獲得動態顏色身份組使用權。")
             elif product.get("kind") == self.kind_server_item:
@@ -1790,6 +2086,11 @@ class ShopHouse:
                     skills = item_instance.get("skills") or {}
                 skill_lines = self.skill_pickaxe_public_lines(skills)
                 seller_text += "\n\n技能：\n" + "\n".join(skill_lines)
+            elif product.get("kind") == self.kind_juice_battle_equipment:
+                offsets = self.juice_battle_offsets_public(item_instance if isinstance(item_instance, dict) else None)
+                offset_lines = self.juice_battle_offset_lines(offsets)
+                if offset_lines:
+                    seller_text += "\n\n偏移：\n" + "\n".join(offset_lines)
             buyer_embed = Embed(title=self.trade_dm_title, description=buyer_text, color=common.bot_color)
             seller_embed = Embed(title=self.trade_dm_title, description=seller_text, color=common.bot_color)
             await asyncio.gather(
@@ -1907,6 +2208,15 @@ class ShopHouse:
                     return {"ok": False, "error": "這筆賣單缺少礦鎬資料"}
                 if not await self.has_empty_pickaxe_slot(buyer_id):
                     return {"ok": False, "error": "挖礦背包沒有空位，無法購買"}
+            if product.get("kind") == self.kind_juice_battle_equipment:
+                fill_quantity = 1
+                if fill_quantity > remaining:
+                    return {"ok": False, "error": f"這筆賣單只剩 {remaining} 個"}
+                item_instance = order.get("item_instance") if isinstance(order.get("item_instance"), dict) else None
+                if item_instance is None:
+                    return {"ok": False, "error": "這筆賣單缺少裝備資料"}
+                if not await self.has_empty_juice_battle_slot(buyer_id):
+                    return {"ok": False, "error": "Juice Battle 背包沒有空位，無法購買"}
             if product.get("kind") == self.kind_server_item:
                 item_house = self.server_item_house()
                 if item_house is None or not await item_house.can_receive(buyer_id, self.server_item_id_of(product)):
@@ -1919,12 +2229,16 @@ class ShopHouse:
             try:
                 if product.get("kind") == self.kind_skill_pickaxe:
                     delivered = await self.deliver_skill_pickaxe(buyer_id, item_instance)
+                elif product.get("kind") == self.kind_juice_battle_equipment:
+                    delivered = await self.deliver_juice_battle_equipment(buyer_id, item_instance)
                 else:
                     delivered = await self.deliver_item(buyer_id, product, fill_quantity)
                 if not delivered:
                     await self.add_cake(buyer_id, total)
                     if product.get("kind") == self.kind_skill_pickaxe:
                         deliver_error = "挖礦背包沒有空位，無法購買"
+                    elif product.get("kind") == self.kind_juice_battle_equipment:
+                        deliver_error = "Juice Battle 背包沒有空位，無法購買"
                     elif product.get("kind") == self.kind_server_item:
                         deliver_error = "背包已滿，無法購買"
                     else:
@@ -2015,9 +2329,20 @@ class ShopHouse:
                 item_instance = await self.take_skill_pickaxe(seller_id, self.skill_pickaxe_template_of(product), slot)
                 if item_instance is None:
                     return {"ok": False, "error": "找不到這把礦鎬，或它不符合此商品"}
+            elif product.get("kind") == self.kind_juice_battle_equipment:
+                if remaining < 1:
+                    return {"ok": False, "error": "這筆求購單已經沒有剩餘數量"}
+                fill_quantity = 1
+                try:
+                    slot = int(bag_slot)
+                except (TypeError, ValueError):
+                    return {"ok": False, "error": "請選擇要快速販賣的裝備"}
+                item_instance = await self.take_juice_battle_equipment(seller_id, product, slot)
+                if item_instance is None:
+                    return {"ok": False, "error": "找不到這件裝備，或目前無法上架（對戰中／初始裝不可賣）"}
             elif fill_quantity < 1:
                 return {"ok": False, "error": "這筆求購單已經沒有剩餘數量"}
-            if product.get("kind") != self.kind_skill_pickaxe:
+            if product.get("kind") not in (self.kind_skill_pickaxe, self.kind_juice_battle_equipment):
                 owned = await self.get_owned_count(seller_id, product)
                 if owned is not None and fill_quantity > owned:
                     return {"ok": False, "error": f"你只有 {owned} 個{product.get('name') or '商品'}"}
@@ -2030,6 +2355,8 @@ class ShopHouse:
             if reserved_cake < total:
                 if product.get("kind") == self.kind_skill_pickaxe:
                     await self.return_skill_pickaxe(seller_id, item_instance)
+                elif product.get("kind") == self.kind_juice_battle_equipment:
+                    await self.return_juice_battle_equipment(seller_id, item_instance)
                 else:
                     await self.release_item(seller_id, product, fill_quantity)
                 return {"ok": False, "error": "求購單預扣蛋糕不足"}
@@ -2037,12 +2364,17 @@ class ShopHouse:
                 delivered = await self.deliver_skill_pickaxe(
                     buyer_id, item_instance, target.get("locked_bag_slot"), target.get("order_id")
                 )
+            elif product.get("kind") == self.kind_juice_battle_equipment:
+                delivered = await self.deliver_juice_battle_equipment(buyer_id, item_instance)
             else:
                 delivered = await self.deliver_item(buyer_id, product, fill_quantity)
             if not delivered:
                 if product.get("kind") == self.kind_skill_pickaxe:
                     await self.return_skill_pickaxe(seller_id, item_instance)
                     return {"ok": False, "error": "對方挖礦背包沒有空位，無法成交"}
+                if product.get("kind") == self.kind_juice_battle_equipment:
+                    await self.return_juice_battle_equipment(seller_id, item_instance)
+                    return {"ok": False, "error": "對方 Juice Battle 背包沒有空位，無法成交"}
                 await self.release_item(seller_id, product, fill_quantity)
                 return {"ok": False, "error": "對方背包已滿，無法成交" if product.get("kind") == self.kind_server_item else "發放商品失敗"}
             seller_gain, fee, fee_percent = await self.settle_trade_cake(seller_id, total)
