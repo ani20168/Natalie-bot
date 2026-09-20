@@ -1935,20 +1935,44 @@ class JuiceBattle(commands.Cog):
         progress.pop("battle", None)
         floor = int(progress.get("floor", self.tower_floor_min))
         progress["cleared_floor"] = floor
-        progress["pending_cake"] = int(progress.get("pending_cake", 0)) + int(round(800 * floor * random.uniform(0.9, 1.1)))
+        cake_reward = int(round(800 * floor * random.uniform(0.9, 1.1)))
+        progress["pending_cake"] = int(progress.get("pending_cake", 0)) + cake_reward
+        equipment_reward = None
         if floor % 5 == 0:
             item_id = await self.tower_pick_equipment(floor)
             if item_id:
                 progress.setdefault("pending_equipment", []).append(item_id)
+                equipment_reward = item_id
         progress["member_hp"] = {fighter["user_id"]: max(0, int(fighter["hp"])) for fighter in view.fighters}
         progress["dead_ids"] = [fighter["user_id"] for fighter in view.fighters if fighter["hp"] <= 0]
         progress["floor"] = floor + 1
         progress["monster"] = self.build_tower_monster(floor + 1)
         await self.tower_save_progress(progress)
         view.stop()
-        next_view = JuiceBattleTowerFloorView(cog=self, progress=progress)
+        view.rebuild_buttons()
+        result_embed = view.build_embed()
+        result_embed.title = f"Juice Battle｜爬塔第 {floor} 層通關"
+        result_embed.description = "怪物已死亡，本層挑戰成功！"
+        equipment_name = "無"
+        if equipment_reward:
+            equipment_template = (
+                self.item_template("weapon", equipment_reward)
+                or self.item_template("armor", equipment_reward)
+            )
+            equipment_name = equipment_template["name"] if equipment_template else str(equipment_reward)
+        result_embed.add_field(
+            name="戰利品",
+            value=(
+                f"蛋糕：+{cake_reward} {common.cake_emoji}"
+                f"（目前累積 {int(progress.get('pending_cake', 0))}）\n"
+                f"裝備：{equipment_name}"
+                f"（目前累積 {len(progress.get('pending_equipment') or [])} 件）"
+            ),
+            inline=False,
+        )
+        next_view = JuiceBattleTowerNextFloorView(cog=self, progress=progress)
         next_view.message = view.message
-        await view.message.edit(embed=self.tower_floor_embed(progress, log_text=log_text), view=next_view)
+        await view.message.edit(embed=result_embed, view=next_view)
 
     async def tower_start_battle(self, interaction: discord.Interaction, progress: dict):
         """
@@ -3524,6 +3548,110 @@ class JuiceBattleTowerFloorView(discord.ui.View):
                 pass
 
 
+class JuiceBattleTowerNextFloorButton(discord.ui.Button):
+    """前往下一層按鈕。"""
+
+    def __init__(self):
+        """建立前往下一層按鈕。"""
+        super().__init__(label="前往下一層", style=discord.ButtonStyle.success)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        進入下一層樓層入口。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: JuiceBattleTowerNextFloorView = self.view  # type: ignore[assignment]
+        await view.on_next_floor(interaction)
+
+
+class JuiceBattleTowerNextFloorView(discord.ui.View):
+    """爬塔單層通關後的戰鬥結果介面。"""
+
+    def __init__(self, *, cog: JuiceBattle, progress: dict):
+        """
+        建立單層通關結果 View。
+
+        Args:
+            cog (JuiceBattle): "Juice Battle cog"
+            progress (dict): "已保存下一層進度"
+        """
+        super().__init__(timeout=cog.tower_view_timeout)
+        self.cog = cog
+        self.progress = copy.deepcopy(progress)
+        self.message: discord.Message | None = None
+        self.finished = False
+        self.add_item(JuiceBattleTowerNextFloorButton())
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """
+        只允許爬塔隊員進入下一層。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+
+        Returns:
+            allowed (bool): "是否為本次爬塔隊員"
+        """
+        member_ids = {str(member_id) for member_id in self.progress.get("member_ids") or []}
+        if str(interaction.user.id) in member_ids:
+            return True
+        await interaction.response.send_message(
+            embed=Embed(
+                title="Juice Battle｜爬塔",
+                description="只有本次爬塔隊員可以進入下一層。",
+                color=common.bot_error_color,
+            ),
+            ephemeral=True,
+        )
+        return False
+
+    async def on_next_floor(self, interaction: discord.Interaction):
+        """
+        顯示下一層怪物與挑戰／逃跑按鈕。
+
+        Args:
+            interaction (discord.Interaction): "前往下一層按鈕互動"
+        """
+        if self.finished:
+            return
+        self.finished = True
+        next_view = JuiceBattleTowerFloorView(cog=self.cog, progress=self.progress)
+        next_view.message = self.message
+        await interaction.response.edit_message(
+            embed=self.cog.tower_floor_embed(self.progress),
+            view=next_view,
+        )
+        self.stop()
+
+    async def on_timeout(self) -> None:
+        """
+        通關結果介面逾時後保存進度並解除隊伍鎖定。
+        """
+        if self.finished:
+            return
+        self.finished = True
+        for member_id in self.progress.get("member_ids") or []:
+            await self.cog.clear_session(str(member_id))
+        floor_view = JuiceBattleTowerFloorView(cog=self.cog, progress=self.progress)
+        for child in floor_view.children:
+            child.disabled = True
+        floor_view.message = self.message
+        if self.message is not None:
+            try:
+                await self.message.edit(
+                    embed=self.cog.tower_floor_embed(
+                        self.progress,
+                        log_text="通關結果介面操作逾時，請重新使用指令繼續。",
+                    ),
+                    view=floor_view,
+                )
+            except Exception:
+                pass
+        self.stop()
+
+
 class JuiceBattleTowerAttackButton(discord.ui.Button):
     """爬塔玩家攻擊按鈕。"""
 
@@ -3777,8 +3905,8 @@ class JuiceBattleTowerView(discord.ui.View):
             )
         if self.log_text:
             embed.add_field(name="戰鬥紀錄", value=self.log_text[:1024], inline=False)
-        action_text = "戰鬥處理中"
-        if self.phase == "player_attack" and self.current_actor() is not None:
+        action_text = "本層已通關" if self.finished else "戰鬥處理中"
+        if not self.finished and self.phase == "player_attack" and self.current_actor() is not None:
             actor = self.current_actor()
             action_text = f"輪到 **{actor['display_name']}** 攻擊"
             armed_source = actor.get("tower_skill_armed")
@@ -3786,7 +3914,7 @@ class JuiceBattleTowerView(discord.ui.View):
                 ability = self.cog.tower_skill_definition(actor, armed_source)
                 if ability:
                     action_text += f"\n已發動：**{ability['name']}**"
-        elif self.phase == "player_defend" and self.pending_target_id:
+        elif not self.finished and self.phase == "player_defend" and self.pending_target_id:
             defender = self.fighter_by_id(self.pending_target_id)
             action_text = f"輪到 **{defender['display_name']}** 選擇防禦或閃避"
             if self.pending_bind:

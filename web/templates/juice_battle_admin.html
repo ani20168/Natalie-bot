@@ -13,7 +13,8 @@
     <button type="button" class="btn btn-bid btn-sm" id="tower-settings-save">儲存設定</button>
   </div>
   <p class="encounter-hint">5、10、15 等樓層沒有專屬設定時，會從這裡勾選的裝備中平均抽取。全部取消勾選代表不掉落裝備。</p>
-  <div id="tower-default-pool" class="tower-equipment-grid"></div>
+  <div class="tower-pool-summary" id="tower-default-summary">尚未選擇裝備。</div>
+  <button type="button" class="btn btn-outline btn-sm" id="tower-default-open">選擇裝備</button>
 </section>
 
 <section class="shop-admin-card">
@@ -28,15 +29,74 @@
 
 {% block extra_script %}
 <div id="tower-settings-toast" class="auction-toast" role="status"></div>
+<div class="dialog-backdrop" id="tower-equipment-dialog" role="dialog" aria-modal="true" aria-labelledby="tower-equipment-dialog-title">
+  <div class="dialog-card dialog-wide tower-equipment-dialog-card">
+    <div class="tower-dialog-head">
+      <div>
+        <h3 id="tower-equipment-dialog-title">選擇裝備</h3>
+        <p id="tower-equipment-dialog-lead">勾選要加入掉落池的裝備。</p>
+      </div>
+      <button type="button" class="tower-dialog-close" id="tower-equipment-close" aria-label="關閉">×</button>
+    </div>
+    <div class="tower-equipment-toolbar">
+      <input type="search" id="tower-equipment-search" placeholder="搜尋裝備名稱、類型或技能">
+      <span id="tower-equipment-count"></span>
+    </div>
+    <div id="tower-equipment-list" class="tower-equipment-modal-list"></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="tower-equipment-cancel">取消</button>
+      <button type="button" class="btn btn-bid btn-sm" id="tower-equipment-confirm">套用選擇</button>
+    </div>
+  </div>
+</div>
+<div class="dialog-backdrop" id="tower-floor-dialog" role="dialog" aria-modal="true" aria-labelledby="tower-floor-dialog-title">
+  <div class="dialog-card dialog-wide tower-equipment-dialog-card">
+    <div class="tower-dialog-head">
+      <div>
+        <h3 id="tower-floor-dialog-title">新增指定樓層</h3>
+        <p>輸入樓層並在同一個視窗選擇該樓層的掉落裝備。</p>
+      </div>
+      <button type="button" class="tower-dialog-close" id="tower-floor-close" aria-label="關閉">×</button>
+    </div>
+    <div class="shop-field tower-floor-input-field">
+      <label for="tower-floor-input">樓層（正的 5 倍數）</label>
+      <input type="number" id="tower-floor-input" min="5" step="5" placeholder="例如 5">
+    </div>
+    <div class="tower-equipment-toolbar">
+      <input type="search" id="tower-floor-search" placeholder="搜尋裝備名稱、類型或技能">
+      <span id="tower-floor-count"></span>
+    </div>
+    <div id="tower-floor-equipment-list" class="tower-equipment-modal-list"></div>
+    <div class="dialog-actions">
+      <button type="button" class="btn btn-outline btn-sm" id="tower-floor-cancel">取消</button>
+      <button type="button" class="btn btn-bid btn-sm" id="tower-floor-confirm">新增樓層</button>
+    </div>
+  </div>
+</div>
 <script>
   (function () {
     var equipment = [];
     var pools = { default: [] };
-    var defaultBox = document.getElementById("tower-default-pool");
+    var defaultSummary = document.getElementById("tower-default-summary");
     var floorsBox = document.getElementById("tower-floor-pools");
     var toastBox = document.getElementById("tower-settings-toast");
     var saveButton = document.getElementById("tower-settings-save");
     var addButton = document.getElementById("tower-floor-add");
+    var defaultOpenButton = document.getElementById("tower-default-open");
+    var equipmentDialog = document.getElementById("tower-equipment-dialog");
+    var equipmentDialogTitle = document.getElementById("tower-equipment-dialog-title");
+    var equipmentDialogLead = document.getElementById("tower-equipment-dialog-lead");
+    var equipmentSearch = document.getElementById("tower-equipment-search");
+    var equipmentCount = document.getElementById("tower-equipment-count");
+    var equipmentList = document.getElementById("tower-equipment-list");
+    var floorDialog = document.getElementById("tower-floor-dialog");
+    var floorInput = document.getElementById("tower-floor-input");
+    var floorSearch = document.getElementById("tower-floor-search");
+    var floorCount = document.getElementById("tower-floor-count");
+    var floorEquipmentList = document.getElementById("tower-floor-equipment-list");
+    var activePool = "";
+    var draftSelection = [];
+    var floorDraftSelection = [];
     var toastHideTimer = null;
     var toastOutTimer = null;
 
@@ -66,28 +126,84 @@
       }, 2400);
     }
 
-    function equipmentLabel(item) {
+    function equipmentStats(item) {
       var kind = item.kind === "weapon" ? "武器" : "防具";
-      var stats = "HP" + item.hp_offset + "｜攻擊" + item.atk_offset +
+      return kind + "｜HP" + item.hp_offset + "｜攻擊" + item.atk_offset +
         "｜防禦" + item.def_offset + "｜敏捷" + item.agi_offset;
-      var ability = item.ability && item.ability.name ? "｜" + item.ability.name : "";
-      return "<strong>" + escapeHtml(item.name) + "</strong><small>" +
-        escapeHtml(kind + "｜" + stats + ability) + "</small>";
     }
 
-    function isChecked(pool, itemId) {
-      return (pools[pool] || []).indexOf(itemId) >= 0;
+    function equipmentSearchText(item) {
+      var ability = item.ability || {};
+      return [
+        item.name,
+        item.kind === "weapon" ? "武器" : "防具",
+        equipmentStats(item),
+        ability.name || "",
+        ability.description || ""
+      ].join(" ").toLowerCase();
     }
 
-    function renderPool(pool, box) {
+    function equipmentOption(item, selected) {
+      var checked = selected.indexOf(item.item_id) >= 0 ? " checked" : "";
+      var ability = item.ability || {};
+      var abilityName = ability.name || "沒有特殊技能";
+      var abilityDescription = ability.description || "這件裝備沒有額外技能。";
+      return "<label class=\"tower-equipment-option\" data-equipment-text=\"" +
+        escapeHtml(equipmentSearchText(item)) + "\">" +
+        "<input type=\"checkbox\" data-item-id=\"" + escapeHtml(item.item_id) + "\"" + checked + ">" +
+        "<span class=\"tower-equipment-option-body\">" +
+        "<strong>" + escapeHtml(item.name) + "</strong>" +
+        "<small>" + escapeHtml(equipmentStats(item)) + "</small>" +
+        "<span class=\"tower-equipment-tooltip\" role=\"tooltip\">" +
+        "<b>" + escapeHtml(abilityName) + "</b><br>" +
+        escapeHtml(abilityDescription) + "</span>" +
+        "</span></label>";
+    }
+
+    function renderEquipmentList(box, countBox, selected, searchText) {
       if (!box) return;
-      box.innerHTML = equipment.map(function (item) {
-        var checked = isChecked(pool, item.item_id) ? " checked" : "";
-        return "<label class=\"tower-equipment-option\">" +
-          "<input type=\"checkbox\" data-pool=\"" + escapeHtml(pool) +
-          "\" data-item-id=\"" + escapeHtml(item.item_id) + "\"" + checked + ">" +
-          "<span>" + equipmentLabel(item) + "</span></label>";
-      }).join("");
+      var keyword = String(searchText || "").trim().toLowerCase();
+      var visible = equipment.filter(function (item) {
+        return !keyword || equipmentSearchText(item).indexOf(keyword) >= 0;
+      });
+      box.innerHTML = visible.length
+        ? visible.map(function (item) { return equipmentOption(item, selected); }).join("")
+        : "<p class=\"encounter-empty\">找不到符合的裝備。</p>";
+      if (countBox) {
+        countBox.textContent = "顯示 " + visible.length + " / " + equipment.length +
+          " 件，已選 " + selected.length + " 件";
+      }
+    }
+
+    function updateDraftItemSelection(event, target) {
+      var input = event.target;
+      if (!input || input.type !== "checkbox") return;
+      var itemId = input.getAttribute("data-item-id");
+      var index = target.indexOf(itemId);
+      if (input.checked && index < 0) {
+        target.push(itemId);
+      } else if (!input.checked && index >= 0) {
+        target.splice(index, 1);
+      }
+    }
+
+    function poolSummary(pool) {
+      var selected = pools[pool] || [];
+      if (!selected.length) {
+        return "<span class=\"tower-pool-summary-empty\">尚未選擇裝備（不掉落）</span>";
+      }
+      var names = selected.map(function (itemId) {
+        var item = equipment.find(function (entry) { return entry.item_id === itemId; });
+        return item ? item.name : itemId;
+      });
+      var preview = names.slice(0, 4).join("、");
+      if (names.length > 4) preview += " 等";
+      return "<strong>已選 " + names.length + " 件</strong><span>" +
+        escapeHtml(preview) + "</span>";
+    }
+
+    function renderDefault() {
+      if (defaultSummary) defaultSummary.innerHTML = poolSummary("default");
     }
 
     function renderFloors() {
@@ -100,55 +216,124 @@
       floorsBox.innerHTML = keys.map(function (floor) {
         return "<section class=\"tower-floor-pool\" data-floor=\"" + escapeHtml(floor) + "\">" +
           "<div class=\"encounter-card-head\"><h4>第 " + escapeHtml(floor) + " 層</h4>" +
-          "<button type=\"button\" class=\"btn btn-danger btn-sm tower-floor-remove\">移除</button></div>" +
-          "<div class=\"tower-equipment-grid\" data-pool-box=\"" + escapeHtml(floor) + "\"></div></section>";
+          "<div class=\"tower-floor-actions\">" +
+          "<button type=\"button\" class=\"btn btn-outline btn-sm tower-floor-select\" data-floor=\"" +
+          escapeHtml(floor) + "\">選擇裝備</button>" +
+          "<button type=\"button\" class=\"btn btn-danger btn-sm tower-floor-remove\" data-floor=\"" +
+          escapeHtml(floor) + "\">移除</button>" +
+          "</div></div>" +
+          "<div class=\"tower-pool-summary\">" + poolSummary(floor) + "</div></section>";
       }).join("");
-      keys.forEach(function (floor) {
-        renderPool(floor, floorsBox.querySelector("[data-pool-box='" + floor + "']"));
-      });
     }
 
-    function syncPools() {
-      var nextPools = {};
-      var defaultItems = [];
-      defaultBox.querySelectorAll("input[type='checkbox']:checked").forEach(function (input) {
-        defaultItems.push(input.getAttribute("data-item-id"));
-      });
-      nextPools.default = defaultItems;
-      floorsBox.querySelectorAll(".tower-floor-pool").forEach(function (row) {
-        var floor = row.getAttribute("data-floor");
-        var selected = [];
-        row.querySelectorAll("input[type='checkbox']:checked").forEach(function (input) {
-          selected.push(input.getAttribute("data-item-id"));
-        });
-        nextPools[floor] = selected;
-      });
-      pools = nextPools;
+    function closeEquipmentDialog() {
+      equipmentDialog.classList.remove("is-open");
+      activePool = "";
     }
+
+    function closeFloorDialog() {
+      floorDialog.classList.remove("is-open");
+      floorDraftSelection = [];
+    }
+
+    function openEquipmentDialog(pool) {
+      activePool = pool;
+      draftSelection = (pools[pool] || []).slice();
+      equipmentDialogTitle.textContent = pool === "default"
+        ? "選擇通用掉落裝備"
+        : "選擇第 " + pool + " 層掉落裝備";
+      equipmentDialogLead.textContent = pool === "default"
+        ? "未設定專屬樓層時，會從這裡選出的裝備中平均抽取。"
+        : "這個樓層會只從下方選出的裝備中平均抽取。";
+      equipmentSearch.value = "";
+      renderEquipmentList(equipmentList, equipmentCount, draftSelection, "");
+      equipmentDialog.classList.add("is-open");
+      setTimeout(function () { equipmentSearch.focus(); }, 0);
+    }
+
+    function openFloorDialog() {
+      floorInput.value = "";
+      floorSearch.value = "";
+      floorDraftSelection = [];
+      renderEquipmentList(floorEquipmentList, floorCount, floorDraftSelection, "");
+      floorDialog.classList.add("is-open");
+      setTimeout(function () { floorInput.focus(); }, 0);
+    }
+
+    defaultOpenButton.addEventListener("click", function () {
+      openEquipmentDialog("default");
+    });
+
+    document.getElementById("tower-equipment-close").addEventListener("click", closeEquipmentDialog);
+    document.getElementById("tower-equipment-cancel").addEventListener("click", closeEquipmentDialog);
+    document.getElementById("tower-floor-close").addEventListener("click", closeFloorDialog);
+    document.getElementById("tower-floor-cancel").addEventListener("click", closeFloorDialog);
+
+    equipmentDialog.addEventListener("click", function (event) {
+      if (event.target === equipmentDialog) closeEquipmentDialog();
+    });
+    floorDialog.addEventListener("click", function (event) {
+      if (event.target === floorDialog) closeFloorDialog();
+    });
+    document.addEventListener("keydown", function (event) {
+      if (event.key !== "Escape") return;
+      closeEquipmentDialog();
+      closeFloorDialog();
+    });
+
+    equipmentList.addEventListener("change", function (event) {
+      updateDraftItemSelection(event, draftSelection);
+    });
+    floorEquipmentList.addEventListener("change", function (event) {
+      updateDraftItemSelection(event, floorDraftSelection);
+    });
+    equipmentSearch.addEventListener("input", function () {
+      renderEquipmentList(equipmentList, equipmentCount, draftSelection, equipmentSearch.value);
+    });
+    floorSearch.addEventListener("input", function () {
+      renderEquipmentList(floorEquipmentList, floorCount, floorDraftSelection, floorSearch.value);
+    });
+
+    document.getElementById("tower-equipment-confirm").addEventListener("click", function () {
+      if (!activePool) return;
+      pools[activePool] = draftSelection.slice();
+      closeEquipmentDialog();
+      renderDefault();
+      renderFloors();
+    });
 
     addButton.addEventListener("click", function () {
-      syncPools();
-      var value = window.prompt("請輸入正的 5 倍數樓層，例如 5");
-      var floor = parseInt(value, 10);
-      if (!floor || floor < 5 || floor % 5 !== 0 || pools[String(floor)]) {
-        if (value !== null) showToast(false, "樓層必須是尚未設定的正 5 倍數");
+      openFloorDialog();
+    });
+
+    document.getElementById("tower-floor-confirm").addEventListener("click", function () {
+      var floor = parseInt(floorInput.value, 10);
+      var floorKey = String(floor);
+      if (!floor || floor < 5 || floor % 5 !== 0) {
+        showToast(false, "樓層必須是正的 5 倍數");
         return;
       }
-      pools[String(floor)] = [];
+      if (Object.prototype.hasOwnProperty.call(pools, floorKey)) {
+        showToast(false, "這個樓層已經設定過了");
+        return;
+      }
+      pools[floorKey] = floorDraftSelection.slice();
+      closeFloorDialog();
       renderFloors();
     });
 
     floorsBox.addEventListener("click", function (event) {
       var button = event.target.closest(".tower-floor-remove");
-      if (!button) return;
-      syncPools();
-      var row = button.closest(".tower-floor-pool");
-      delete pools[row.getAttribute("data-floor")];
-      renderFloors();
+      if (button) {
+        delete pools[button.getAttribute("data-floor")];
+        renderFloors();
+        return;
+      }
+      button = event.target.closest(".tower-floor-select");
+      if (button) openEquipmentDialog(button.getAttribute("data-floor"));
     });
 
     saveButton.addEventListener("click", async function () {
-      syncPools();
       saveButton.disabled = true;
       try {
         var response = await fetch("/api/juice-battle/tower/settings", {
@@ -164,7 +349,7 @@
         }
         equipment = data.equipment || equipment;
         pools = data.drop_pools || { default: [] };
-        renderPool("default", defaultBox);
+        renderDefault();
         renderFloors();
         showToast(true, data.message || "已儲存設定");
       } catch (error) {
@@ -184,7 +369,7 @@
         }
         equipment = data.equipment || [];
         pools = data.drop_pools || { default: [] };
-        renderPool("default", defaultBox);
+        renderDefault();
         renderFloors();
       } catch (error) {
         showToast(false, "載入失敗，請稍後再試");
