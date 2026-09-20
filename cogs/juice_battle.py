@@ -692,7 +692,7 @@ class JuiceBattle(commands.Cog):
                 message = await channel.fetch_message(int(message_id))
                 embed = Embed(
                     title="Juice Battle",
-                    description="因機器人重啟，本場戰鬥已作廢。",
+                    description="機器人重啟，請重新使用指令哦。",
                     color=common.bot_error_color,
                 )
                 await message.edit(embed=embed, view=None)
