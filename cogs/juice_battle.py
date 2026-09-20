@@ -403,7 +403,7 @@ class JuiceBattle(commands.Cog):
 
     def equipment_catalog(self) -> list[dict]:
         """
-        回傳後台與掉落設定使用的完整裝備清單。
+        回傳後台與掉落設定使用的非初始裝備清單。
 
         Returns:
             items (list[dict]): "每個項目包含 item_id、kind、name 與能力資料"
@@ -411,6 +411,8 @@ class JuiceBattle(commands.Cog):
         items = []
         for kind, collection in (("weapon", self.weapons), ("armor", self.armors)):
             for item_id, template in collection.items():
+                if template.get("starter"):
+                    continue
                 ability = template.get("ability")
                 items.append(
                     {
@@ -1605,6 +1607,10 @@ class JuiceBattle(commands.Cog):
         view.pending_bind = bool(battle.get("pending_bind", False))
         view.last_attack_damage = int(battle.get("last_attack_damage", 0))
         view.log_text = str(battle.get("log_text") or "")
+        if view.monster_turn_id not in view.turn_order:
+            view.turn_order.append(view.monster_turn_id)
+            if view.phase == "player_defend":
+                view.current_index = len(view.turn_order)
         view.finished = False
         view.rebuild_buttons()
         return view
@@ -3751,6 +3757,7 @@ class JuiceBattleTowerView(discord.ui.View):
         self.progress = copy.deepcopy(progress)
         self.fighters = fighters
         self.monster = monster
+        self.monster_turn_id = "__tower_monster__"
         if self.monster.get("id") == "old_jin":
             for fighter in self.fighters:
                 fighter["two_dice"] = True
@@ -4012,7 +4019,7 @@ class JuiceBattleTowerView(discord.ui.View):
 
     async def begin(self):
         """
-        擲先攻骰並開始第一個玩家回合。
+        擲玩家與怪物先攻骰並開始戰鬥。
         """
         while True:
             initiative = []
@@ -4023,25 +4030,46 @@ class JuiceBattleTowerView(discord.ui.View):
                     fighter.get("agi_offset", 0),
                 )
                 initiative.append((total, fighter["user_id"]))
-            if len(initiative) <= 1 or len({item[0] for item in initiative}) == len(initiative):
+            monster_total = self.cog.tower_roll(
+                self.monster,
+                self.monster["agi"],
+                0,
+            )[1]
+            player_totals = [item[0] for item in initiative]
+            if (
+                len(initiative) <= 1
+                or len(set(player_totals)) == len(player_totals)
+            ) and monster_total != max(player_totals):
                 break
         initiative.sort(key=lambda item: item[0], reverse=True)
-        self.turn_order = [str(user_id) for _total, user_id in initiative]
+        player_order = [str(user_id) for _total, user_id in initiative]
+        if monster_total > initiative[0][0]:
+            self.turn_order = [self.monster_turn_id] + player_order
+        else:
+            self.turn_order = player_order + [self.monster_turn_id]
         initiative_text = "｜".join(
             f"{self.fighter_by_id(user_id)['display_name']} 先攻 **{total}**"
             for total, user_id in initiative
         )
-        first_fighter = self.fighter_by_id(initiative[0][1])
-        self.log_text = f"{initiative_text}\n**{first_fighter['display_name']}** 先攻！"
+        initiative_text = (
+            f"{initiative_text}｜{self.monster['name']} 先攻 **{monster_total}**"
+        )
+        first_name = self.monster["name"] if monster_total > initiative[0][0] else (
+            self.fighter_by_id(initiative[0][1])["display_name"]
+        )
+        self.log_text = f"{initiative_text}\n**{first_name}** 先攻！"
         await self.enter_next_player()
 
     async def enter_next_player(self):
         """
-        找到下一位存活玩家，或切換到怪物回合。
+        依先攻順序找到下一位玩家或切換到怪物回合。
         """
         while self.current_index < len(self.turn_order):
             user_id = self.turn_order[self.current_index]
             self.current_index += 1
+            if user_id == self.monster_turn_id:
+                await self.run_monster_turn()
+                return
             fighter = self.fighter_by_id(user_id)
             if fighter is None or fighter["hp"] <= 0:
                 continue
@@ -4060,7 +4088,9 @@ class JuiceBattleTowerView(discord.ui.View):
                 self.append_log(f"{fighter['display_name']} 暈眩，跳過本次攻擊。")
             if fighter.get("stun_remaining", 0) > 0:
                 fighter["stun_remaining"] = max(0, fighter["stun_remaining"] - 1)
-        await self.run_monster_turn()
+        self.round_number += 1
+        self.current_index = 0
+        await self.enter_next_player()
 
     def prepare_player_turn(self, fighter: dict):
         """
@@ -4484,8 +4514,6 @@ class JuiceBattleTowerView(discord.ui.View):
         if self.monster["hp"] <= 0:
             await self.cog.tower_finish_floor(self, self.log_text)
             return
-        self.round_number += 1
-        self.current_index = 0
         await self.enter_next_player()
         if interaction.response.is_done():
             return

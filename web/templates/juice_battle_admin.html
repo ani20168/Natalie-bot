@@ -3,14 +3,13 @@
 <div class="shop-page-head">
   <div>
     <h2>Juice Battle 爬塔後台</h2>
-    <p class="shop-lead">勾選裝備後會平均分配掉落機率；未設定的 5 倍數樓層會使用通用掉落池。</p>
+    <p class="shop-lead">在裝備選單中選擇後會平均分配掉落機率；未設定的 5 倍數樓層會使用通用掉落池。</p>
   </div>
 </div>
 
 <section class="shop-admin-card">
   <div class="encounter-card-head">
     <h3>通用掉落池</h3>
-    <button type="button" class="btn btn-bid btn-sm" id="tower-settings-save">儲存設定</button>
   </div>
   <p class="encounter-hint">5、10、15 等樓層沒有專屬設定時，會從這裡勾選的裝備中平均抽取。全部取消勾選代表不掉落裝備。</p>
   <div class="tower-pool-summary" id="tower-default-summary">尚未選擇裝備。</div>
@@ -80,7 +79,6 @@
     var defaultSummary = document.getElementById("tower-default-summary");
     var floorsBox = document.getElementById("tower-floor-pools");
     var toastBox = document.getElementById("tower-settings-toast");
-    var saveButton = document.getElementById("tower-settings-save");
     var addButton = document.getElementById("tower-floor-add");
     var defaultOpenButton = document.getElementById("tower-default-open");
     var equipmentDialog = document.getElementById("tower-equipment-dialog");
@@ -97,6 +95,7 @@
     var activePool = "";
     var draftSelection = [];
     var floorDraftSelection = [];
+    var settingsSaving = false;
     var toastHideTimer = null;
     var toastOutTimer = null;
 
@@ -260,6 +259,35 @@
       setTimeout(function () { floorInput.focus(); }, 0);
     }
 
+    async function saveSettings() {
+      if (settingsSaving) return false;
+      settingsSaving = true;
+      try {
+        var response = await fetch("/api/juice-battle/tower/settings", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ drop_pools: pools })
+        });
+        var data = await response.json();
+        if (!data.ok) {
+          showToast(false, data.error || "儲存失敗");
+          return false;
+        }
+        equipment = data.equipment || equipment;
+        pools = data.drop_pools || { default: [] };
+        renderDefault();
+        renderFloors();
+        showToast(true, data.message || "已儲存設定");
+        return true;
+      } catch (error) {
+        showToast(false, "儲存失敗，請稍後再試");
+        return false;
+      } finally {
+        settingsSaving = false;
+      }
+    }
+
     defaultOpenButton.addEventListener("click", function () {
       openEquipmentDialog("default");
     });
@@ -269,12 +297,19 @@
     document.getElementById("tower-floor-close").addEventListener("click", closeFloorDialog);
     document.getElementById("tower-floor-cancel").addEventListener("click", closeFloorDialog);
 
-    equipmentDialog.addEventListener("click", function (event) {
-      if (event.target === equipmentDialog) closeEquipmentDialog();
-    });
-    floorDialog.addEventListener("click", function (event) {
-      if (event.target === floorDialog) closeFloorDialog();
-    });
+    function bindBackdropClose(dialog, closeFn) {
+      var downOnBackdrop = false;
+      dialog.addEventListener("pointerdown", function (event) {
+        downOnBackdrop = event.target === dialog;
+      });
+      dialog.addEventListener("click", function (event) {
+        if (downOnBackdrop && event.target === dialog) closeFn();
+        downOnBackdrop = false;
+      });
+    }
+
+    bindBackdropClose(equipmentDialog, closeEquipmentDialog);
+    bindBackdropClose(floorDialog, closeFloorDialog);
     document.addEventListener("keydown", function (event) {
       if (event.key !== "Escape") return;
       closeEquipmentDialog();
@@ -294,19 +329,20 @@
       renderEquipmentList(floorEquipmentList, floorCount, floorDraftSelection, floorSearch.value);
     });
 
-    document.getElementById("tower-equipment-confirm").addEventListener("click", function () {
+    document.getElementById("tower-equipment-confirm").addEventListener("click", async function () {
       if (!activePool) return;
       pools[activePool] = draftSelection.slice();
       closeEquipmentDialog();
       renderDefault();
       renderFloors();
+      await saveSettings();
     });
 
     addButton.addEventListener("click", function () {
       openFloorDialog();
     });
 
-    document.getElementById("tower-floor-confirm").addEventListener("click", function () {
+    document.getElementById("tower-floor-confirm").addEventListener("click", async function () {
       var floor = parseInt(floorInput.value, 10);
       var floorKey = String(floor);
       if (!floor || floor < 5 || floor % 5 !== 0) {
@@ -320,43 +356,19 @@
       pools[floorKey] = floorDraftSelection.slice();
       closeFloorDialog();
       renderFloors();
+      await saveSettings();
     });
 
-    floorsBox.addEventListener("click", function (event) {
+    floorsBox.addEventListener("click", async function (event) {
       var button = event.target.closest(".tower-floor-remove");
       if (button) {
         delete pools[button.getAttribute("data-floor")];
         renderFloors();
+        await saveSettings();
         return;
       }
       button = event.target.closest(".tower-floor-select");
       if (button) openEquipmentDialog(button.getAttribute("data-floor"));
-    });
-
-    saveButton.addEventListener("click", async function () {
-      saveButton.disabled = true;
-      try {
-        var response = await fetch("/api/juice-battle/tower/settings", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ drop_pools: pools })
-        });
-        var data = await response.json();
-        if (!data.ok) {
-          showToast(false, data.error || "儲存失敗");
-          return;
-        }
-        equipment = data.equipment || equipment;
-        pools = data.drop_pools || { default: [] };
-        renderDefault();
-        renderFloors();
-        showToast(true, data.message || "已儲存設定");
-      } catch (error) {
-        showToast(false, "儲存失敗，請稍後再試");
-      } finally {
-        saveButton.disabled = false;
-      }
     });
 
     async function loadAdmin() {

@@ -1556,8 +1556,27 @@ a {
   border-color: var(--accent);
 }
 
+.tower-equipment-option:has(input:checked) {
+  background: rgba(0, 223, 235, 0.22);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 14px rgba(0, 223, 235, 0.14);
+}
+
+.tower-equipment-option:has(input:checked)::after {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  content: "✓";
+  color: var(--accent);
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
 .tower-equipment-option input {
   margin-top: 3px;
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
 }
 
 .tower-equipment-option-body {
