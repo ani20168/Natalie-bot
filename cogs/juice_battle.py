@@ -2293,8 +2293,9 @@ class JuiceBattle(commands.Cog):
         """
         pending_equipment = [str(item_id) for item_id in progress.get("pending_equipment") or []]
         member_ids = [str(member_id) for member_id in progress.get("member_ids") or []]
-        if len(member_ids) == 1:
-            await self.tower_grant_rewards(progress, [member_ids[0]] * len(pending_equipment))
+        if len(member_ids) == 1 or not pending_equipment:
+            recipients = [member_ids[0]] * len(pending_equipment) if member_ids else []
+            await self.tower_grant_rewards(progress, recipients)
             await interaction.response.edit_message(
                 embed=Embed(
                     title="Juice Battle｜爬塔結算",
@@ -5123,7 +5124,10 @@ class JuiceBattleTowerRewardView(discord.ui.View):
         Returns:
             name (str): "裝備名稱"
         """
-        item_id = (self.progress.get("pending_equipment") or [])[self.pending_index]
+        pending = self.progress.get("pending_equipment") or []
+        if self.pending_index < 0 or self.pending_index >= len(pending):
+            return "未知裝備"
+        item_id = pending[self.pending_index]
         template = self.cog.item_template("weapon", item_id) or self.cog.item_template("armor", item_id)
         return template["name"] if template else str(item_id)
 
@@ -5135,10 +5139,11 @@ class JuiceBattleTowerRewardView(discord.ui.View):
             embed (Embed): "裝備領取資訊"
         """
         total = len(self.progress.get("pending_equipment") or [])
+        current = min(self.pending_index + 1, max(total, 1))
         return Embed(
             title="Juice Battle｜領取爬塔裝備",
             description=(
-                f"請指定第 **{self.pending_index + 1}/{total}** 件裝備的領取者：**{self.item_name()}**。\n"
+                f"請指定第 **{current}/{total}** 件裝備的領取者：**{self.item_name()}**。\n"
                 f"蛋糕：**{int(self.progress.get('pending_cake', 0))}** {common.cake_emoji}"
             ),
             color=common.bot_color,
