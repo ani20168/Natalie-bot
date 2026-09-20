@@ -3886,21 +3886,25 @@ class JuiceBattleTowerView(discord.ui.View):
         """
         擲先攻骰並開始第一個玩家回合。
         """
-        initiative = []
-        for fighter in self.fighters:
-            _dice, total, dice_text = self.cog.tower_roll(
-                fighter,
-                fighter["agi"],
-                fighter.get("agi_offset", 0),
-            )
-            initiative.append((total, fighter["user_id"], dice_text))
+        while True:
+            initiative = []
+            for fighter in self.fighters:
+                _dice, total, _dice_text = self.cog.tower_roll(
+                    fighter,
+                    fighter["agi"],
+                    fighter.get("agi_offset", 0),
+                )
+                initiative.append((total, fighter["user_id"]))
+            if len(initiative) <= 1 or len({item[0] for item in initiative}) == len(initiative):
+                break
         initiative.sort(key=lambda item: item[0], reverse=True)
-        self.turn_order = [str(item[1]) for item in initiative]
+        self.turn_order = [str(user_id) for _total, user_id in initiative]
         initiative_text = "｜".join(
-            f"{self.fighter_by_id(user_id)['display_name']} {dice_text}+敏捷={total}"
-            for total, user_id, dice_text in initiative
+            f"{self.fighter_by_id(user_id)['display_name']} 先攻 **{total}**"
+            for total, user_id in initiative
         )
-        self.append_log(f"先攻：{initiative_text}")
+        first_fighter = self.fighter_by_id(initiative[0][1])
+        self.log_text = f"{initiative_text}\n**{first_fighter['display_name']}** 先攻！"
         await self.enter_next_player()
 
     async def enter_next_player(self):
@@ -4039,25 +4043,28 @@ class JuiceBattleTowerView(discord.ui.View):
             result (str): "攻擊結果文字"
         """
         if use_dodge_roll:
-            dice, attack_total, dice_text = self.cog.tower_roll(
+            _dice, attack_total, _dice_text = self.cog.tower_roll(
                 attacker,
                 attacker["agi"],
                 attacker.get("agi_offset", 0),
             )
-            attack_label = f"閃避骰 {dice_text}"
+            attack_label = "閃避骰"
         else:
             base = attacker["defense"] if attacker.get("stance_swap_attack") else attacker["atk"]
             offset = attacker.get("def_offset", 0) if attacker.get("stance_swap_attack") else attacker.get("atk_offset", 0)
             offset += int(attacker.get("berserk_offset", 0))
-            dice, attack_total, dice_text = self.cog.tower_roll(attacker, base, offset)
-            attack_label = dice_text
+            _dice, attack_total, _dice_text = self.cog.tower_roll(attacker, base, offset)
+            attack_label = "攻擊"
         if attacker.get("stance_swap_attack"):
             attacker["stance_swap_attack"] = False
         mode = self.choose_monster_defense(attack_total, bound)
         if mode == "stunned":
             damage = self.apply_damage(self.monster, attack_total)
             self.last_attack_damage = damage
-            result = f"{attacker['display_name']} {attack_label} 攻擊 **{attack_total}**，怪物暈眩，無法防禦，造成 **{damage}** 傷害"
+            result = (
+                f"{attacker['display_name']} {attack_label} **{attack_total}**，"
+                f"怪物暈眩，無法防禦，造成 **{damage}** 傷害"
+            )
         elif mode == "defend":
             self.monster["sprint_armed"] = False
             _defense_dice, defense_total, defense_text = self.cog.tower_roll(
@@ -4079,8 +4086,8 @@ class JuiceBattleTowerView(discord.ui.View):
             actual_damage = self.apply_damage(self.monster, damage)
             self.last_attack_damage = actual_damage
             result = (
-                f"{attacker['display_name']} {attack_label} 攻擊 **{attack_total}**，"
-                f"怪物防禦 {defense_text}+素質 = **{defense_total}**，受到 **{actual_damage}** 傷害{hardening_text}"
+                f"{attacker['display_name']} {attack_label} **{attack_total}**，"
+                f"怪物防禦 **{defense_total}**，受到 **{actual_damage}** 傷害{hardening_text}"
             )
         else:
             dodge_offset = int(self.monster.get("dodge_offset", 0))
@@ -4095,14 +4102,14 @@ class JuiceBattleTowerView(discord.ui.View):
                 damage = self.apply_damage(self.monster, attack_total)
                 self.last_attack_damage = damage
                 result = (
-                    f"{attacker['display_name']} {attack_label} 攻擊 **{attack_total}**，"
-                    f"怪物閃避 {dodge_text}+素質 = **{dodge_total}**，失敗，受到 **{damage}** 傷害"
+                    f"{attacker['display_name']} {attack_label} **{attack_total}**，"
+                    f"怪物閃避 **{dodge_total}**，失敗，受到 **{damage}** 傷害"
                 )
             else:
                 self.last_attack_damage = 0
                 result = (
-                    f"{attacker['display_name']} {attack_label} 攻擊 **{attack_total}**，"
-                    f"怪物閃避 {dodge_text}+素質 = **{dodge_total}**，成功，無傷"
+                    f"{attacker['display_name']} {attack_label} **{attack_total}**，"
+                    f"怪物閃避 **{dodge_total}**，成功，無傷"
                 )
             self.monster["sprint_armed"] = False
         return result
@@ -4241,10 +4248,7 @@ class JuiceBattleTowerView(discord.ui.View):
             self.monster["hellfire_offset"] = int(self.monster.get("hellfire_offset", 0)) + 1
             self.monster["attack_offset"] = self.monster["hellfire_offset"]
         skill_note = f"（發動 {ability['name']}）" if self.pending_bind else ""
-        self.log_text = (
-            f"{self.monster['name']} 攻擊 **{attack_total}**"
-            f"（{attack_dice_text}）{skill_note}"
-        )
+        self.log_text = f"{self.monster['name']} 攻擊 **{attack_total}**{skill_note}"
         self.rebuild_buttons()
         if self.message is not None:
             await self.message.edit(embed=self.build_embed(), view=self)
@@ -4272,20 +4276,27 @@ class JuiceBattleTowerView(discord.ui.View):
         defender["tower_skill_armed"] = None
         attack_total = int(self.pending_attack_total)
         damage = 0
-        log_parts = [f"{self.monster['name']} 攻擊 {attack_total}（{self.pending_attack_dice}）"]
+        defender_skill_note = f"（發動 {ability['name']}）" if ability else ""
+        monster_ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
+        monster_skill_note = f"（發動 {monster_ability['name']}）" if self.pending_bind else ""
+        log_parts = [f"{self.monster['name']} 攻擊 **{attack_total}**{monster_skill_note}"]
         defense_dice = 0
         defense_total = 0
         if mode == "dodge":
-            defense_dice, dodge_total, dodge_text = self.cog.tower_roll(
+            defense_dice, dodge_total, _dodge_text = self.cog.tower_roll(
                 defender,
                 defender["agi"],
                 defender.get("agi_offset", 0) + defender.get("dodge_offset", 0),
             )
             if attack_total >= dodge_total:
                 damage = attack_total
-                log_parts.append(f"{defender['display_name']} 閃避 {dodge_text}+敏捷 = {dodge_total}，失敗")
+                log_parts.append(
+                    f"{defender['display_name']} 閃避 **{dodge_total}**{defender_skill_note}，失敗"
+                )
             else:
-                log_parts.append(f"{defender['display_name']} 閃避 {dodge_text}+敏捷 = {dodge_total}，成功")
+                log_parts.append(
+                    f"{defender['display_name']} 閃避 **{dodge_total}**{defender_skill_note}，成功，無傷"
+                )
         else:
             stance_swap = bool(ability and ability.get("id") == "stance_swap")
             if stance_swap:
@@ -4294,12 +4305,16 @@ class JuiceBattleTowerView(discord.ui.View):
             else:
                 defense_base = defender["defense"]
                 defense_offset = defender.get("def_offset", 0)
-            defense_dice, defense_total, defense_text = self.cog.tower_roll(defender, defense_base, defense_offset)
+            defense_dice, defense_total, _defense_text = self.cog.tower_roll(
+                defender,
+                defense_base,
+                defense_offset,
+            )
             if ability and ability.get("id") == "life_conversion":
                 damage = attack_total
             else:
                 damage = max(1, attack_total - defense_total)
-            log_parts.append(f"{defender['display_name']} 防禦 {defense_text}+素質 = {defense_total}")
+            log_parts.append(f"{defender['display_name']} 防禦 **{defense_total}**{defender_skill_note}")
             if ability and ability.get("id") == "shield_counter" and defense_total == attack_total:
                 self.monster["stun_remaining"] = 1
                 log_parts.append("盾反成功，怪物暈眩一回合")
