@@ -178,9 +178,28 @@
       var visible = equipment.filter(function (item) {
         return !keyword || equipmentSearchText(item).indexOf(keyword) >= 0;
       });
-      box.innerHTML = visible.length
-        ? visible.map(function (item) { return equipmentOption(item, selected); }).join("")
-        : "<p class=\"encounter-empty\">找不到符合的裝備。</p>";
+      var weapons = visible.filter(function (item) { return item.kind === "weapon"; });
+      var armors = visible.filter(function (item) { return item.kind === "armor"; });
+      if (!visible.length) {
+        box.innerHTML = "<p class=\"encounter-empty\">找不到符合的裝備。</p>";
+      } else {
+        var html = "";
+        if (weapons.length) {
+          html += "<section class=\"tower-equipment-kind-group\">" +
+            "<h4 class=\"tower-equipment-kind-title\">武器（" + weapons.length + "）</h4>" +
+            "<div class=\"tower-equipment-kind-list\">" +
+            weapons.map(function (item) { return equipmentOption(item, selected); }).join("") +
+            "</div></section>";
+        }
+        if (armors.length) {
+          html += "<section class=\"tower-equipment-kind-group\">" +
+            "<h4 class=\"tower-equipment-kind-title\">防具（" + armors.length + "）</h4>" +
+            "<div class=\"tower-equipment-kind-list\">" +
+            armors.map(function (item) { return equipmentOption(item, selected); }).join("") +
+            "</div></section>";
+        }
+        box.innerHTML = html;
+      }
       if (countBox) {
         countBox.textContent = "顯示 " + visible.length + " / " + equipment.length +
           " 件，已選 " + selected.length + " 件";

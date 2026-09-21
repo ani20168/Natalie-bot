@@ -1801,13 +1801,31 @@ a {
 
 .tower-equipment-modal-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 8px;
+  gap: 16px;
   flex: 1 1 auto;
   min-height: 120px;
   max-height: min(54vh, 460px);
   overflow: auto;
   padding: 2px 4px 8px 2px;
+}
+
+.tower-equipment-kind-group {
+  display: grid;
+  gap: 8px;
+}
+
+.tower-equipment-kind-title {
+  margin: 0;
+  padding: 2px 2px 0;
+  color: var(--text);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.tower-equipment-kind-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 8px;
 }
 
 .tower-floor-input-field {
@@ -1827,7 +1845,7 @@ a {
     padding: 18px;
   }
 
-  .tower-equipment-modal-list {
+  .tower-equipment-kind-list {
     grid-template-columns: 1fr;
   }
 
