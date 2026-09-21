@@ -670,60 +670,90 @@ class JuiceBattle(commands.Cog):
 
     async def cog_load(self):
         """
-        載入時清除殘留對戰鎖，並盡力把舊對戰訊息標為作廢；有未結算賭注則退還。
+        載入時清除殘留挑戰／爬塔介面鎖，並盡力把舊訊息標為作廢；有未結算賭注則退還。
         """
         collection = common.mongo_storage.get_collection("userdata")
         if collection is None:
             return
-        cursor = collection.find({"juice_battle.playing": True})
+        cursor = collection.find(
+            {
+                "$or": [
+                    {"juice_battle.playing": True},
+                    {"juice_battle.tower_session": {"$type": "object"}},
+                    {"juice_battle.session.tower": True},
+                ]
+            }
+        )
         async for document in cursor:
-            session = (document.get("juice_battle") or {}).get("session") or {}
+            juice_battle = document.get("juice_battle") or {}
             user_id = str(document.get("_id"))
-            channel_id = session.get("channel_id")
-            message_id = session.get("message_id")
+            # 挑戰 session 與爬塔 session 分開清；舊資料可能把爬塔寫在 session.tower
+            sessions = []
+            challenge_session = juice_battle.get("session")
+            if isinstance(challenge_session, dict):
+                sessions.append(challenge_session)
+            tower_session = juice_battle.get("tower_session")
+            if isinstance(tower_session, dict):
+                sessions.append(tower_session)
 
-            # 重啟時退還尚未結算的 PvP 賭注（每位玩家退回自己那份）
-            bet = int(session.get("bet", 0) or 0)
-            if bet > 0 and not session.get("vs_bot") and not session.get("bet_settled"):
-                cake = int(document.get("cake", 0)) + bet
+            for session in sessions:
+                channel_id = session.get("channel_id")
+                message_id = session.get("message_id")
+
+                # 重啟時退還尚未結算的 PvP 賭注（每位玩家退回自己那份）
+                bet = int(session.get("bet", 0) or 0)
+                is_challenge = not session.get("tower")
+                if is_challenge and bet > 0 and not session.get("vs_bot") and not session.get("bet_settled"):
+                    cake = int(document.get("cake", 0)) + bet
+                    try:
+                        await collection.update_one(
+                            {"_id": user_id},
+                            {"$set": {"cake": cake}},
+                        )
+                    except Exception:
+                        pass
+
+                if channel_id is None or message_id is None:
+                    continue
+                channel = self.bot.get_channel(int(channel_id))
+                if channel is None:
+                    try:
+                        channel = await self.bot.fetch_channel(int(channel_id))
+                    except Exception:
+                        continue
                 try:
-                    await collection.update_one(
-                        {"_id": user_id},
-                        {"$set": {"cake": cake}},
+                    message = await channel.fetch_message(int(message_id))
+                    if is_challenge and bet > 0 and not session.get("vs_bot"):
+                        description = (
+                            f"機器人重啟，對戰已取消；賭注已退還（各 **{bet}** {common.cake_emoji}）。"
+                            f"請重新使用指令哦。"
+                        )
+                    elif session.get("tower"):
+                        description = "機器人重啟，爬塔介面已失效；進度仍保留，請重新使用指令繼續。"
+                    else:
+                        description = "機器人重啟，請重新使用指令哦。"
+                    embed = Embed(
+                        title="Juice Battle",
+                        description=description,
+                        color=common.bot_error_color,
                     )
+                    await message.edit(embed=embed, view=None)
                 except Exception:
                     pass
-
-            if channel_id is None or message_id is None:
-                continue
-            channel = self.bot.get_channel(int(channel_id))
-            if channel is None:
-                try:
-                    channel = await self.bot.fetch_channel(int(channel_id))
-                except Exception:
-                    continue
-            try:
-                message = await channel.fetch_message(int(message_id))
-                if bet > 0 and not session.get("vs_bot"):
-                    description = (
-                        f"機器人重啟，對戰已取消；賭注已退還（各 **{bet}** {common.cake_emoji}）。"
-                        f"請重新使用指令哦。"
-                    )
-                else:
-                    description = "機器人重啟，請重新使用指令哦。"
-                embed = Embed(
-                    title="Juice Battle",
-                    description=description,
-                    color=common.bot_error_color,
-                )
-                await message.edit(embed=embed, view=None)
-            except Exception:
-                pass
         await collection.update_many(
-            {"juice_battle.playing": True},
+            {
+                "$or": [
+                    {"juice_battle.playing": True},
+                    {"juice_battle.tower_session": {"$exists": True}},
+                    {"juice_battle.session.tower": True},
+                ]
+            },
             {
                 "$set": {"juice_battle.playing": False},
-                "$unset": {"juice_battle.session": ""},
+                "$unset": {
+                    "juice_battle.session": "",
+                    "juice_battle.tower_session": "",
+                },
             },
         )
 
@@ -779,6 +809,15 @@ class JuiceBattle(commands.Cog):
             juice_battle["equipped_armor_slot"] = None
         if "playing" not in juice_battle:
             juice_battle["playing"] = False
+        # 舊版把爬塔介面寫在 playing/session.tower；遷移到獨立 tower_session
+        session = juice_battle.get("session")
+        if isinstance(session, dict) and session.get("tower"):
+            if not isinstance(juice_battle.get("tower_session"), dict):
+                juice_battle["tower_session"] = session
+            juice_battle["playing"] = False
+            juice_battle.pop("session", None)
+        if juice_battle.get("tower_session") is not None and not isinstance(juice_battle.get("tower_session"), dict):
+            juice_battle["tower_session"] = None
         if not isinstance(juice_battle.get("character_stats"), dict):
             juice_battle["character_stats"] = {}
         if juice_battle.get("tower_progress") is not None and not isinstance(juice_battle.get("tower_progress"), dict):
@@ -924,7 +963,7 @@ class JuiceBattle(commands.Cog):
 
     def playing_block_description(self, juice_battle: dict) -> str:
         """
-        組出「仍在對戰中」的提示（含訊息連結）。
+        組出「仍在挑戰對戰中」的提示（含訊息連結）。
 
         Args:
             juice_battle (dict): "{'playing': True, 'session': {}}"
@@ -936,6 +975,21 @@ class JuiceBattle(commands.Cog):
         if url:
             return f"你還在對戰中。\n對戰訊息：{url}"
         return "你還在對戰中。"
+
+    def tower_session_block_description(self, juice_battle: dict) -> str:
+        """
+        組出「仍有進行中爬塔介面」的提示（含訊息連結）。
+
+        Args:
+            juice_battle (dict): "{'tower_session': {}}"
+
+        Returns:
+            text (str): "你還有進行中的爬塔介面。\\n爬塔訊息：..."
+        """
+        url = self.session_jump_url(juice_battle.get("tower_session"))
+        if url:
+            return f"你還有進行中的爬塔介面。\n爬塔訊息：{url}"
+        return "你還有進行中的爬塔介面。"
 
     def build_fighter(self, *, user_id: str, display_name: str, character_id: str, juice_battle: dict | None, is_bot: bool) -> dict:
         """
@@ -1222,7 +1276,7 @@ class JuiceBattle(commands.Cog):
 
     async def clear_session(self, userid: str):
         """
-        清除指定玩家的對戰中狀態。
+        清除指定玩家的挑戰對戰狀態（不影響爬塔進度／介面）。
 
         Args:
             userid (str): "4108"
@@ -1232,9 +1286,20 @@ class JuiceBattle(commands.Cog):
         user_data["juice_battle"].pop("session", None)
         await common.mongo_storage.replace_user(userid, user_data)
 
+    async def clear_tower_session(self, userid: str):
+        """
+        清除指定玩家的爬塔介面鎖定（保留 tower_progress）。
+
+        Args:
+            userid (str): "4108"
+        """
+        user_data = await self.load_user(userid)
+        user_data["juice_battle"].pop("tower_session", None)
+        await common.mongo_storage.replace_user(userid, user_data)
+
     async def set_playing_session(self, userid: str, session: dict):
         """
-        標記玩家進入對戰並寫入 session。
+        標記玩家進入挑戰對戰並寫入 session（不覆寫爬塔介面）。
 
         Args:
             userid (str): "4108"
@@ -1751,6 +1816,7 @@ class JuiceBattle(commands.Cog):
         async with common.jsonio_lock:
             challenger_data = await self.load_user(challenger_id)
             challenger_juice = challenger_data["juice_battle"]
+            # 僅擋挑戰進行中；爬塔中（tower_session／tower_progress）仍可發起挑戰
             if challenger_juice.get("playing"):
                 await interaction.response.send_message(
                     embed=Embed(
@@ -1822,7 +1888,7 @@ class JuiceBattle(commands.Cog):
                 await interaction.response.send_message(
                     embed=Embed(
                         title="Juice Battle",
-                        description=f"{opponent.display_name} 正在對戰中。",
+                        description=f"{opponent.display_name} 正在挑戰對戰中。",
                         color=common.bot_error_color,
                     ),
                     ephemeral=True,
@@ -2046,18 +2112,20 @@ class JuiceBattle(commands.Cog):
 
     async def tower_set_playing(self, member_ids: list[str], session: dict):
         """
-        標記爬塔隊伍正在進行中。
+        標記爬塔隊伍的介面進行中（寫入 tower_session，不影響挑戰 playing）。
 
         Args:
             member_ids (list[str]): "隊伍成員 ID"
             session (dict): "爬塔訊息 session"
         """
         for member_id in member_ids:
-            await self.set_playing_session(str(member_id), copy.deepcopy(session))
+            user_data = await self.load_user(str(member_id))
+            user_data["juice_battle"]["tower_session"] = copy.deepcopy(session)
+            await common.mongo_storage.replace_user(str(member_id), user_data)
 
     async def tower_clear_progress(self, member_ids: list[str]):
         """
-        清除隊伍爬塔進度、暫存獎勵與進行中鎖定。
+        清除隊伍爬塔進度、暫存獎勵與爬塔介面鎖定（不影響進行中的挑戰）。
 
         Args:
             member_ids (list[str]): "隊伍成員 ID"
@@ -2065,8 +2133,7 @@ class JuiceBattle(commands.Cog):
         for member_id in member_ids:
             user_data = await self.load_user(str(member_id))
             juice_battle = user_data["juice_battle"]
-            juice_battle["playing"] = False
-            juice_battle.pop("session", None)
+            juice_battle.pop("tower_session", None)
             juice_battle["tower_progress"] = None
             await common.mongo_storage.replace_user(str(member_id), user_data)
 
@@ -2135,6 +2202,7 @@ class JuiceBattle(commands.Cog):
             {
                 "_id": 1,
                 "juice_battle.tower_progress": 1,
+                "juice_battle.tower_session": 1,
                 "juice_battle.session": 1,
                 "juice_battle.playing": 1,
             },
@@ -2158,7 +2226,12 @@ class JuiceBattle(commands.Cog):
                     "name": str(member_names.get(member_id) or member_id),
                 })
             monster = progress.get("monster") if isinstance(progress.get("monster"), dict) else {}
-            session = juice_battle.get("session") if isinstance(juice_battle.get("session"), dict) else {}
+            tower_session = juice_battle.get("tower_session") if isinstance(juice_battle.get("tower_session"), dict) else None
+            # 相容尚未遷移的舊 session.tower
+            if tower_session is None:
+                legacy_session = juice_battle.get("session") if isinstance(juice_battle.get("session"), dict) else {}
+                if legacy_session.get("tower"):
+                    tower_session = legacy_session
             runs_by_key[key] = {
                 "team_key": ",".join(sorted(key)),
                 "member_ids": member_ids,
@@ -2166,8 +2239,8 @@ class JuiceBattle(commands.Cog):
                 "floor": int(progress.get("floor", self.tower_floor_min)),
                 "cleared_floor": int(progress.get("cleared_floor", 0)),
                 "monster_name": str(monster.get("name") or "未知怪物"),
-                "playing": bool(juice_battle.get("playing")),
-                "session_url": self.session_jump_url(session) if session.get("tower") else None,
+                "playing": bool(tower_session),
+                "session_url": self.session_jump_url(tower_session) if tower_session else None,
             }
         runs = list(runs_by_key.values())
         runs.sort(key=lambda entry: (-int(entry["floor"]), entry["team_key"]))
@@ -2202,9 +2275,14 @@ class JuiceBattle(commands.Cog):
                 if progress_key != key:
                     continue
                 found = True
-                current_session = user_data["juice_battle"].get("session")
-                if isinstance(current_session, dict) and current_session.get("tower"):
+                current_session = user_data["juice_battle"].get("tower_session")
+                if isinstance(current_session, dict):
                     session = current_session
+                else:
+                    # 相容尚未遷移的舊 session.tower
+                    legacy_session = user_data["juice_battle"].get("session")
+                    if isinstance(legacy_session, dict) and legacy_session.get("tower"):
+                        session = legacy_session
             if not found:
                 self.tower_aborted_teams.discard(key)
                 return {"ok": False, "error": "找不到這支隊伍的爬塔進度"}
@@ -2512,8 +2590,7 @@ class JuiceBattle(commands.Cog):
                 bag[selected_slot] = {"item_id": item_id, "kind": kind}
         for member_id, user_data in user_data_map.items():
             juice_battle = user_data["juice_battle"]
-            juice_battle["playing"] = False
-            juice_battle.pop("session", None)
+            juice_battle.pop("tower_session", None)
             juice_battle["tower_progress"] = None
             await common.mongo_storage.replace_user(member_id, user_data)
         await self.tower_record_success(progress)
@@ -2671,11 +2748,12 @@ class JuiceBattle(commands.Cog):
             own_data = await self.load_user(userid)
             own_juice = own_data["juice_battle"]
             own_progress = own_juice.get("tower_progress")
-            if own_juice.get("playing"):
+            # 爬塔介面仍活著時請用原訊息，不可再開一份（與挑戰 playing 互不干擾）
+            if isinstance(own_juice.get("tower_session"), dict):
                 await interaction.response.send_message(
                     embed=Embed(
                         title="Juice Battle｜爬塔",
-                        description=self.playing_block_description(own_juice),
+                        description=self.tower_session_block_description(own_juice),
                         color=common.bot_error_color,
                     ),
                     ephemeral=True,
@@ -2752,11 +2830,12 @@ class JuiceBattle(commands.Cog):
                     return
                 for member_id in member_ids:
                     member_data = await self.load_user(str(member_id))
-                    if member_data["juice_battle"].get("playing"):
+                    member_juice = member_data["juice_battle"]
+                    if isinstance(member_juice.get("tower_session"), dict):
                         await interaction.response.send_message(
                             embed=Embed(
                                 title="Juice Battle｜爬塔",
-                                description=f"<@{member_id}> 目前正在其他 Juice Battle 中。",
+                                description=f"<@{member_id}> 目前已有進行中的爬塔介面。",
                                 color=common.bot_error_color,
                             ),
                             ephemeral=True,
@@ -3393,7 +3472,7 @@ class JuiceBattleChallengeView(discord.ui.View):
             opponent_data = await self.cog.load_user(self.opponent_id)
             if challenger_data["juice_battle"].get("playing") or opponent_data["juice_battle"].get("playing"):
                 await interaction.response.send_message(
-                    embed=Embed(title="Juice Battle", description="其中一方已在對戰中，無法開始。", color=common.bot_error_color),
+                    embed=Embed(title="Juice Battle", description="其中一方已在挑戰對戰中，無法開始。", color=common.bot_error_color),
                     ephemeral=True,
                 )
                 return
@@ -3871,7 +3950,7 @@ class JuiceBattleView(discord.ui.View):
 
     async def finish_battle(self, *, winner: dict | None, reason: str, interaction: discord.Interaction | None):
         """
-        結束戰鬥並清除雙方 playing；有賭注時結算或退還蛋糕。
+        結束挑戰戰鬥並清除雙方挑戰 playing；不影響爬塔進度／介面。有賭注時結算或退還蛋糕。
 
         Args:
             winner (dict | None): "{'display_name': 'Ani'}"
@@ -3885,7 +3964,7 @@ class JuiceBattleView(discord.ui.View):
         else:
             self.result_text = f"**{winner['display_name']}** 獲勝！\n{reason}"
 
-        # 結算賭注與清除對戰狀態
+        # 結算賭注與清除挑戰對戰狀態（保留 tower_session／tower_progress）
         async with common.jsonio_lock:
             if winner is not None:
                 loser = self.other_fighter(winner["user_id"])
@@ -4391,17 +4470,18 @@ class JuiceBattleTowerInviteView(discord.ui.View):
         async with self.cog.tower_lock:
             for member_id in member_ids:
                 member_data = await self.cog.load_user(member_id)
-                if member_data["juice_battle"].get("playing"):
+                member_juice = member_data["juice_battle"]
+                if isinstance(member_juice.get("tower_session"), dict):
                     await interaction.response.send_message(
                         embed=Embed(
                             title="Juice Battle｜爬塔",
-                            description=f"<@{member_id}> 目前正在其他 Juice Battle 中。",
+                            description=f"<@{member_id}> 目前已有進行中的爬塔介面。",
                             color=common.bot_error_color,
                         ),
                         ephemeral=True,
                     )
                     return
-                existing_progress = member_data["juice_battle"].get("tower_progress")
+                existing_progress = member_juice.get("tower_progress")
                 if not isinstance(existing_progress, dict):
                     continue
                 existing_ids = {str(value) for value in existing_progress.get("member_ids") or []}
@@ -4535,13 +4615,13 @@ class JuiceBattleTowerFloorView(discord.ui.View):
         member_ids = {str(member_id) for member_id in self.progress.get("member_ids") or []}
         if await self.cog.tower_reject_if_aborted(interaction, member_ids):
             return False
-        if str(interaction.user.id) in member_ids:
-            return True
-        await interaction.response.send_message(
-            embed=Embed(title="Juice Battle｜爬塔", description="只有本層爬塔隊員可以操作。", color=common.bot_error_color),
-            ephemeral=True,
-        )
-        return False
+        if str(interaction.user.id) not in member_ids:
+            await interaction.response.send_message(
+                embed=Embed(title="Juice Battle｜爬塔", description="只有本層爬塔隊員可以操作。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return False
+        return True
 
     async def on_challenge(self, interaction: discord.Interaction):
         """
@@ -4565,10 +4645,10 @@ class JuiceBattleTowerFloorView(discord.ui.View):
 
     async def on_timeout(self) -> None:
         """
-        樓層介面逾時後解除進行中鎖定，但保留進度供下次續爬。
+        樓層介面逾時後解除爬塔介面鎖定，但保留進度供下次續爬。
         """
         for member_id in self.progress.get("member_ids") or []:
-            await self.cog.clear_session(str(member_id))
+            await self.cog.clear_tower_session(str(member_id))
         for child in self.children:
             child.disabled = True
         if self.message is not None:
@@ -4628,17 +4708,17 @@ class JuiceBattleTowerNextFloorView(discord.ui.View):
         member_ids = {str(member_id) for member_id in self.progress.get("member_ids") or []}
         if await self.cog.tower_reject_if_aborted(interaction, member_ids):
             return False
-        if str(interaction.user.id) in member_ids:
-            return True
-        await interaction.response.send_message(
-            embed=Embed(
-                title="Juice Battle｜爬塔",
-                description="只有本次爬塔隊員可以進入下一層。",
-                color=common.bot_error_color,
-            ),
-            ephemeral=True,
-        )
-        return False
+        if str(interaction.user.id) not in member_ids:
+            await interaction.response.send_message(
+                embed=Embed(
+                    title="Juice Battle｜爬塔",
+                    description="只有本次爬塔隊員可以進入下一層。",
+                    color=common.bot_error_color,
+                ),
+                ephemeral=True,
+            )
+            return False
+        return True
 
     async def on_next_floor(self, interaction: discord.Interaction):
         """
@@ -4661,13 +4741,13 @@ class JuiceBattleTowerNextFloorView(discord.ui.View):
 
     async def on_timeout(self) -> None:
         """
-        通關結果介面逾時後保存進度並解除隊伍鎖定。
+        通關結果介面逾時後保存進度並解除爬塔介面鎖定。
         """
         if self.finished:
             return
         self.finished = True
         for member_id in self.progress.get("member_ids") or []:
-            await self.cog.clear_session(str(member_id))
+            await self.cog.clear_tower_session(str(member_id))
         floor_view = JuiceBattleTowerFloorView(cog=self.cog, progress=self.progress)
         for child in floor_view.children:
             child.disabled = True
@@ -5690,9 +5770,9 @@ class JuiceBattleTowerView(discord.ui.View):
         await self.save_battle_state()
         self.rebuild_buttons()
 
-        # 清除本場戰鬥鎖定，但保留已保存的樓層、戰利品與進度。
+        # 清除本場爬塔介面鎖定，但保留已保存的樓層、戰利品與進度。
         for member_id in self.member_ids:
-            await self.cog.clear_session(member_id)
+            await self.cog.clear_tower_session(member_id)
 
         if self.message is not None:
             try:
