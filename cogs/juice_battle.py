@@ -1159,6 +1159,50 @@ class JuiceBattle(commands.Cog):
         dice = random.randint(1, 6)
         return dice, dice + base + offset
 
+    def multi_attack_plan(self, attacker: dict, ability_ids: set) -> list[dict]:
+        """
+        依星爆／絕地反擊決定本回合攻擊段數與各段擲骰方式（爬塔與挑戰共用）。
+
+        Args:
+            attacker (dict): "攻擊方戰鬥狀態"
+            ability_ids (set): "{'starburst'}"
+
+        Returns:
+            plan (list[dict]): "[{'use_dodge_roll': False}, {'use_dodge_roll': True}]"
+        """
+        attack_count = 1
+        if "starburst" in ability_ids:
+            attack_count = 2
+        armor_ability = attacker.get("armor_ability") if isinstance(attacker.get("armor_ability"), dict) else {}
+        if armor_ability.get("id") == "desperate_counter" and attacker["hp"] in (1, 2):
+            attack_count = max(attack_count, 3 if "starburst" in ability_ids else 2)
+        return [
+            {"use_dodge_roll": "starburst" in ability_ids and attack_index > 0}
+            for attack_index in range(attack_count)
+        ]
+
+    def roll_attack(self, attacker: dict, *, use_dodge_roll: bool) -> tuple[int, int, str]:
+        """
+        結算一次攻擊擲骰（星爆第二段起用敏捷／閃避骰；爬塔與挑戰共用）。
+
+        Args:
+            attacker (dict): "攻擊方"
+            use_dodge_roll (bool): "True 表示用敏捷骰攻擊"
+
+        Returns:
+            result (tuple[int, int, str]): "(dice, total, label) 例如 (5, 13, '閃避骰')"
+        """
+        if use_dodge_roll:
+            dice, total, _text = self.tower_roll(
+                attacker,
+                attacker["agi"],
+                attacker.get("agi_offset", 0),
+            )
+            return dice, total, "閃避骰"
+        base, offset = self.attack_roll_stats(attacker)
+        dice, total, _text = self.tower_roll(attacker, base, offset)
+        return dice, total, "攻擊"
+
     async def load_user(self, userid: str) -> dict:
         """
         讀取並確保使用者文件存在。
@@ -3923,7 +3967,8 @@ class JuiceBattleView(discord.ui.View):
         skill_note = ""
 
         # 首次攻擊才消耗已發動技能並處理星爆／黏液等
-        if not self.resolving_followup:
+        is_followup = self.resolving_followup
+        if not is_followup:
             abilities = self.cog.tower_consume_armed_skills(attacker)
             ability_ids = {ability.get("id") for ability in abilities}
             self.pending_bind = False
@@ -3944,40 +3989,32 @@ class JuiceBattleView(discord.ui.View):
                 self.cog.tower_add_hp(attacker, 3)
                 gained = int(attacker.get("hp", 0)) - before_hp
                 skill_note = f"{skill_note}（聖光 +{gained} HP）" if skill_note else f"（聖光 +{gained} HP）"
-            attack_count = 1
-            if "starburst" in ability_ids:
-                attack_count = 2
-            armor_ability = attacker.get("armor_ability") if isinstance(attacker.get("armor_ability"), dict) else {}
-            if armor_ability.get("id") == "desperate_counter" and attacker["hp"] in (1, 2):
-                attack_count = max(attack_count, 3 if "starburst" in ability_ids else 2)
-            # 額外攻擊排隊：第二次起用閃避骰（星爆）
-            for attack_index in range(1, attack_count):
-                self.pending_extra_attacks.append(
-                    {"use_dodge_roll": "starburst" in ability_ids and attack_index > 0}
-                )
+            # 星爆／絕地反擊段數與爬塔共用 multi_attack_plan；第一段當場打，其餘排隊
+            attack_plan = self.cog.multi_attack_plan(attacker, ability_ids)
+            self.pending_extra_attacks = list(attack_plan[1:])
         self.resolving_followup = False
 
+        # 攻擊擲骰與爬塔共用 roll_attack（星爆第二段起為閃避骰）
         use_dodge_roll = self.attack_uses_dodge_roll
         self.attack_uses_dodge_roll = False
-        if use_dodge_roll:
-            _dice, total = self.cog.roll_stat(attacker["agi"], attacker["agi_offset"])
-            attack_label = "閃避骰攻擊"
-        else:
-            atk_base, atk_offset = self.cog.attack_roll_stats(attacker)
-            _dice, total = self.cog.roll_stat(atk_base, atk_offset)
-            attack_label = "攻擊"
+        _dice, total, attack_label = self.cog.roll_attack(attacker, use_dodge_roll=use_dodge_roll)
         if attacker.get("stance_swap_attack") and not use_dodge_roll:
             attacker["stance_swap_attack"] = False
             skill_note = f"{skill_note}（架式對調攻擊）" if skill_note else "（架式對調攻擊）"
         self.pending_attack_dice = _dice
         self.pending_attack_total = total
         attack_line = f"{attacker['display_name']} {attack_label} **{total}**{skill_note}"
+        # 連擊後續段 append；新的一回合攻擊則覆寫本段紀錄開頭
         if interaction is None and self.log_text:
             self.append_log(attack_line)
         else:
             self.log_text = attack_line
         self.phase = "defend"
-        self.prepare_defend_phase()
+        # 連擊後續段不重跑防守 CD（與爬塔同回合多段攻擊一致）
+        if not is_followup:
+            self.prepare_defend_phase()
+        else:
+            self.cog.tower_clear_skill_armed(defender)
 
         # 對戰機器人：防守方立刻決策並結算
         if defender.get("is_bot"):
@@ -4095,8 +4132,7 @@ class JuiceBattleView(discord.ui.View):
         else:
             skill_note = ""
 
-        # 計算傷害
-        attack_line = f"{attacker['display_name']} 攻擊 **{attack_total}**"
+        # 計算傷害（攻擊行已由 execute_attack 寫入；此處只 append 防守結果，避免星爆連擊被覆寫成單筆）
         defense_total = 0
         if mode == "defend":
             def_base, def_offset = self.cog.defense_roll_stats(defender, stance_swap_defend=stance_swap_defend)
@@ -4124,8 +4160,8 @@ class JuiceBattleView(discord.ui.View):
         if fridge_armed and damage > 0 and defender["hp"] - damage <= 0:
             heal = damage
             defender["hp"] = min(defender["max_hp"], defender["hp"] + heal)
-            self.log_text = (
-                f"{attack_line}\n{outcome_line}\n"
+            self.append_log(
+                f"{outcome_line}\n"
                 f"{defender['display_name']} 冰箱發動！傷害無效，回復 **{heal}** 點生命"
             )
             damage = 0
@@ -4134,11 +4170,11 @@ class JuiceBattleView(discord.ui.View):
                 defender["ghost_armed"] = True
             actual_damage = self.apply_incoming_damage(defender, damage)
             if "ghost" in ability_ids and damage > 0 and actual_damage == 0:
-                self.log_text = f"{attack_line}\n{outcome_line}\n幽靈化發動，傷害無效"
+                self.append_log(f"{outcome_line}\n幽靈化發動，傷害無效")
             elif mode == "defend" or actual_damage > 0 or damage > 0:
-                self.log_text = f"{attack_line}\n{outcome_line}，受到 **{actual_damage}** 點傷害"
+                self.append_log(f"{outcome_line}，受到 **{actual_damage}** 點傷害")
             else:
-                self.log_text = f"{attack_line}\n{outcome_line}"
+                self.append_log(outcome_line)
 
         if "life_conversion" in ability_ids and defender["hp"] > 0:
             self.cog.tower_add_hp(defender, defense_total)
@@ -5290,18 +5326,8 @@ class JuiceBattleTowerView(discord.ui.View):
         Returns:
             result (str): "攻擊結果文字"
         """
-        if use_dodge_roll:
-            _dice, attack_total, _dice_text = self.cog.tower_roll(
-                attacker,
-                attacker["agi"],
-                attacker.get("agi_offset", 0),
-            )
-            attack_label = "閃避骰"
-        else:
-            # 架式只對調角色數值；偏移與暴走維持攻擊欄位
-            base, offset = self.cog.attack_roll_stats(attacker)
-            _dice, attack_total, _dice_text = self.cog.tower_roll(attacker, base, offset)
-            attack_label = "攻擊"
+        # 攻擊擲骰與挑戰戰共用 roll_attack（星爆第二段為閃避骰）
+        _dice, attack_total, attack_label = self.cog.roll_attack(attacker, use_dodge_roll=use_dodge_roll)
         if attacker.get("stance_swap_attack"):
             attacker["stance_swap_attack"] = False
         mode = self.choose_monster_defense(attack_total, bound)
@@ -5409,13 +5435,8 @@ class JuiceBattleTowerView(discord.ui.View):
         abilities = self.cog.tower_consume_armed_skills(attacker)
         ability_ids = {ability.get("id") for ability in abilities}
         attacker["pending_poison"] = False
-        attack_count = 1
-        second_attack_uses_dodge = False
         bind = False
         results = []
-        if "starburst" in ability_ids:
-            attack_count = 2
-            second_attack_uses_dodge = True
         if "bind" in ability_ids:
             bind = True
         if "poison" in ability_ids:
@@ -5432,14 +5453,12 @@ class JuiceBattleTowerView(discord.ui.View):
                 gained = int(fighter.get("hp", 0)) - before_hp
                 heal_parts.append(f"{fighter['display_name']} +{gained}")
             results.append(f"聖光發動，存活隊員回復：**{'／'.join(heal_parts)}**")
-        armor_ability = attacker.get("armor_ability") if isinstance(attacker.get("armor_ability"), dict) else {}
-        if armor_ability.get("id") == "desperate_counter" and attacker["hp"] in (1, 2):
-            attack_count = max(attack_count, 3 if "starburst" in ability_ids else 2)
-            second_attack_uses_dodge = "starburst" in ability_ids
-        for attack_index in range(attack_count):
+        # 星爆／絕地反擊段數與挑戰戰共用 multi_attack_plan
+        attack_plan = self.cog.multi_attack_plan(attacker, ability_ids)
+        for attack_index, plan_entry in enumerate(attack_plan):
             result = self.resolve_player_attack(
                 attacker,
-                use_dodge_roll=second_attack_uses_dodge and attack_index > 0,
+                use_dodge_roll=bool(plan_entry.get("use_dodge_roll")),
                 bound=bind and attack_index == 0,
             )
             results.append(result)
