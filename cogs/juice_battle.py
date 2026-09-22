@@ -4342,7 +4342,6 @@ class JuiceBattleView(discord.ui.View):
                     attacker["poison_damage"] = 0
                 self.append_log(
                     f"{attacker['display_name']} 毒性回生，回復 **{gained}** HP"
-                    f"（剩餘 {attacker['poison_remaining']} 回合）"
                 )
             else:
                 tick_damage = int(attacker.get("poison_damage", self.cog.poison_base_damage))
@@ -4352,7 +4351,6 @@ class JuiceBattleView(discord.ui.View):
                     attacker["poison_damage"] = 0
                 self.append_log(
                     f"{attacker['display_name']} 中毒，受到 **{damage}** 點傷害"
-                    f"（剩餘 {attacker['poison_remaining']} 回合）"
                 )
                 if attacker["hp"] <= 0:
                     return True
@@ -4947,10 +4945,7 @@ class JuiceBattleView(discord.ui.View):
         # 中毒：攻擊成功（實際傷害 > 0）上毒；未上成則留給連擊
         if self.pending_poison and actual_damage > 0:
             self.cog.apply_poison(defender)
-            self.append_log(
-                f"{defender['display_name']} 中毒"
-                f"（每跳 {defender['poison_damage']}，剩餘 {defender['poison_remaining']} 回合）"
-            )
+            self.append_log(f"{defender['display_name']} 中毒")
             self.pending_poison = False
 
         # 黏液：連擊期間維持，整段攻擊結束後清除
@@ -6056,7 +6051,7 @@ class JuiceBattleTowerView(discord.ui.View):
                 if fighter["poison_remaining"] <= 0:
                     fighter["poison_damage"] = 0
                 self.append_log(
-                    f"{fighter['display_name']} 毒性回生，回復 **{gained}** HP（剩餘 {fighter['poison_remaining']} 回合）"
+                    f"{fighter['display_name']} 毒性回生，回復 **{gained}** HP"
                 )
             else:
                 tick_damage = int(fighter.get("poison_damage", self.cog.poison_base_damage))
@@ -6065,7 +6060,7 @@ class JuiceBattleTowerView(discord.ui.View):
                 if fighter["poison_remaining"] <= 0:
                     fighter["poison_damage"] = 0
                 self.append_log(
-                    f"{fighter['display_name']} 中毒，受到 **{damage}** 點傷害（剩餘 {fighter['poison_remaining']} 回合）"
+                    f"{fighter['display_name']} 中毒，受到 **{damage}** 點傷害"
                 )
 
     def apply_damage(self, target: dict, damage: int, *, count_damage: bool = True, absorbable: bool = True) -> int:
@@ -6404,10 +6399,7 @@ class JuiceBattleTowerView(discord.ui.View):
             if attacker.get("pending_poison") and self.last_attack_damage > 0:
                 if self.monster.get("id") != "poison_bubble_bug":
                     self.cog.apply_poison(self.monster)
-                    results.append(
-                        f"怪物中毒（每跳 {self.monster['poison_damage']}，"
-                        f"剩餘 {self.monster['poison_remaining']} 回合）。"
-                    )
+                    results.append(f"{self.monster['name']} 中毒")
                 attacker["pending_poison"] = False
         attacker["pending_poison"] = False
         self.log_text = "\n".join(results)
@@ -6435,7 +6427,6 @@ class JuiceBattleTowerView(discord.ui.View):
                 self.monster["poison_damage"] = 0
             self.append_log(
                 f"{self.monster['name']} 中毒，受到 **{poison_damage}** 點傷害"
-                f"（剩餘 {self.monster['poison_remaining']} 回合）"
             )
             if self.monster["hp"] <= 0:
                 await self.cog.tower_finish_floor(self, self.log_text)
@@ -6584,10 +6575,7 @@ class JuiceBattleTowerView(discord.ui.View):
         # 部落弓箭手：攻擊成功時賦予中毒（對齊 apply_poison）
         if monster_ability.get("id") == "poison" and actual_damage > 0:
             self.cog.apply_poison(defender)
-            log_parts.append(
-                f"{defender['display_name']} 中毒"
-                f"（每跳 {defender['poison_damage']}，剩餘 {defender['poison_remaining']} 回合）"
-            )
+            log_parts.append(f"{defender['display_name']} 中毒")
         self.log_text = "\n".join(log_parts)
         self.pending_attack_total = None
         self.pending_attack_dice = ""
