@@ -111,7 +111,7 @@ class JuiceBattle(commands.Cog):
                     "name": "祭血術",
                     "phase": "attack",
                     "cd": 5,
-                    "description": "消耗當前HP÷3（向下取整）的生命，立即對對方造成消耗量×2傷害（跳過防守，可被吸收背心擋1）；不取代普攻。HP≤2無法發動。平衡:6",
+                    "description": "消耗自身1/3的生命值，立即對對方造成消耗血量兩倍的傷害。血量為2或以下時無法使用。",
                 },
             },
         }
@@ -4116,7 +4116,7 @@ class JuiceBattleView(discord.ui.View):
         self.cog.tower_prepare_skill_cooldowns(defender, "defend")
         self.cog.tower_clear_skill_armed(defender)
 
-    def apply_incoming_damage(self, target: dict, damage: int, *, count_damage: bool = True) -> int:
+    def apply_incoming_damage(self, target: dict, damage: int, *, count_damage: bool = True, absorbable: bool = True) -> int:
         """
         套用傷害並處理吸收／幽靈化／暴走（與爬塔共用邏輯概念）。
 
@@ -4124,13 +4124,14 @@ class JuiceBattleView(discord.ui.View):
             target (dict): "受傷方"
             damage (int): "原始傷害"
             count_damage (bool): "是否計入狂戰鎧甲次數"
+            absorbable (bool): "是否可被吸收背心無效化"
 
         Returns:
             actual_damage (int): "實際扣血"
         """
         damage = max(0, int(damage))
         armor_ability = target.get("armor_ability") if isinstance(target.get("armor_ability"), dict) else {}
-        if damage == 1 and armor_ability.get("id") == "absorption":
+        if absorbable and damage == 1 and armor_ability.get("id") == "absorption":
             return 0
         if target.get("ghost_armed"):
             target["ghost_armed"] = False
@@ -4381,7 +4382,8 @@ class JuiceBattleView(discord.ui.View):
             self.append_log(
                 f"{actor['display_name']} 發動祭血術，自損 **{self_damage}** HP（消耗 {cost}）"
             )
-            dealt = self.apply_incoming_damage(opponent, cost * 2)
+            # 對對方：跳過防守，傷害不可被吸收背心擋下
+            dealt = self.apply_incoming_damage(opponent, cost * 2, absorbable=False)
             self.append_log(
                 f"祭血術對 {opponent['display_name']} 造成 **{dealt}** 點傷害（跳過防守）"
             )
@@ -4796,7 +4798,8 @@ class JuiceBattleView(discord.ui.View):
                 self.append_log(
                     f"{attacker['display_name']} 發動祭血術，自損 **{self_damage}** HP（消耗 {cost}）"
                 )
-                dealt = self.apply_incoming_damage(opponent, cost * 2)
+                # 對對方：跳過防守，傷害不可被吸收背心擋下
+                dealt = self.apply_incoming_damage(opponent, cost * 2, absorbable=False)
                 self.append_log(
                     f"祭血術對 {opponent['display_name']} 造成 **{dealt}** 點傷害（跳過防守）"
                 )
@@ -5815,7 +5818,7 @@ class JuiceBattleTowerView(discord.ui.View):
                     f"{fighter['display_name']} 中毒，受到 **{damage}** 點傷害（剩餘 {fighter['poison_remaining']} 回合）"
                 )
 
-    def apply_damage(self, target: dict, damage: int, *, count_damage: bool = True) -> int:
+    def apply_damage(self, target: dict, damage: int, *, count_damage: bool = True, absorbable: bool = True) -> int:
         """
         套用爬塔傷害並處理吸收、暴走與地獄業火重置。
 
@@ -5823,13 +5826,14 @@ class JuiceBattleTowerView(discord.ui.View):
             target (dict): "受到傷害的角色"
             damage (int): "原始傷害"
             count_damage (bool): "是否計入狂戰鎧甲承受次數"
+            absorbable (bool): "是否可被吸收背心無效化"
 
         Returns:
             actual_damage (int): "實際扣除的生命值"
         """
         damage = max(0, int(damage))
         armor_ability = target.get("armor_ability") if isinstance(target.get("armor_ability"), dict) else {}
-        if damage == 1 and armor_ability.get("id") == "absorption":
+        if absorbable and damage == 1 and armor_ability.get("id") == "absorption":
             return 0
         if target.get("ghost_armed"):
             target["ghost_armed"] = False
@@ -6056,7 +6060,8 @@ class JuiceBattleTowerView(discord.ui.View):
             self.append_log(
                 f"{actor['display_name']} 發動祭血術，自損 **{self_damage}** HP（消耗 {cost}）"
             )
-            dealt = self.apply_damage(self.monster, cost * 2)
+            # 對怪物：跳過防守，傷害不可被吸收背心擋下
+            dealt = self.apply_damage(self.monster, cost * 2, absorbable=False)
             self.append_log(
                 f"祭血術對 {self.monster['name']} 造成 **{dealt}** 點傷害（跳過防守）"
             )
