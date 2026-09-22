@@ -219,13 +219,22 @@ class JuiceBattle(commands.Cog):
                 "atk_offset": 0,
                 "def_offset": -1,
                 "agi_offset": 0,
-                "ability": {
-                    "id": "condemn",
-                    "name": "斷罪",
-                    "phase": "attack",
-                    "cd": 1,
-                    "description": "[被動]血色晚宴：每當自己受傷時獲得一層血宴。[攻擊階段(CD:1)]斷罪：消耗所有血宴，在本次攻擊後另外造成等同血宴層數的傷害（不可防禦或閃避）。",
-                },
+                "abilities": [
+                    {
+                        "id": "blood_feast",
+                        "name": "血色晚宴",
+                        "phase": "passive",
+                        "cd": None,
+                        "description": "每當自己受傷時，獲得一層\"血宴\"狀態。",
+                    },
+                    {
+                        "id": "condemn",
+                        "name": "斷罪",
+                        "phase": "attack",
+                        "cd": 1,
+                        "description": "消耗所有血宴狀態，在本次攻擊後，另外造成等同血宴傷害的傷害值。不可防禦或閃避。",
+                    },
+                ],
             },
             "lily_toxic_spear": {
                 "name": "莉莉的毒棘槍",
@@ -238,7 +247,7 @@ class JuiceBattle(commands.Cog):
                     "name": "毒性蔓延",
                     "phase": "passive",
                     "cd": None,
-                    "description": "攻擊敵人時，若敵人身上有中毒效果，則最終攻擊值再加上等同中毒剩餘回合數的傷害，並延長一回合中毒狀態。",
+                    "description": "攻擊敵人時，如果敵人身上有中毒效果，則最終攻擊值會在加上等同中毒狀態剩餘回合數的傷害值，並且延長一回合中毒狀態",
                 },
             },
         }
@@ -363,7 +372,7 @@ class JuiceBattle(commands.Cog):
                     "name": "最後一舞",
                     "phase": "passive",
                     "cd": None,
-                    "description": "自身血量為 5 以下時，攻擊附帶吸血效果（回復等同本次造成的實際傷害）。",
+                    "description": "自身血量為5以下時，攻擊附帶吸血效果",
                 },
             },
             "lily_emerald_shawl": {
@@ -377,7 +386,7 @@ class JuiceBattle(commands.Cog):
                     "name": "毒性回生",
                     "phase": "passive",
                     "cd": None,
-                    "description": "自身有中毒效果時，中毒跳傷轉變成回合開始時自身回復 1 HP（剩餘回合照常遞減）。",
+                    "description": "當自身有中毒效果時，效果轉變成回合開始時自身+1HP",
                 },
             },
         }
@@ -500,7 +509,7 @@ class JuiceBattle(commands.Cog):
             for item_id, template in collection.items():
                 if template.get("starter"):
                     continue
-                ability = template.get("ability")
+                abilities = self.template_abilities(template)
                 items.append(
                     {
                         "item_id": item_id,
@@ -510,7 +519,8 @@ class JuiceBattle(commands.Cog):
                         "atk_offset": template["atk_offset"],
                         "def_offset": template["def_offset"],
                         "agi_offset": template["agi_offset"],
-                        "ability": copy.deepcopy(ability) if isinstance(ability, dict) else None,
+                        "abilities": copy.deepcopy(abilities),
+                        "ability": copy.deepcopy(abilities[0]) if abilities else None,
                         "starter": bool(template.get("starter")),
                     }
                 )
@@ -550,7 +560,8 @@ class JuiceBattle(commands.Cog):
         stats = [10, 0, 0, 0]
         for _ in range(bonus_points):
             stats[random.randrange(4)] += 1
-        ability = copy.deepcopy(template.get("ability"))
+        abilities = self.template_abilities(template)
+        ability = copy.deepcopy(abilities[0]) if abilities else None
         return {
             "id": template["id"],
             "name": template["name"],
@@ -561,6 +572,7 @@ class JuiceBattle(commands.Cog):
             "defense": stats[2],
             "agi": stats[3],
             "ability": ability,
+            "abilities": copy.deepcopy(abilities),
             "is_boss": is_boss,
             "attack_offset": 0,
             "skill_cd": 0,
@@ -597,59 +609,213 @@ class JuiceBattle(commands.Cog):
         total = dice + base + (offset * offset_multiplier)
         return dice, total, dice_text
 
-    def tower_skill_definition(self, fighter: dict, source: str) -> dict | None:
+    def normalize_abilities(self, value) -> list[dict]:
+        """
+        把單一 ability 或 abilities 清單正規化為 list。
+
+        Args:
+            value (dict | list | None): "技能定義或清單"
+
+        Returns:
+            abilities (list): "[{'id': 'poison', 'name': '中毒'}]"
+        """
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [copy.deepcopy(item) for item in value if isinstance(item, dict)]
+        if isinstance(value, dict):
+            return [copy.deepcopy(value)]
+        return []
+
+    def template_abilities(self, template: dict | None) -> list[dict]:
+        """
+        從角色／裝備／怪物模板讀取技能清單（相容 ability 與 abilities）。
+
+        Args:
+            template (dict | None): "武器或角色模板"
+
+        Returns:
+            abilities (list): "技能定義清單"
+        """
+        if not isinstance(template, dict):
+            return []
+        if "abilities" in template:
+            return self.normalize_abilities(template.get("abilities"))
+        return self.normalize_abilities(template.get("ability"))
+
+    def fighter_abilities(self, fighter: dict, source: str) -> list[dict]:
+        """
+        取得戰鬥中某來源的全部技能。
+
+        Args:
+            fighter (dict): "玩家戰鬥狀態"
+            source (str): "character、weapon 或 armor"
+
+        Returns:
+            abilities (list): "該來源技能清單"
+        """
+        if source == "character":
+            return self.template_abilities(self.characters.get(fighter.get("character_id")))
+        abilities = fighter.get(f"{source}_abilities")
+        if isinstance(abilities, list):
+            return [item for item in abilities if isinstance(item, dict)]
+        ability = fighter.get(f"{source}_ability")
+        return [ability] if isinstance(ability, dict) else []
+
+    def find_fighter_ability(self, fighter: dict, ability_id: str) -> tuple[str, dict] | None:
+        """
+        依技能 id 尋找來源與定義。
+
+        Args:
+            fighter (dict): "玩家戰鬥狀態"
+            ability_id (str): "condemn"
+
+        Returns:
+            result (tuple | None): "('weapon', {...}) 或 None"
+        """
+        for source in ("character", "weapon", "armor"):
+            for ability in self.fighter_abilities(fighter, source):
+                if ability.get("id") == ability_id:
+                    return source, ability
+        return None
+
+    def fighter_has_ability(self, fighter: dict, ability_id: str) -> bool:
+        """
+        判斷戰鬥角色是否擁有指定技能（含被動）。
+
+        Args:
+            fighter (dict): "玩家戰鬥狀態"
+            ability_id (str): "blood_feast"
+
+        Returns:
+            has_ability (bool): "True"
+        """
+        return self.find_fighter_ability(fighter, ability_id) is not None
+
+    def ability_cd_left(self, fighter: dict, ability_id: str, source: str) -> int:
+        """
+        取得技能剩餘 CD（相容舊的來源級 CD 欄位）。
+
+        Args:
+            fighter (dict): "玩家戰鬥狀態"
+            ability_id (str): "condemn"
+            source (str): "weapon"
+
+        Returns:
+            cd_left (int): "0"
+        """
+        cds = fighter.get("ability_cds")
+        if isinstance(cds, dict) and ability_id in cds:
+            return max(0, int(cds.get(ability_id, 0)))
+        return max(0, int(fighter.get(f"{source}_skill_cd", 0)))
+
+    def set_ability_cd(self, fighter: dict, ability_id: str, value: int):
+        """
+        寫入技能 CD。
+
+        Args:
+            fighter (dict): "玩家戰鬥狀態"
+            ability_id (str): "condemn"
+            value (int): "1"
+        """
+        if not isinstance(fighter.get("ability_cds"), dict):
+            fighter["ability_cds"] = {}
+        fighter["ability_cds"][ability_id] = max(0, int(value))
+
+    def ability_used_once(self, fighter: dict, ability_id: str, source: str) -> bool:
+        """
+        判斷每場一次技能是否已用過（相容舊來源級欄位）。
+
+        Args:
+            fighter (dict): "玩家戰鬥狀態"
+            ability_id (str): "fridge"
+            source (str): "character"
+
+        Returns:
+            used (bool): "True"
+        """
+        used = fighter.get("ability_used")
+        if isinstance(used, dict) and ability_id in used:
+            return bool(used.get(ability_id))
+        return bool(fighter.get(f"{source}_skill_used", False))
+
+    def mark_ability_used(self, fighter: dict, ability_id: str):
+        """
+        標記每場一次技能已使用。
+
+        Args:
+            fighter (dict): "玩家戰鬥狀態"
+            ability_id (str): "fridge"
+        """
+        if not isinstance(fighter.get("ability_used"), dict):
+            fighter["ability_used"] = {}
+        fighter["ability_used"][ability_id] = True
+
+    def tower_skill_definition(self, fighter: dict, source: str, ability_id: str | None = None) -> dict | None:
         """
         取得爬塔角色、武器或防具技能定義。
 
         Args:
             fighter (dict): "玩家戰鬥狀態"
             source (str): "character、weapon 或 armor"
+            ability_id (str | None): "指定技能 id；省略時回傳第一個非被動技能"
 
         Returns:
             ability (dict | None): "技能資料"
         """
-        if source == "character":
-            ability = self.character_ability(fighter.get("character_id"))
-        else:
-            ability = fighter.get(f"{source}_ability")
-        return ability if isinstance(ability, dict) else None
+        abilities = self.fighter_abilities(fighter, source)
+        if ability_id is not None:
+            for ability in abilities:
+                if ability.get("id") == ability_id:
+                    return ability
+            return None
+        for ability in abilities:
+            if ability.get("phase") != "passive":
+                return ability
+        return abilities[0] if abilities else None
 
-    def tower_skill_is_ready(self, fighter: dict, source: str, phase: str) -> bool:
+    def tower_skill_is_ready(self, fighter: dict, ability_id: str, phase: str) -> bool:
         """
-        判斷爬塔裝備或角色技能是否可發動。
+        判斷指定技能是否可在該階段發動。
 
         Args:
             fighter (dict): "玩家戰鬥狀態"
-            source (str): "character、weapon 或 armor"
+            ability_id (str): "condemn"
             phase (str): "attack 或 defend"
 
         Returns:
             ready (bool): "技能是否可用"
         """
-        ability = self.tower_skill_definition(fighter, source)
-        if ability is None or ability.get("phase") != phase:
+        found = self.find_fighter_ability(fighter, ability_id)
+        if found is None:
+            return False
+        source, ability = found
+        if ability.get("phase") != phase:
             return False
         if ability.get("cd") is None:
-            return not fighter.get(f"{source}_skill_used", False)
-        return int(fighter.get(f"{source}_skill_cd", 0)) <= 0
+            return not self.ability_used_once(fighter, ability_id, source)
+        return self.ability_cd_left(fighter, ability_id, source) <= 0
 
-    def tower_consume_skill(self, fighter: dict, source: str) -> dict | None:
+    def tower_consume_skill(self, fighter: dict, ability_id: str) -> dict | None:
         """
-        消耗一個爬塔技能並寫入 CD 或一次性使用狀態。
+        消耗一個技能並寫入 CD 或一次性使用狀態。
 
         Args:
             fighter (dict): "玩家戰鬥狀態"
-            source (str): "character、weapon 或 armor"
+            ability_id (str): "condemn"
 
         Returns:
             ability (dict | None): "消耗的技能資料"
         """
-        ability = self.tower_skill_definition(fighter, source)
-        if ability is None:
+        found = self.find_fighter_ability(fighter, ability_id)
+        if found is None:
             return None
+        source, ability = found
         if ability.get("cd") is None:
+            self.mark_ability_used(fighter, ability_id)
             fighter[f"{source}_skill_used"] = True
         else:
+            self.set_ability_cd(fighter, ability_id, int(ability["cd"]))
             fighter[f"{source}_skill_cd"] = int(ability["cd"])
         return ability
 
@@ -663,15 +829,49 @@ class JuiceBattle(commands.Cog):
         """
         sources = ("character", "weapon") if phase == "attack" else ("character", "armor", "weapon")
         for source in sources:
-            ability = self.tower_skill_definition(fighter, source)
-            if ability and ability.get("phase") == phase:
-                key = f"{source}_skill_cd"
-                if int(fighter.get(key, 0)) > 0:
-                    fighter[key] = int(fighter[key]) - 1
+            for ability in self.fighter_abilities(fighter, source):
+                if ability.get("phase") != phase or ability.get("cd") is None:
+                    continue
+                ability_id = str(ability.get("id") or "")
+                if not ability_id:
+                    continue
+                cd_left = self.ability_cd_left(fighter, ability_id, source)
+                if cd_left > 0:
+                    self.set_ability_cd(fighter, ability_id, cd_left - 1)
+                    fighter[f"{source}_skill_cd"] = cd_left - 1
+
+    def tower_armed_ability_ids(self, fighter: dict) -> list[str]:
+        """
+        取得目前已發動的技能 id 清單（相容舊存檔的來源字串）。
+
+        Args:
+            fighter (dict): "玩家戰鬥狀態"
+
+        Returns:
+            ability_ids (list): "['condemn', 'bind']"
+        """
+        armed = fighter.get("tower_skill_armed")
+        if armed is None or armed == "":
+            return []
+        if isinstance(armed, str):
+            armed_items = [armed]
+        elif isinstance(armed, list):
+            armed_items = [str(item) for item in armed if item]
+        else:
+            return []
+        ability_ids = []
+        for item in armed_items:
+            if item in ("character", "weapon", "armor"):
+                ability = self.tower_skill_definition(fighter, item)
+                if ability is not None and ability.get("id"):
+                    ability_ids.append(str(ability["id"]))
+                continue
+            ability_ids.append(item)
+        return ability_ids
 
     def tower_armed_sources(self, fighter: dict) -> list[str]:
         """
-        取得目前已發動的技能來源清單（相容舊存檔的單一字串）。
+        取得目前已發動技能的來源清單（由技能 id 反推）。
 
         Args:
             fighter (dict): "玩家戰鬥狀態"
@@ -679,47 +879,48 @@ class JuiceBattle(commands.Cog):
         Returns:
             sources (list): "['character', 'armor']"
         """
-        armed = fighter.get("tower_skill_armed")
-        if armed is None or armed == "":
-            return []
-        if isinstance(armed, str):
-            return [armed]
-        if isinstance(armed, list):
-            return [str(source) for source in armed if source]
-        return []
+        sources = []
+        for ability_id in self.tower_armed_ability_ids(fighter):
+            found = self.find_fighter_ability(fighter, ability_id)
+            if found is None:
+                continue
+            source = found[0]
+            if source not in sources:
+                sources.append(source)
+        return sources
 
-    def tower_is_skill_armed(self, fighter: dict, source: str) -> bool:
+    def tower_is_skill_armed(self, fighter: dict, ability_id: str) -> bool:
         """
-        判斷指定來源技能是否已發動。
+        判斷指定技能是否已發動。
 
         Args:
             fighter (dict): "玩家戰鬥狀態"
-            source (str): "character"
+            ability_id (str): "condemn"
 
         Returns:
             armed (bool): "True"
         """
-        return str(source) in self.tower_armed_sources(fighter)
+        return str(ability_id) in self.tower_armed_ability_ids(fighter)
 
-    def tower_toggle_skill_armed(self, fighter: dict, source: str):
+    def tower_toggle_skill_armed(self, fighter: dict, ability_id: str):
         """
-        切換指定來源技能的發動狀態；可同時發動多個來源。
+        切換指定技能的發動狀態；可同時發動多個技能。
 
         Args:
             fighter (dict): "玩家戰鬥狀態"
-            source (str): "armor"
+            ability_id (str): "condemn"
         """
-        sources = self.tower_armed_sources(fighter)
-        source = str(source)
-        if source in sources:
-            sources = [item for item in sources if item != source]
+        ability_ids = self.tower_armed_ability_ids(fighter)
+        ability_id = str(ability_id)
+        if ability_id in ability_ids:
+            ability_ids = [item for item in ability_ids if item != ability_id]
         else:
-            sources.append(source)
-        fighter["tower_skill_armed"] = sources
+            ability_ids.append(ability_id)
+        fighter["tower_skill_armed"] = ability_ids
 
     def tower_clear_skill_armed(self, fighter: dict):
         """
-        清空已發動的技能來源。
+        清空已發動的技能。
 
         Args:
             fighter (dict): "玩家戰鬥狀態"
@@ -737,8 +938,8 @@ class JuiceBattle(commands.Cog):
             abilities (list): "[{'id': 'fridge', 'name': '冰箱'}]"
         """
         abilities = []
-        for source in self.tower_armed_sources(fighter):
-            ability = self.tower_consume_skill(fighter, source)
+        for ability_id in self.tower_armed_ability_ids(fighter):
+            ability = self.tower_consume_skill(fighter, ability_id)
             if ability is not None:
                 abilities.append(ability)
         self.tower_clear_skill_armed(fighter)
@@ -1179,6 +1380,8 @@ class JuiceBattle(commands.Cog):
         armor_id = None
         weapon_ability = None
         armor_ability = None
+        weapon_abilities = []
+        armor_abilities = []
         if juice_battle is not None:
             bag = juice_battle.get("bag") or []
             weapon_slot = juice_battle.get("equipped_weapon_slot")
@@ -1192,12 +1395,15 @@ class JuiceBattle(commands.Cog):
                 template = self.item_template(kind, entry.get("item_id"))
                 if template is None:
                     continue
+                abilities = self.template_abilities(template)
                 if kind == "weapon":
                     weapon_id = entry.get("item_id")
-                    weapon_ability = copy.deepcopy(template.get("ability"))
+                    weapon_abilities = abilities
+                    weapon_ability = copy.deepcopy(abilities[0]) if abilities else None
                 else:
                     armor_id = entry.get("item_id")
-                    armor_ability = copy.deepcopy(template.get("ability"))
+                    armor_abilities = abilities
+                    armor_ability = copy.deepcopy(abilities[0]) if abilities else None
         return {
             "user_id": str(user_id),
             "display_name": display_name,
@@ -1223,12 +1429,16 @@ class JuiceBattle(commands.Cog):
             "armor_id": armor_id,
             "weapon_ability": weapon_ability,
             "armor_ability": armor_ability,
+            "weapon_abilities": copy.deepcopy(weapon_abilities),
+            "armor_abilities": copy.deepcopy(armor_abilities),
             "character_skill_cd": 0,
             "weapon_skill_cd": 0,
             "armor_skill_cd": 0,
             "character_skill_used": False,
             "weapon_skill_used": False,
             "armor_skill_used": False,
+            "ability_cds": {},
+            "ability_used": {},
             "tower_skill_armed": [],
             "damage_taken_count": 0,
             "berserk_triggered": False,
@@ -1240,7 +1450,7 @@ class JuiceBattle(commands.Cog):
 
     def character_ability(self, character_id: str) -> dict | None:
         """
-        取得角色技能定義。
+        取得角色主要（第一個非被動）技能定義。
 
         Args:
             character_id (str): "lily"
@@ -1248,11 +1458,11 @@ class JuiceBattle(commands.Cog):
         Returns:
             ability (dict | None): "{'id': 'poison', 'name': '中毒', 'phase': 'attack', 'cd': 6}"
         """
-        character = self.characters.get(character_id)
-        if character is None:
-            return None
-        ability = character.get("ability")
-        return ability if isinstance(ability, dict) else None
+        abilities = self.template_abilities(self.characters.get(character_id))
+        for ability in abilities:
+            if ability.get("phase") != "passive":
+                return ability
+        return abilities[0] if abilities else None
 
     def apply_poison(self, target: dict):
         """
@@ -1270,7 +1480,7 @@ class JuiceBattle(commands.Cog):
 
     def skill_is_ready(self, fighter: dict, phase: str) -> bool:
         """
-        判斷該階段是否可發動技能。
+        判斷角色主要技能是否可發動（相容舊介面）。
 
         Args:
             fighter (dict): "{'character_id': 'lily', 'skill_cd': 0}"
@@ -1282,13 +1492,11 @@ class JuiceBattle(commands.Cog):
         ability = self.character_ability(fighter["character_id"])
         if ability is None or ability.get("phase") != phase:
             return False
-        if ability.get("cd") is None:
-            return not fighter.get("skill_used_once", False)
-        return int(fighter.get("skill_cd", 0)) <= 0
+        return self.tower_skill_is_ready(fighter, str(ability["id"]), phase)
 
     def consume_armed_skill(self, fighter: dict) -> dict | None:
         """
-        消耗已發動的技能並進入 CD／一次性標記。
+        消耗已發動的角色主要技能（相容舊介面）。
 
         Args:
             fighter (dict): "{'skill_armed': True, 'character_id': 'lily'}"
@@ -1300,13 +1508,9 @@ class JuiceBattle(commands.Cog):
             return None
         ability = self.character_ability(fighter["character_id"])
         fighter["skill_armed"] = False
-        if ability is None:
+        if ability is None or not ability.get("id"):
             return None
-        if ability.get("cd") is None:
-            fighter["skill_used_once"] = True
-        else:
-            fighter["skill_cd"] = int(ability["cd"])
-        return ability
+        return self.tower_consume_skill(fighter, str(ability["id"]))
 
     def attack_roll_stats(self, fighter: dict) -> tuple[int, int]:
         """
@@ -1353,6 +1557,51 @@ class JuiceBattle(commands.Cog):
         if source == "armor":
             return "防具"
         return "武器"
+
+    def ability_phase_label(self, phase: str | None) -> str:
+        """
+        技能階段顯示文案。
+
+        Args:
+            phase (str | None): "attack"
+
+        Returns:
+            label (str): "攻擊階段"
+        """
+        if phase == "attack":
+            return "攻擊階段"
+        if phase == "defend":
+            return "防守階段"
+        if phase == "passive":
+            return "被動"
+        return "技能"
+
+    def format_ability_lines(self, abilities: list[dict], *, source: str | None = None) -> list[str]:
+        """
+        將技能清單格式化為顯示用文字行。
+
+        Args:
+            abilities (list): "技能定義清單"
+            source (str | None): "若提供則加上來源前綴"
+
+        Returns:
+            lines (list): "顯示文字"
+        """
+        lines = []
+        for ability in abilities:
+            phase_text = self.ability_phase_label(ability.get("phase"))
+            cd_value = ability.get("cd")
+            if ability.get("phase") == "passive":
+                cd_text = ""
+            elif cd_value is not None:
+                cd_text = f"(CD:{cd_value})"
+            else:
+                cd_text = "(每場一次)"
+            prefix = f"{self.skill_source_label(source)}：" if source else ""
+            header = f"{prefix}[{phase_text}{cd_text}] {ability.get('name', '技能')}"
+            description = ability.get("description", "")
+            lines.append(f"{header}\n{description}" if description else header)
+        return lines
 
     def build_bot_fighter(self) -> dict:
         """
@@ -1407,8 +1656,7 @@ class JuiceBattle(commands.Cog):
         attack_count = 1
         if "starburst" in ability_ids:
             attack_count = 2
-        armor_ability = attacker.get("armor_ability") if isinstance(attacker.get("armor_ability"), dict) else {}
-        if armor_ability.get("id") == "desperate_counter" and attacker["hp"] in (1, 2):
+        if self.fighter_has_ability(attacker, "desperate_counter") and attacker["hp"] in (1, 2):
             attack_count = max(attack_count, 3 if "starburst" in ability_ids else 2)
         return [
             {"use_dodge_roll": "starburst" in ability_ids and attack_index > 0}
@@ -1737,7 +1985,14 @@ class JuiceBattle(commands.Cog):
                 f"防禦 {template['def_offset']:+d}｜敏捷 {template['agi_offset']:+d}"
             )
             ability = template.get("ability")
-            if isinstance(ability, dict):
+            abilities = self.template_abilities(template)
+            if abilities:
+                ability_text = "\n".join(
+                    f"能力：{ability.get('name', '無')}｜{ability.get('description', '')}"
+                    for ability in abilities
+                )
+                value += f"\n{ability_text}"
+            elif isinstance(ability, dict):
                 value += f"\n能力：{ability.get('name', '無')}｜{ability.get('description', '')}"
             embed.add_field(name=f"[{slot_label}] {template['name']}", value=value, inline=False)
         if discard_confirm_slot is not None:
@@ -1791,17 +2046,13 @@ class JuiceBattle(commands.Cog):
         attacker = view.fighter_by_id(view.attacker_id) if view.phase in ("attack", "defend") else None
         slime_preview = False
         if attacker is not None and view.phase == "attack":
-            slime_preview = any(
-                (self.tower_skill_definition(attacker, source) or {}).get("id") == "slime"
-                for source in self.tower_armed_sources(attacker)
-            )
+            slime_preview = "slime" in self.tower_armed_ability_ids(attacker)
         for fighter in (view.fighter_a, view.fighter_b):
-            armed_abilities = [
-                ability
-                for source in self.tower_armed_sources(fighter)
-                for ability in [self.tower_skill_definition(fighter, source)]
-                if ability is not None
-            ]
+            armed_abilities = []
+            for ability_id in self.tower_armed_ability_ids(fighter):
+                found = self.find_fighter_ability(fighter, ability_id)
+                if found is not None:
+                    armed_abilities.append(found[1])
             # 大山架式：只對調角色攻防數值，偏移量維持原欄位
             stance_active = bool(fighter.get("stance_swap_attack")) or any(
                 ability.get("id") == "stance_swap" for ability in armed_abilities
@@ -1825,8 +2076,7 @@ class JuiceBattle(commands.Cog):
 
             status_parts = []
             if fighter.get("poison_remaining", 0) > 0:
-                armor_ability = fighter.get("armor_ability") if isinstance(fighter.get("armor_ability"), dict) else {}
-                if armor_ability.get("id") == "toxic_revival":
+                if self.fighter_has_ability(fighter, "toxic_revival"):
                     status_parts.append(f"毒性回生 {fighter['poison_remaining']}")
                 else:
                     poison_damage = int(fighter.get("poison_damage", self.poison_base_damage))
@@ -1853,8 +2103,7 @@ class JuiceBattle(commands.Cog):
             status_text = f"\n狀態：{'／'.join(status_parts)}" if status_parts else ""
             ability_names = []
             for source in ("character", "weapon", "armor"):
-                ability = self.tower_skill_definition(fighter, source)
-                if ability is not None:
+                for ability in self.fighter_abilities(fighter, source):
                     ability_names.append(f"{self.skill_source_label(source)}：{ability['name']}")
             ability_text = f"\n技能：{'／'.join(ability_names)}" if ability_names else ""
             embed.add_field(
@@ -1881,12 +2130,11 @@ class JuiceBattle(commands.Cog):
         elif view.phase == "attack":
             attacker = view.fighter_by_id(view.attacker_id)
             action = f"輪到 **{attacker['display_name']}** 攻擊"
-            armed_abilities = [
-                ability
-                for source in self.tower_armed_sources(attacker)
-                for ability in [self.tower_skill_definition(attacker, source)]
-                if ability is not None
-            ]
+            armed_abilities = []
+            for ability_id in self.tower_armed_ability_ids(attacker):
+                found = self.find_fighter_ability(attacker, ability_id)
+                if found is not None:
+                    armed_abilities.append(found[1])
             if armed_abilities:
                 names = "、".join(ability["name"] for ability in armed_abilities)
                 action += f"\n已發動：**{names}**"
@@ -1897,12 +2145,11 @@ class JuiceBattle(commands.Cog):
                 action = f"輪到 **{defender['display_name']}** 選擇防禦（被束縛，無法閃避）"
             else:
                 action = f"輪到 **{defender['display_name']}** 選擇防禦或閃避"
-            armed_abilities = [
-                ability
-                for source in self.tower_armed_sources(defender)
-                for ability in [self.tower_skill_definition(defender, source)]
-                if ability is not None
-            ]
+            armed_abilities = []
+            for ability_id in self.tower_armed_ability_ids(defender):
+                found = self.find_fighter_ability(defender, ability_id)
+                if found is not None:
+                    armed_abilities.append(found[1])
             if armed_abilities:
                 names = "、".join(ability["name"] for ability in armed_abilities)
                 action += f"\n已發動：**{names}**"
@@ -1932,15 +2179,9 @@ class JuiceBattle(commands.Cog):
             color=common.bot_color,
         )
         for character_id, character in self.characters.items():
-            ability = character.get("ability")
-            if isinstance(ability, dict):
-                phase_text = "攻擊階段" if ability.get("phase") == "attack" else "防守階段"
-                cd_value = ability.get("cd")
-                cd_text = f"CD:{cd_value}" if cd_value is not None else "每場一次"
-                ability_line = (
-                    f"\n技能：[{phase_text}({cd_text})] {ability['name']}\n"
-                    f"{ability.get('description', '')}"
-                )
+            abilities = self.template_abilities(character)
+            if abilities:
+                ability_line = "\n技能：" + "\n".join(self.format_ability_lines(abilities))
             else:
                 ability_line = "\n技能：無"
             embed.add_field(
@@ -2301,7 +2542,17 @@ class JuiceBattle(commands.Cog):
             monster=copy.deepcopy(monster),
         )
         for fighter in view.fighters:
-            fighter["tower_skill_armed"] = self.tower_armed_sources(fighter)
+            # 以目前模板刷新技能清單（相容多技能遷移與舊存檔）
+            for kind, id_key in (("weapon", "weapon_id"), ("armor", "armor_id")):
+                template = self.item_template(kind, fighter.get(id_key))
+                abilities = self.template_abilities(template)
+                fighter[f"{kind}_abilities"] = copy.deepcopy(abilities)
+                fighter[f"{kind}_ability"] = copy.deepcopy(abilities[0]) if abilities else None
+            if not isinstance(fighter.get("ability_cds"), dict):
+                fighter["ability_cds"] = {}
+            if not isinstance(fighter.get("ability_used"), dict):
+                fighter["ability_used"] = {}
+            fighter["tower_skill_armed"] = self.tower_armed_ability_ids(fighter)
         view.turn_order = [str(user_id) for user_id in battle.get("turn_order") or []]
         view.current_index = int(battle.get("current_index", 0))
         view.round_number = int(battle.get("round_number", 1))
@@ -3958,19 +4209,19 @@ class JuiceBattleDodgeButton(discord.ui.Button):
 class JuiceBattleSkillButton(discord.ui.Button):
     """角色／武器／防具技能按鈕（與爬塔共用來源標籤格式）。"""
 
-    def __init__(self, *, source: str, label: str, armed: bool, disabled: bool = False):
+    def __init__(self, *, ability_id: str, label: str, armed: bool, disabled: bool = False):
         """
         建立挑戰戰技能按鈕。
 
         Args:
-            source (str): "character、weapon 或 armor"
+            ability_id (str): "condemn"
             label (str): "技能名稱"
             armed (bool): "是否已發動"
             disabled (bool): "是否鎖定（CD／已使用）"
         """
         display = f"{label}（已發動）" if armed else label
         super().__init__(label=display, style=discord.ButtonStyle.success, disabled=disabled)
-        self.source = source
+        self.ability_id = ability_id
 
     async def callback(self, interaction: discord.Interaction):
         """
@@ -3980,7 +4231,7 @@ class JuiceBattleSkillButton(discord.ui.Button):
             interaction (discord.Interaction): "按鈕互動"
         """
         view: JuiceBattleView = self.view  # type: ignore[assignment]
-        await view.on_skill(interaction, self.source)
+        await view.on_skill(interaction, self.ability_id)
 
 
 class JuiceBattleView(discord.ui.View):
@@ -4082,8 +4333,7 @@ class JuiceBattleView(discord.ui.View):
 
         # 中毒：攻擊階段開始時跳傷；翠毒披肩改為回復
         if int(attacker.get("poison_remaining", 0)) > 0:
-            armor_ability = attacker.get("armor_ability") if isinstance(attacker.get("armor_ability"), dict) else {}
-            if armor_ability.get("id") == "toxic_revival":
+            if self.cog.fighter_has_ability(attacker, "toxic_revival"):
                 before_hp = int(attacker.get("hp", 0))
                 self.cog.tower_add_hp(attacker, self.cog.toxic_revival_heal)
                 gained = int(attacker.get("hp", 0)) - before_hp
@@ -4130,8 +4380,7 @@ class JuiceBattleView(discord.ui.View):
             actual_damage (int): "實際扣血"
         """
         damage = max(0, int(damage))
-        armor_ability = target.get("armor_ability") if isinstance(target.get("armor_ability"), dict) else {}
-        if absorbable and damage == 1 and armor_ability.get("id") == "absorption":
+        if absorbable and damage == 1 and self.cog.fighter_has_ability(target, "absorption"):
             return 0
         if target.get("ghost_armed"):
             target["ghost_armed"] = False
@@ -4139,12 +4388,12 @@ class JuiceBattleView(discord.ui.View):
         actual_damage = min(damage, max(0, int(target.get("hp", 0))))
         target["hp"] = max(0, int(target.get("hp", 0)) - actual_damage)
         if actual_damage > 0:
-            weapon_ability = target.get("weapon_ability") if isinstance(target.get("weapon_ability"), dict) else {}
-            if weapon_ability.get("id") == "condemn":
+            # 血色晚宴：受傷時疊血宴
+            if self.cog.fighter_has_ability(target, "blood_feast"):
                 target["blood_feast_stacks"] = int(target.get("blood_feast_stacks", 0)) + 1
             if count_damage:
                 target["damage_taken_count"] = int(target.get("damage_taken_count", 0)) + 1
-                if armor_ability.get("id") == "berserk" and target["damage_taken_count"] >= 5:
+                if self.cog.fighter_has_ability(target, "berserk") and target["damage_taken_count"] >= 5:
                     target["berserk_triggered"] = True
                     target["berserk_offset"] = 3
         return actual_damage
@@ -4162,69 +4411,69 @@ class JuiceBattleView(discord.ui.View):
                 return
             self.add_item(JuiceBattleAttackButton())
             for source in ("character", "weapon"):
-                button = self.build_skill_button(attacker, source, "attack")
-                if button is not None:
-                    self.add_item(button)
+                for ability in self.cog.fighter_abilities(attacker, source):
+                    button = self.build_skill_button(attacker, source, ability, "attack")
+                    if button is not None:
+                        self.add_item(button)
             return
         if self.phase == "defend":
             defender = self.fighter_by_id(self.defender_id)
             if defender.get("is_bot"):
                 return
             self.add_item(JuiceBattleDefendButton())
-            life_conversion_armed = any(
-                (self.cog.tower_skill_definition(defender, source) or {}).get("id") == "life_conversion"
-                for source in self.cog.tower_armed_sources(defender)
-            )
+            life_conversion_armed = "life_conversion" in self.cog.tower_armed_ability_ids(defender)
             if not self.pending_bind and not life_conversion_armed:
                 self.add_item(JuiceBattleDodgeButton())
             for source in ("character", "armor", "weapon"):
-                button = self.build_skill_button(defender, source, "defend")
-                if button is not None:
-                    self.add_item(button)
+                for ability in self.cog.fighter_abilities(defender, source):
+                    button = self.build_skill_button(defender, source, ability, "defend")
+                    if button is not None:
+                        self.add_item(button)
 
-    def build_skill_button(self, fighter: dict, source: str, phase: str):
+    def build_skill_button(self, fighter: dict, source: str, ability: dict, phase: str):
         """
         建立挑戰戰技能按鈕；標籤格式與爬塔相同（角色：中毒）。
 
         Args:
             fighter (dict): "目前行動的玩家"
             source (str): "character、weapon 或 armor"
+            ability (dict): "技能定義"
             phase (str): "attack 或 defend"
 
         Returns:
             button (JuiceBattleSkillButton | None): "可顯示的技能按鈕"
         """
-        ability = self.cog.tower_skill_definition(fighter, source)
-        if ability is None or ability.get("phase") != phase:
+        if ability.get("phase") != phase or not ability.get("id"):
             return None
+        ability_id = str(ability["id"])
         base_label = f"{self.cog.skill_source_label(source)}：{ability['name']}"
-        armed = self.cog.tower_is_skill_armed(fighter, source)
+        armed = self.cog.tower_is_skill_armed(fighter, ability_id)
         # 祭血術：HP≤2 或消耗 <1 時按鈕停用（不進 CD）
         blood_rite_blocked = False
-        if ability.get("id") == "blood_rite":
+        if ability_id == "blood_rite":
             cost = int(fighter.get("hp", 0)) // 3
             blood_rite_blocked = int(fighter.get("hp", 0)) <= 2 or cost < 1
-        if armed or self.cog.tower_skill_is_ready(fighter, source, phase):
+        if armed or self.cog.tower_skill_is_ready(fighter, ability_id, phase):
             return JuiceBattleSkillButton(
-                source=source,
+                ability_id=ability_id,
                 label=base_label,
                 armed=armed,
                 disabled=blood_rite_blocked and not armed,
             )
         if ability.get("cd") is None:
-            if not fighter.get(f"{source}_skill_used"):
+            if not self.cog.ability_used_once(fighter, ability_id, source):
                 return None
             return JuiceBattleSkillButton(
-                source=source,
+                ability_id=ability_id,
                 label=f"{base_label}（已使用）",
                 armed=False,
                 disabled=True,
             )
-        cd_left = int(fighter.get(f"{source}_skill_cd", 0))
+        cd_left = self.cog.ability_cd_left(fighter, ability_id, source)
         if cd_left <= 0:
             return None
         return JuiceBattleSkillButton(
-            source=source,
+            ability_id=ability_id,
             label=f"{base_label}（CD {cd_left}）",
             armed=False,
             disabled=True,
@@ -4344,17 +4593,24 @@ class JuiceBattleView(discord.ui.View):
             await self.message.edit(embed=embed, view=None)
         self.stop()
 
-    async def on_skill(self, interaction: discord.Interaction, source: str):
+    async def on_skill(self, interaction: discord.Interaction, ability_id: str):
         """
-        發動或取消發動指定來源技能（與爬塔相同）。
+        發動或取消發動指定技能（與爬塔相同）。
 
         Args:
             interaction (discord.Interaction): "按鈕互動"
-            source (str): "character、weapon 或 armor"
+            ability_id (str): "condemn"
         """
         actor = self.fighter_by_id(self.attacker_id if self.phase == "attack" else self.defender_id)
-        ability = self.cog.tower_skill_definition(actor, source)
-        if ability is None or ability.get("phase") != self.phase:
+        found = self.cog.find_fighter_ability(actor, ability_id)
+        if found is None:
+            await interaction.response.send_message(
+                embed=Embed(title="Juice Battle", description="此階段無法使用技能。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        _source, ability = found
+        if ability.get("phase") != self.phase:
             await interaction.response.send_message(
                 embed=Embed(title="Juice Battle", description="此階段無法使用技能。", color=common.bot_error_color),
                 ephemeral=True,
@@ -4363,7 +4619,7 @@ class JuiceBattleView(discord.ui.View):
 
         # 祭血術：按鈕當下立即結算（先自傷再打對方，不進 armed、不取代普攻）
         if ability.get("id") == "blood_rite":
-            if not self.cog.tower_skill_is_ready(actor, source, self.phase):
+            if not self.cog.tower_skill_is_ready(actor, ability_id, self.phase):
                 await interaction.response.send_message(
                     embed=Embed(title="Juice Battle", description="技能尚未準備好。", color=common.bot_error_color),
                     ephemeral=True,
@@ -4377,7 +4633,7 @@ class JuiceBattleView(discord.ui.View):
                 )
                 return
             opponent = self.other_fighter(actor["user_id"])
-            self.cog.tower_consume_skill(actor, source)
+            self.cog.tower_consume_skill(actor, ability_id)
             self_damage = self.apply_incoming_damage(actor, cost)
             self.append_log(
                 f"{actor['display_name']} 發動祭血術，自損 **{self_damage}** HP（消耗 {cost}）"
@@ -4405,16 +4661,16 @@ class JuiceBattleView(discord.ui.View):
             await self.replace_with_fresh_view(interaction)
             return
 
-        if self.cog.tower_is_skill_armed(actor, source):
-            self.cog.tower_toggle_skill_armed(actor, source)
+        if self.cog.tower_is_skill_armed(actor, ability_id):
+            self.cog.tower_toggle_skill_armed(actor, ability_id)
         else:
-            if not self.cog.tower_skill_is_ready(actor, source, self.phase):
+            if not self.cog.tower_skill_is_ready(actor, ability_id, self.phase):
                 await interaction.response.send_message(
                     embed=Embed(title="Juice Battle", description="技能尚未準備好。", color=common.bot_error_color),
                     ephemeral=True,
                 )
                 return
-            self.cog.tower_toggle_skill_armed(actor, source)
+            self.cog.tower_toggle_skill_armed(actor, ability_id)
         await self.replace_with_fresh_view(interaction)
 
     async def on_attack(self, interaction: discord.Interaction):
@@ -4474,8 +4730,7 @@ class JuiceBattleView(discord.ui.View):
         self.attack_uses_dodge_roll = False
         _dice, total, attack_label = self.cog.roll_attack(attacker, use_dodge_roll=use_dodge_roll)
         # 毒性蔓延：最終攻擊值加上中毒剩餘回合，並延長 1 回合
-        weapon_ability = attacker.get("weapon_ability") if isinstance(attacker.get("weapon_ability"), dict) else {}
-        if weapon_ability.get("id") == "toxic_spread" and int(defender.get("poison_remaining", 0)) > 0:
+        if self.cog.fighter_has_ability(attacker, "toxic_spread") and int(defender.get("poison_remaining", 0)) > 0:
             poison_bonus = int(defender["poison_remaining"])
             total += poison_bonus
             defender["poison_remaining"] = poison_bonus + 1
@@ -4518,21 +4773,21 @@ class JuiceBattleView(discord.ui.View):
 
         # 自動發動可用的防守技能（冰箱僅在可能致死時發動）
         for source in ("character", "armor", "weapon"):
-            if not self.cog.tower_skill_is_ready(defender, source, "defend"):
-                continue
-            ability = self.cog.tower_skill_definition(defender, source) or {}
-            if ability.get("id") == "fridge":
-                if attack_total >= defender["hp"]:
-                    self.cog.tower_toggle_skill_armed(defender, source)
-            elif ability.get("id") == "life_conversion":
-                continue
-            else:
-                self.cog.tower_toggle_skill_armed(defender, source)
+            for ability in self.cog.fighter_abilities(defender, source):
+                ability_id = str(ability.get("id") or "")
+                if not ability_id or ability.get("phase") != "defend":
+                    continue
+                if not self.cog.tower_skill_is_ready(defender, ability_id, "defend"):
+                    continue
+                if ability_id == "fridge":
+                    if attack_total >= defender["hp"]:
+                        self.cog.tower_toggle_skill_armed(defender, ability_id)
+                elif ability_id == "life_conversion":
+                    continue
+                else:
+                    self.cog.tower_toggle_skill_armed(defender, ability_id)
 
-        armed_ids = {
-            (self.cog.tower_skill_definition(defender, source) or {}).get("id")
-            for source in self.cog.tower_armed_sources(defender)
-        }
+        armed_ids = set(self.cog.tower_armed_ability_ids(defender))
         stance_swap_defend = "stance_swap" in armed_ids
         fridge_armed = "fridge" in armed_ids
         life_conversion_armed = "life_conversion" in armed_ids
@@ -4660,9 +4915,8 @@ class JuiceBattleView(discord.ui.View):
                 self.append_log(outcome_line)
 
         # 最後一舞：HP≤5 時依本次實際傷害吸血
-        attacker_armor = attacker.get("armor_ability") if isinstance(attacker.get("armor_ability"), dict) else {}
         if (
-            attacker_armor.get("id") == "last_dance"
+            self.cog.fighter_has_ability(attacker, "last_dance")
             and int(attacker.get("hp", 0)) <= self.cog.last_dance_hp_threshold
             and actual_damage > 0
             and int(attacker.get("hp", 0)) > 0
@@ -4784,16 +5038,14 @@ class JuiceBattleView(discord.ui.View):
             return
 
         # 祭血術：可用就立即結算（不進 armed）
-        character_ability = self.cog.tower_skill_definition(attacker, "character")
         if (
-            character_ability
-            and character_ability.get("id") == "blood_rite"
-            and self.cog.tower_skill_is_ready(attacker, "character", "attack")
+            self.cog.fighter_has_ability(attacker, "blood_rite")
+            and self.cog.tower_skill_is_ready(attacker, "blood_rite", "attack")
         ):
             cost = int(attacker.get("hp", 0)) // 3
             if int(attacker.get("hp", 0)) > 2 and cost >= 1:
                 opponent = self.other_fighter(attacker["user_id"])
-                self.cog.tower_consume_skill(attacker, "character")
+                self.cog.tower_consume_skill(attacker, "blood_rite")
                 self_damage = self.apply_incoming_damage(attacker, cost)
                 self.append_log(
                     f"{attacker['display_name']} 發動祭血術，自損 **{self_damage}** HP（消耗 {cost}）"
@@ -4820,12 +5072,15 @@ class JuiceBattleView(discord.ui.View):
 
         # 自動發動攻擊階段可用技能（角色／武器；祭血術已立即結算，不進 armed）
         for source in ("character", "weapon"):
-            if not self.cog.tower_skill_is_ready(attacker, source, "attack"):
-                continue
-            ability = self.cog.tower_skill_definition(attacker, source) or {}
-            if ability.get("id") == "blood_rite":
-                continue
-            self.cog.tower_toggle_skill_armed(attacker, source)
+            for ability in self.cog.fighter_abilities(attacker, source):
+                ability_id = str(ability.get("id") or "")
+                if not ability_id or ability.get("phase") != "attack":
+                    continue
+                if ability_id == "blood_rite":
+                    continue
+                if not self.cog.tower_skill_is_ready(attacker, ability_id, "attack"):
+                    continue
+                self.cog.tower_toggle_skill_armed(attacker, ability_id)
         await self.execute_attack(interaction)
 
     async def start_after_initiative(self, interaction: discord.Interaction | None):
@@ -5314,19 +5569,19 @@ class JuiceBattleTowerDodgeButton(discord.ui.Button):
 class JuiceBattleTowerSkillButton(discord.ui.Button):
     """爬塔角色、武器或防具技能按鈕。"""
 
-    def __init__(self, *, source: str, label: str, armed: bool, disabled: bool = False):
+    def __init__(self, *, ability_id: str, label: str, armed: bool, disabled: bool = False):
         """
         建立技能按鈕。
 
         Args:
-            source (str): "技能來源"
+            ability_id (str): "condemn"
             label (str): "按鈕顯示文字"
             armed (bool): "是否已發動"
             disabled (bool): "是否鎖定（例如 CD 中）"
         """
         display = f"{label}（已發動）" if armed else label
         super().__init__(label=display, style=discord.ButtonStyle.success, disabled=disabled)
-        self.source = source
+        self.ability_id = ability_id
 
     async def callback(self, interaction: discord.Interaction):
         """
@@ -5336,7 +5591,7 @@ class JuiceBattleTowerSkillButton(discord.ui.Button):
             interaction (discord.Interaction): "按鈕互動"
         """
         view: JuiceBattleTowerView = self.view  # type: ignore[assignment]
-        await view.on_skill(interaction, self.source)
+        await view.on_skill(interaction, self.ability_id)
 
 
 class JuiceBattleTowerView(discord.ui.View):
@@ -5483,10 +5738,7 @@ class JuiceBattleTowerView(discord.ui.View):
         if self.phase == "player_attack":
             actor = self.current_actor()
             if actor is not None:
-                slime_preview = any(
-                    (self.cog.tower_skill_definition(actor, source) or {}).get("id") == "slime"
-                    for source in self.cog.tower_armed_sources(actor)
-                )
+                slime_preview = "slime" in self.cog.tower_armed_ability_ids(actor)
         if slime_preview:
             monster_dodge_offset -= 1
         if monster_dodge_offset != 0:
@@ -5507,8 +5759,7 @@ class JuiceBattleTowerView(discord.ui.View):
             if fighter.get("stun_remaining", 0) > 0:
                 status.append("暈眩")
             if fighter.get("poison_remaining", 0) > 0:
-                armor_ability = fighter.get("armor_ability") if isinstance(fighter.get("armor_ability"), dict) else {}
-                if armor_ability.get("id") == "toxic_revival":
+                if self.cog.fighter_has_ability(fighter, "toxic_revival"):
                     status.append(f"毒性回生 {fighter['poison_remaining']}")
                 else:
                     poison_damage = int(fighter.get("poison_damage", self.cog.poison_base_damage))
@@ -5519,12 +5770,11 @@ class JuiceBattleTowerView(discord.ui.View):
                 status.append("暴走")
             if int(fighter.get("dodge_offset", 0)) != 0:
                 status.append(f"黏液閃避偏移 {fighter['dodge_offset']:+d}")
-            armed_abilities = [
-                ability
-                for source in self.cog.tower_armed_sources(fighter)
-                for ability in [self.cog.tower_skill_definition(fighter, source)]
-                if ability is not None
-            ]
+            armed_abilities = []
+            for ability_id in self.cog.tower_armed_ability_ids(fighter):
+                found = self.cog.find_fighter_ability(fighter, ability_id)
+                if found is not None:
+                    armed_abilities.append(found[1])
             stance_active = bool(fighter.get("stance_swap_attack")) or any(
                 ability.get("id") == "stance_swap" for ability in armed_abilities
             )
@@ -5543,6 +5793,11 @@ class JuiceBattleTowerView(discord.ui.View):
                 display_def = fighter["defense"]
             display_atk_offset = int(fighter.get("atk_offset", 0)) + int(fighter.get("berserk_offset", 0))
             display_def_offset = int(fighter.get("def_offset", 0))
+            ability_names = []
+            for source in ("character", "weapon", "armor"):
+                for ability in self.cog.fighter_abilities(fighter, source):
+                    ability_names.append(f"{self.cog.skill_source_label(source)}：{ability['name']}")
+            ability_text = f"\n技能：{'／'.join(ability_names)}" if ability_names else ""
             embed.add_field(
                 name=f"{fighter['display_name']}（{fighter['character_name']}）",
                 value=(
@@ -5550,7 +5805,7 @@ class JuiceBattleTowerView(discord.ui.View):
                     f"攻擊 {display_atk}({display_atk_offset:+d})｜"
                     f"防禦 {display_def}({display_def_offset:+d})｜"
                     f"敏捷 {fighter['agi']}({fighter.get('agi_offset', 0) + fighter.get('dodge_offset', 0):+d})"
-                    f"{status_text}"
+                    f"{ability_text}{status_text}"
                 ),
                 inline=False,
             )
@@ -5565,12 +5820,11 @@ class JuiceBattleTowerView(discord.ui.View):
         if not self.finished and self.phase == "player_attack" and self.current_actor() is not None:
             actor = self.current_actor()
             action_text = f"輪到 **{actor['display_name']}** 攻擊"
-            armed_abilities = [
-                ability
-                for source in self.cog.tower_armed_sources(actor)
-                for ability in [self.cog.tower_skill_definition(actor, source)]
-                if ability is not None
-            ]
+            armed_abilities = []
+            for ability_id in self.cog.tower_armed_ability_ids(actor):
+                found = self.cog.find_fighter_ability(actor, ability_id)
+                if found is not None:
+                    armed_abilities.append(found[1])
             if armed_abilities:
                 names = "、".join(ability["name"] for ability in armed_abilities)
                 action_text += f"\n已發動：**{names}**"
@@ -5579,12 +5833,11 @@ class JuiceBattleTowerView(discord.ui.View):
             action_text = f"輪到 **{defender['display_name']}** 選擇防禦或閃避"
             if self.pending_bind:
                 action_text = f"輪到 **{defender['display_name']}** 選擇防禦（被束縛，無法閃避）"
-            armed_abilities = [
-                ability
-                for source in self.cog.tower_armed_sources(defender)
-                for ability in [self.cog.tower_skill_definition(defender, source)]
-                if ability is not None
-            ]
+            armed_abilities = []
+            for ability_id in self.cog.tower_armed_ability_ids(defender):
+                found = self.cog.find_fighter_ability(defender, ability_id)
+                if found is not None:
+                    armed_abilities.append(found[1])
             if armed_abilities:
                 names = "、".join(ability["name"] for ability in armed_abilities)
                 action_text += f"\n已發動：**{names}**"
@@ -5604,68 +5857,68 @@ class JuiceBattleTowerView(discord.ui.View):
                 return
             self.add_item(JuiceBattleTowerAttackButton())
             for source in ("character", "weapon"):
-                button = self.build_skill_button(actor, source, "attack")
-                if button is not None:
-                    self.add_item(button)
+                for ability in self.cog.fighter_abilities(actor, source):
+                    button = self.build_skill_button(actor, source, ability, "attack")
+                    if button is not None:
+                        self.add_item(button)
         elif self.phase == "player_defend":
             defender = self.fighter_by_id(self.pending_target_id or "")
             if defender is None:
                 return
             self.add_item(JuiceBattleTowerDefendButton())
-            life_conversion_armed = any(
-                (self.cog.tower_skill_definition(defender, source) or {}).get("id") == "life_conversion"
-                for source in self.cog.tower_armed_sources(defender)
-            )
+            life_conversion_armed = "life_conversion" in self.cog.tower_armed_ability_ids(defender)
             if not self.pending_bind and not life_conversion_armed:
                 self.add_item(JuiceBattleTowerDodgeButton())
             for source in ("character", "armor", "weapon"):
-                button = self.build_skill_button(defender, source, "defend")
-                if button is not None:
-                    self.add_item(button)
+                for ability in self.cog.fighter_abilities(defender, source):
+                    button = self.build_skill_button(defender, source, ability, "defend")
+                    if button is not None:
+                        self.add_item(button)
 
-    def build_skill_button(self, fighter: dict, source: str, phase: str):
+    def build_skill_button(self, fighter: dict, source: str, ability: dict, phase: str):
         """
         建立爬塔技能按鈕；CD／已使用時改為停用顯示，避免按鈕消失。
 
         Args:
             fighter (dict): "目前行動的玩家"
             source (str): "character、weapon 或 armor"
+            ability (dict): "技能定義"
             phase (str): "attack 或 defend"
 
         Returns:
             button (JuiceBattleTowerSkillButton | None): "可顯示的技能按鈕"
         """
-        ability = self.cog.tower_skill_definition(fighter, source)
-        if ability is None or ability.get("phase") != phase:
+        if ability.get("phase") != phase or not ability.get("id"):
             return None
+        ability_id = str(ability["id"])
         base_label = f"{self.cog.skill_source_label(source)}：{ability['name']}"
-        armed = self.cog.tower_is_skill_armed(fighter, source)
+        armed = self.cog.tower_is_skill_armed(fighter, ability_id)
         # 祭血術：HP≤2 或消耗 <1 時按鈕停用（不進 CD）
         blood_rite_blocked = False
-        if ability.get("id") == "blood_rite":
+        if ability_id == "blood_rite":
             cost = int(fighter.get("hp", 0)) // 3
             blood_rite_blocked = int(fighter.get("hp", 0)) <= 2 or cost < 1
-        if armed or self.cog.tower_skill_is_ready(fighter, source, phase):
+        if armed or self.cog.tower_skill_is_ready(fighter, ability_id, phase):
             return JuiceBattleTowerSkillButton(
-                source=source,
+                ability_id=ability_id,
                 label=base_label,
                 armed=armed,
                 disabled=blood_rite_blocked and not armed,
             )
         if ability.get("cd") is None:
-            if not fighter.get(f"{source}_skill_used"):
+            if not self.cog.ability_used_once(fighter, ability_id, source):
                 return None
             return JuiceBattleTowerSkillButton(
-                source=source,
+                ability_id=ability_id,
                 label=f"{base_label}（已使用）",
                 armed=False,
                 disabled=True,
             )
-        cd_left = int(fighter.get(f"{source}_skill_cd", 0))
+        cd_left = self.cog.ability_cd_left(fighter, ability_id, source)
         if cd_left <= 0:
             return None
         return JuiceBattleTowerSkillButton(
-            source=source,
+            ability_id=ability_id,
             label=f"{base_label}（CD {cd_left}）",
             armed=False,
             disabled=True,
@@ -5797,8 +6050,7 @@ class JuiceBattleTowerView(discord.ui.View):
         fighter["dodge_offset"] = 0
         # 中毒跳傷；翠毒披肩改為毒性回生
         if int(fighter.get("poison_remaining", 0)) > 0:
-            armor_ability = fighter.get("armor_ability") if isinstance(fighter.get("armor_ability"), dict) else {}
-            if armor_ability.get("id") == "toxic_revival":
+            if self.cog.fighter_has_ability(fighter, "toxic_revival"):
                 before_hp = int(fighter.get("hp", 0))
                 self.cog.tower_add_hp(fighter, self.cog.toxic_revival_heal)
                 gained = int(fighter.get("hp", 0)) - before_hp
@@ -5832,8 +6084,7 @@ class JuiceBattleTowerView(discord.ui.View):
             actual_damage (int): "實際扣除的生命值"
         """
         damage = max(0, int(damage))
-        armor_ability = target.get("armor_ability") if isinstance(target.get("armor_ability"), dict) else {}
-        if absorbable and damage == 1 and armor_ability.get("id") == "absorption":
+        if absorbable and damage == 1 and self.cog.fighter_has_ability(target, "absorption"):
             return 0
         if target.get("ghost_armed"):
             target["ghost_armed"] = False
@@ -5841,12 +6092,12 @@ class JuiceBattleTowerView(discord.ui.View):
         actual_damage = min(damage, max(0, int(target.get("hp", 0))))
         target["hp"] = max(0, int(target.get("hp", 0)) - actual_damage)
         if actual_damage > 0:
-            weapon_ability = target.get("weapon_ability") if isinstance(target.get("weapon_ability"), dict) else {}
-            if weapon_ability.get("id") == "condemn":
+            # 血色晚宴：受傷時疊血宴
+            if self.cog.fighter_has_ability(target, "blood_feast"):
                 target["blood_feast_stacks"] = int(target.get("blood_feast_stacks", 0)) + 1
             if count_damage:
                 target["damage_taken_count"] = int(target.get("damage_taken_count", 0)) + 1
-                if armor_ability.get("id") == "berserk" and target["damage_taken_count"] >= 5:
+                if self.cog.fighter_has_ability(target, "berserk") and target["damage_taken_count"] >= 5:
                     target["berserk_triggered"] = True
                     target["berserk_offset"] = 3
                 if target.get("id") == "hell_wraith":
@@ -5941,9 +6192,8 @@ class JuiceBattleTowerView(discord.ui.View):
         if attacker.get("stance_swap_attack"):
             attacker["stance_swap_attack"] = False
         # 毒性蔓延：最終攻擊值加上中毒剩餘回合，並延長 1 回合
-        weapon_ability = attacker.get("weapon_ability") if isinstance(attacker.get("weapon_ability"), dict) else {}
         spread_note = ""
-        if weapon_ability.get("id") == "toxic_spread" and int(self.monster.get("poison_remaining", 0)) > 0:
+        if self.cog.fighter_has_ability(attacker, "toxic_spread") and int(self.monster.get("poison_remaining", 0)) > 0:
             poison_bonus = int(self.monster["poison_remaining"])
             attack_total += poison_bonus
             self.monster["poison_remaining"] = poison_bonus + 1
@@ -6005,9 +6255,8 @@ class JuiceBattleTowerView(discord.ui.View):
                 )
             self.monster["sprint_armed"] = False
         # 最後一舞：HP≤5 時依本次實際傷害吸血
-        armor_ability = attacker.get("armor_ability") if isinstance(attacker.get("armor_ability"), dict) else {}
         if (
-            armor_ability.get("id") == "last_dance"
+            self.cog.fighter_has_ability(attacker, "last_dance")
             and int(attacker.get("hp", 0)) <= self.cog.last_dance_hp_threshold
             and self.last_attack_damage > 0
             and int(attacker.get("hp", 0)) > 0
@@ -6019,20 +6268,27 @@ class JuiceBattleTowerView(discord.ui.View):
                 result = f"{result}\n最後一舞吸血 **{gained}** HP"
         return result
 
-    async def on_skill(self, interaction: discord.Interaction, source: str):
+    async def on_skill(self, interaction: discord.Interaction, ability_id: str):
         """
         發動或取消目前玩家的爬塔技能。
 
         Args:
             interaction (discord.Interaction): "技能按鈕互動"
-            source (str): "character、weapon 或 armor"
+            ability_id (str): "condemn"
         """
         actor = self.current_actor() if self.phase == "player_attack" else self.fighter_by_id(self.pending_target_id or "")
         if actor is None:
             return
         phase = "attack" if self.phase == "player_attack" else "defend"
-        ability = self.cog.tower_skill_definition(actor, source)
-        if ability is None or ability.get("phase") != phase:
+        found = self.cog.find_fighter_ability(actor, ability_id)
+        if found is None:
+            await interaction.response.send_message(
+                embed=Embed(title="Juice Battle｜爬塔", description="此階段無法使用這個技能。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        _source, ability = found
+        if ability.get("phase") != phase:
             await interaction.response.send_message(
                 embed=Embed(title="Juice Battle｜爬塔", description="此階段無法使用這個技能。", color=common.bot_error_color),
                 ephemeral=True,
@@ -6041,7 +6297,7 @@ class JuiceBattleTowerView(discord.ui.View):
 
         # 祭血術：按鈕當下立即結算（先自傷再打怪物，不進 armed、不取代普攻）
         if ability.get("id") == "blood_rite":
-            if not self.cog.tower_skill_is_ready(actor, source, phase):
+            if not self.cog.tower_skill_is_ready(actor, ability_id, phase):
                 await interaction.response.send_message(
                     embed=Embed(title="Juice Battle｜爬塔", description="技能尚未準備好。", color=common.bot_error_color),
                     ephemeral=True,
@@ -6055,7 +6311,7 @@ class JuiceBattleTowerView(discord.ui.View):
                 )
                 return
             await interaction.response.defer()
-            self.cog.tower_consume_skill(actor, source)
+            self.cog.tower_consume_skill(actor, ability_id)
             self_damage = self.apply_damage(actor, cost)
             self.append_log(
                 f"{actor['display_name']} 發動祭血術，自損 **{self_damage}** HP（消耗 {cost}）"
@@ -6083,16 +6339,16 @@ class JuiceBattleTowerView(discord.ui.View):
                 await self.message.edit(embed=self.build_embed(), view=self)
             return
 
-        if self.cog.tower_is_skill_armed(actor, source):
-            self.cog.tower_toggle_skill_armed(actor, source)
+        if self.cog.tower_is_skill_armed(actor, ability_id):
+            self.cog.tower_toggle_skill_armed(actor, ability_id)
         else:
-            if not self.cog.tower_skill_is_ready(actor, source, phase):
+            if not self.cog.tower_skill_is_ready(actor, ability_id, phase):
                 await interaction.response.send_message(
                     embed=Embed(title="Juice Battle｜爬塔", description="技能尚未準備好。", color=common.bot_error_color),
                     ephemeral=True,
                 )
                 return
-            self.cog.tower_toggle_skill_armed(actor, source)
+            self.cog.tower_toggle_skill_armed(actor, ability_id)
         self.rebuild_buttons()
         await self.save_battle_state()
         await interaction.response.edit_message(embed=self.build_embed(), view=self)
