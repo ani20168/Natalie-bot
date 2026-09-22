@@ -30,6 +30,8 @@ class JuiceBattle(commands.Cog):
         self.default_character_id = "ownerless"
         self.starter_weapon_id = "wooden_stick"
         self.starter_armor_id = "leather_armor"
+        self.poison_duration = 3
+        self.poison_base_damage = 1
         self.characters = {
             "ownerless": {
                 "name": "一無所有者",
@@ -50,7 +52,7 @@ class JuiceBattle(commands.Cog):
                     "name": "中毒",
                     "phase": "attack",
                     "cd": 6,
-                    "description": "本次攻擊成功時，賦予對方中毒：對方攻擊階段開始時 -1HP，持續 3 回合",
+                    "description": "本次攻擊成功時賦予中毒（首次：每跳 -1HP、持續 3 回合）；若對方已中毒，則剩餘回合疊加 3 且每跳傷害 +1",
                 },
             },
             "dashan": {
@@ -482,6 +484,7 @@ class JuiceBattle(commands.Cog):
             "skill_used_once": False,
             "stun_remaining": 0,
             "poison_remaining": 0,
+            "poison_damage": 0,
             "dodge_offset": 0,
             "two_dice": template["id"] == "old_jin",
             "hardening_armed": False,
@@ -756,6 +759,31 @@ class JuiceBattle(commands.Cog):
                 },
             },
         )
+        # 自癒：清除「戰鬥快照全員已死」卻仍殘留的爬塔進度（逾時寫回造成）
+        dead_cursor = collection.find(
+            {"juice_battle.tower_progress.battle.fighters": {"$type": "array"}},
+            {"_id": 1, "juice_battle.tower_progress": 1},
+        )
+        cleared_team_keys = set()
+        async for document in dead_cursor:
+            juice_battle = document.get("juice_battle") or {}
+            progress = juice_battle.get("tower_progress")
+            if not isinstance(progress, dict):
+                continue
+            battle = progress.get("battle")
+            if not isinstance(battle, dict):
+                continue
+            fighters = battle.get("fighters")
+            if not isinstance(fighters, list) or not fighters:
+                continue
+            if not all(int(fighter.get("hp", 0)) <= 0 for fighter in fighters if isinstance(fighter, dict)):
+                continue
+            member_ids = [str(member_id) for member_id in progress.get("member_ids") or []]
+            team_key = self.tower_team_key(member_ids)
+            if not team_key or team_key in cleared_team_keys:
+                continue
+            cleared_team_keys.add(team_key)
+            await self.tower_clear_progress(list(team_key))
 
     def default_juice_battle(self) -> dict:
         """
@@ -829,6 +857,59 @@ class JuiceBattle(commands.Cog):
             juice_battle["tower_records"] = []
         user_data["juice_battle"] = juice_battle
         return juice_battle
+
+    def sort_juice_battle_bag(self, juice_battle: dict) -> None:
+        """
+        將背包相同裝備聚在一起（空格移到後方），並同步裝備中格子索引。
+
+        相同定義：kind + item_id；同組內再依四項偏移排序，最後用原索引保持穩定。
+
+        Args:
+            juice_battle (dict): "{'bag': [], 'equipped_weapon_slot': 0}"
+        """
+        bag = juice_battle.get("bag")
+        if not isinstance(bag, list) or not bag:
+            return
+        weapon_slot = juice_battle.get("equipped_weapon_slot")
+        armor_slot = juice_battle.get("equipped_armor_slot")
+        # 抽出非空格並組排序鍵
+        occupied = []
+        for index, entry in enumerate(bag):
+            if not isinstance(entry, dict):
+                continue
+            kind = str(entry.get("kind") or "")
+            item_id = str(entry.get("item_id") or "")
+            kind_order = 0 if kind == "weapon" else 1 if kind == "armor" else 2
+            offsets = self.equipment_stat_offsets(entry) or {}
+            occupied.append(
+                (
+                    (
+                        kind_order,
+                        item_id,
+                        int(offsets.get("hp_offset", 0)),
+                        int(offsets.get("atk_offset", 0)),
+                        int(offsets.get("def_offset", 0)),
+                        int(offsets.get("agi_offset", 0)),
+                        index,
+                    ),
+                    index,
+                    entry,
+                )
+            )
+        occupied.sort(key=lambda item: item[0])
+        # 重組背包並重對裝備中索引
+        new_bag = [None] * len(bag)
+        new_weapon_slot = None
+        new_armor_slot = None
+        for new_index, (_, old_index, entry) in enumerate(occupied):
+            new_bag[new_index] = entry
+            if weapon_slot == old_index:
+                new_weapon_slot = new_index
+            if armor_slot == old_index:
+                new_armor_slot = new_index
+        juice_battle["bag"] = new_bag
+        juice_battle["equipped_weapon_slot"] = new_weapon_slot
+        juice_battle["equipped_armor_slot"] = new_armor_slot
 
     def item_template(self, kind: str, item_id: str) -> dict | None:
         """
@@ -1054,6 +1135,7 @@ class JuiceBattle(commands.Cog):
             "skill_armed": False,
             "stance_swap_attack": False,
             "poison_remaining": 0,
+            "poison_damage": 0,
             "weapon_id": weapon_id,
             "armor_id": armor_id,
             "weapon_ability": weapon_ability,
@@ -1087,6 +1169,20 @@ class JuiceBattle(commands.Cog):
             return None
         ability = character.get("ability")
         return ability if isinstance(ability, dict) else None
+
+    def apply_poison(self, target: dict):
+        """
+        對目標施加中毒：首次為基準持續／每跳傷害；已有中毒則回合疊加且每跳傷害 +1。
+
+        Args:
+            target (dict): "{'poison_remaining': 0, 'poison_damage': 0}"
+        """
+        if int(target.get("poison_remaining", 0)) > 0:
+            target["poison_remaining"] = int(target["poison_remaining"]) + self.poison_duration
+            target["poison_damage"] = int(target.get("poison_damage", self.poison_base_damage)) + 1
+            return
+        target["poison_remaining"] = self.poison_duration
+        target["poison_damage"] = self.poison_base_damage
 
     def skill_is_ready(self, fighter: dict, phase: str) -> bool:
         """
@@ -1429,6 +1525,27 @@ class JuiceBattle(commands.Cog):
             edit_message (bool): "True 時編輯原訊息（邀請同意後）"
         """
         view = self.tower_restore_battle(progress)
+        # 殘留的全員死亡戰鬥快照：視為已結束，清掉後不再開啟介面
+        if view is None and isinstance(progress.get("battle"), dict):
+            battle_fighters = progress["battle"].get("fighters")
+            if (
+                isinstance(battle_fighters, list)
+                and battle_fighters
+                and all(int(fighter.get("hp", 0)) <= 0 for fighter in battle_fighters if isinstance(fighter, dict))
+            ):
+                await self.tower_clear_progress(
+                    [str(member_id) for member_id in progress.get("member_ids") or []]
+                )
+                embed = Embed(
+                    title="Juice Battle｜爬塔",
+                    description="偵測到已結束的殘留戰鬥資料，已自動清除；請重新開始爬塔。",
+                    color=common.bot_error_color,
+                )
+                if edit_message:
+                    await interaction.response.edit_message(embed=embed, view=None)
+                else:
+                    await interaction.response.send_message(embed=embed, ephemeral=True)
+                return
         if view is None:
             if progress.get("battle") is not None:
                 progress["battle"] = None
@@ -1624,7 +1741,8 @@ class JuiceBattle(commands.Cog):
 
             status_parts = []
             if fighter.get("poison_remaining", 0) > 0:
-                status_parts.append(f"中毒 {fighter['poison_remaining']}")
+                poison_damage = int(fighter.get("poison_damage", self.poison_base_damage))
+                status_parts.append(f"中毒({poison_damage}) {fighter['poison_remaining']}")
             if fighter.get("stun_remaining", 0) > 0:
                 status_parts.append("暈眩")
             if fighter.get("berserk_triggered"):
@@ -2050,6 +2168,14 @@ class JuiceBattle(commands.Cog):
         Args:
             view (JuiceBattleTowerView): "進行中的爬塔戰鬥 View"
         """
+        # 已正常結算（非逾時）或進度已被清掉時，禁止殘留 View 再寫回
+        if view.finished and not view.timed_out:
+            return
+        if self.tower_is_aborted(view.member_ids):
+            return
+        existing = await self.tower_load_shared_progress(view.member_ids)
+        if existing is None:
+            return
         progress = copy.deepcopy(view.progress)
         progress["battle"] = view.battle_snapshot()
         await self.tower_save_progress(progress)
@@ -2070,6 +2196,13 @@ class JuiceBattle(commands.Cog):
         fighters = battle.get("fighters")
         monster = battle.get("monster")
         if not isinstance(fighters, list) or not isinstance(monster, dict):
+            return None
+        # 全員已死的快照不還原（避免已結算殘留被當成進行中）
+        living = [
+            fighter for fighter in fighters
+            if isinstance(fighter, dict) and int(fighter.get("hp", 0)) > 0
+        ]
+        if fighters and not living:
             return None
         view = JuiceBattleTowerView(
             cog=self,
@@ -2214,6 +2347,16 @@ class JuiceBattle(commands.Cog):
                 continue
             member_ids = [str(member_id) for member_id in progress.get("member_ids") or []]
             if not member_ids:
+                continue
+            # 自癒：全員已死的殘留戰鬥不當進行中，直接清掉
+            battle = progress.get("battle") if isinstance(progress.get("battle"), dict) else None
+            fighters = battle.get("fighters") if isinstance(battle, dict) else None
+            if (
+                isinstance(fighters, list)
+                and fighters
+                and all(int(fighter.get("hp", 0)) <= 0 for fighter in fighters if isinstance(fighter, dict))
+            ):
+                await self.tower_clear_progress(member_ids)
                 continue
             key = self.tower_team_key(member_ids)
             if key in runs_by_key:
@@ -2588,11 +2731,18 @@ class JuiceBattle(commands.Cog):
             if selected_slot is not None:
                 kind = "weapon" if item_id in self.weapons else "armor"
                 bag[selected_slot] = {"item_id": item_id, "kind": kind}
-        for member_id, user_data in user_data_map.items():
-            juice_battle = user_data["juice_battle"]
-            juice_battle.pop("tower_session", None)
-            juice_battle["tower_progress"] = None
-            await common.mongo_storage.replace_user(member_id, user_data)
+        # 與逾時 handler 共用鎖，避免結算清進度後又被寫回；並防止重複發放
+        async with self.tower_lock:
+            existing = await self.tower_load_shared_progress(member_ids)
+            if existing is None:
+                return
+            for member_id, user_data in user_data_map.items():
+                juice_battle = user_data["juice_battle"]
+                # 發放後整理背包，讓相同裝備聚在一起
+                self.sort_juice_battle_bag(juice_battle)
+                juice_battle.pop("tower_session", None)
+                juice_battle["tower_progress"] = None
+                await common.mongo_storage.replace_user(member_id, user_data)
         await self.tower_record_success(progress)
 
     async def tower_finish_defeat(self, view: "JuiceBattleTowerView", reason: str):
@@ -2603,21 +2753,26 @@ class JuiceBattle(commands.Cog):
             view (JuiceBattleTowerView): "結束中的爬塔戰鬥 View"
             reason (str): "顯示給玩家的失敗原因"
         """
-        if view.finished:
-            return
-        view.finished = True
+        async with self.tower_lock:
+            if view.finished:
+                return
+            # 先標記結束並 stop，避免與 on_timeout 競態再寫回進度／舊畫面
+            view.finished = True
+            view.stop()
+            await self.tower_clear_progress(view.member_ids)
         view.rebuild_buttons()
         if view.message is not None:
-            await view.message.edit(
-                embed=Embed(
-                    title="Juice Battle｜爬塔失敗",
-                    description=f"{reason}\n本次爬塔的蛋糕、裝備與進度全部消失。",
-                    color=common.bot_error_color,
-                ),
-                view=None,
-            )
-        await self.tower_clear_progress(view.member_ids)
-        view.stop()
+            try:
+                await view.message.edit(
+                    embed=Embed(
+                        title="Juice Battle｜爬塔失敗",
+                        description=f"{reason}\n本次爬塔的蛋糕、裝備與進度全部消失。",
+                        color=common.bot_error_color,
+                    ),
+                    view=None,
+                )
+            except Exception:
+                pass
 
     async def tower_finish_floor(self, view: "JuiceBattleTowerView", log_text: str):
         """
@@ -2627,27 +2782,28 @@ class JuiceBattle(commands.Cog):
             view (JuiceBattleTowerView): "已擊敗怪物的爬塔戰鬥 View"
             log_text (str): "本層戰鬥紀錄"
         """
-        if view.finished:
-            return
-        view.finished = True
-        progress = copy.deepcopy(view.progress)
-        progress.pop("battle", None)
-        floor = int(progress.get("floor", self.tower_floor_min))
-        progress["cleared_floor"] = floor
-        cake_reward = int(round(800 * floor * random.uniform(0.9, 1.1)))
-        progress["pending_cake"] = int(progress.get("pending_cake", 0)) + cake_reward
-        equipment_reward = None
-        if floor % 5 == 0:
-            item_id = await self.tower_pick_equipment(floor)
-            if item_id:
-                progress.setdefault("pending_equipment", []).append(item_id)
-                equipment_reward = item_id
-        progress["member_hp"] = {fighter["user_id"]: max(0, int(fighter["hp"])) for fighter in view.fighters}
-        progress["dead_ids"] = [fighter["user_id"] for fighter in view.fighters if fighter["hp"] <= 0]
-        progress["floor"] = floor + 1
-        progress["monster"] = self.build_tower_monster(floor + 1)
-        await self.tower_save_progress(progress)
-        view.stop()
+        async with self.tower_lock:
+            if view.finished:
+                return
+            view.finished = True
+            view.stop()
+            progress = copy.deepcopy(view.progress)
+            progress.pop("battle", None)
+            floor = int(progress.get("floor", self.tower_floor_min))
+            progress["cleared_floor"] = floor
+            cake_reward = int(round(800 * floor * random.uniform(0.9, 1.1)))
+            progress["pending_cake"] = int(progress.get("pending_cake", 0)) + cake_reward
+            equipment_reward = None
+            if floor % 5 == 0:
+                item_id = await self.tower_pick_equipment(floor)
+                if item_id:
+                    progress.setdefault("pending_equipment", []).append(item_id)
+                    equipment_reward = item_id
+            progress["member_hp"] = {fighter["user_id"]: max(0, int(fighter["hp"])) for fighter in view.fighters}
+            progress["dead_ids"] = [fighter["user_id"] for fighter in view.fighters if fighter["hp"] <= 0]
+            progress["floor"] = floor + 1
+            progress["monster"] = self.build_tower_monster(floor + 1)
+            await self.tower_save_progress(progress)
         view.rebuild_buttons()
         result_embed = view.build_embed()
         result_embed.title = f"Juice Battle｜爬塔第 {floor} 層通關"
@@ -3397,6 +3553,7 @@ class JuiceBattleBagView(discord.ui.View):
                 juice_battle["equipped_weapon_slot"] = None
             if juice_battle.get("equipped_armor_slot") == slot_index:
                 juice_battle["equipped_armor_slot"] = None
+            self.cog.sort_juice_battle_bag(juice_battle)
             await common.mongo_storage.replace_user(self.userid, user_data)
         self.discard_confirm_slot = None
         await self.refresh_message(interaction, juice_battle)
@@ -3765,10 +3922,13 @@ class JuiceBattleView(discord.ui.View):
         self.cog.tower_prepare_skill_cooldowns(attacker, "attack")
         self.cog.tower_clear_skill_armed(attacker)
 
-        # 中毒：攻擊階段開始時 -1HP（吸收背心可無效化）
+        # 中毒：攻擊階段開始時依層數扣 HP（吸收背心可無效化 1 點傷害）
         if int(attacker.get("poison_remaining", 0)) > 0:
-            damage = self.apply_incoming_damage(attacker, 1, count_damage=False)
+            tick_damage = int(attacker.get("poison_damage", self.cog.poison_base_damage))
+            damage = self.apply_incoming_damage(attacker, tick_damage, count_damage=False)
             attacker["poison_remaining"] = int(attacker["poison_remaining"]) - 1
+            if attacker["poison_remaining"] <= 0:
+                attacker["poison_damage"] = 0
             self.append_log(
                 f"{attacker['display_name']} 中毒，受到 **{damage}** 點傷害"
                 f"（剩餘 {attacker['poison_remaining']} 回合）"
@@ -4269,8 +4429,11 @@ class JuiceBattleView(discord.ui.View):
 
         # 中毒：攻擊成功（實際傷害 > 0）上毒；未上成則留給連擊
         if self.pending_poison and actual_damage > 0:
-            defender["poison_remaining"] = 3
-            self.append_log(f"{defender['display_name']} 中毒（持續 3 回合）")
+            self.cog.apply_poison(defender)
+            self.append_log(
+                f"{defender['display_name']} 中毒"
+                f"（每跳 {defender['poison_damage']}，剩餘 {defender['poison_remaining']} 回合）"
+            )
             self.pending_poison = False
 
         # 黏液：連擊期間維持，整段攻擊結束後清除
@@ -4598,6 +4761,7 @@ class JuiceBattleTowerFloorView(discord.ui.View):
         self.cog = cog
         self.progress = copy.deepcopy(progress)
         self.message: discord.Message | None = None
+        self.settled = False
         self.add_item(JuiceBattleTowerChallengeButton())
         if int(self.progress.get("floor", cog.tower_floor_min)) > cog.tower_floor_min:
             self.add_item(JuiceBattleTowerEscapeButton())
@@ -4630,8 +4794,12 @@ class JuiceBattleTowerFloorView(discord.ui.View):
         Args:
             interaction (discord.Interaction): "挑戰按鈕互動"
         """
+        async with self.cog.tower_lock:
+            if self.settled:
+                return
+            self.settled = True
+            self.stop()
         await self.cog.tower_start_battle(interaction, self.progress)
-        self.stop()
 
     async def on_escape(self, interaction: discord.Interaction):
         """
@@ -4640,15 +4808,28 @@ class JuiceBattleTowerFloorView(discord.ui.View):
         Args:
             interaction (discord.Interaction): "逃跑按鈕互動"
         """
+        async with self.cog.tower_lock:
+            if self.settled:
+                return
+            self.settled = True
+            self.stop()
         await self.cog.tower_escape(interaction, self.progress)
-        self.stop()
 
     async def on_timeout(self) -> None:
         """
         樓層介面逾時後解除爬塔介面鎖定，但保留進度供下次續爬。
         """
-        for member_id in self.progress.get("member_ids") or []:
-            await self.cog.clear_tower_session(str(member_id))
+        member_ids = [str(member_id) for member_id in self.progress.get("member_ids") or []]
+        async with self.cog.tower_lock:
+            if self.settled:
+                return
+            existing = await self.cog.tower_load_shared_progress(member_ids)
+            if existing is None:
+                return
+            self.settled = True
+            self.stop()
+            for member_id in member_ids:
+                await self.cog.clear_tower_session(member_id)
         for child in self.children:
             child.disabled = True
         if self.message is not None:
@@ -4727,9 +4908,11 @@ class JuiceBattleTowerNextFloorView(discord.ui.View):
         Args:
             interaction (discord.Interaction): "前往下一層按鈕互動"
         """
-        if self.finished:
-            return
-        self.finished = True
+        async with self.cog.tower_lock:
+            if self.finished:
+                return
+            self.finished = True
+            self.stop()
         next_view = JuiceBattleTowerFloorView(cog=self.cog, progress=self.progress)
         next_view.message = self.message
         await interaction.response.edit_message(
@@ -4737,17 +4920,22 @@ class JuiceBattleTowerNextFloorView(discord.ui.View):
             view=next_view,
         )
         self.cog.schedule_tower_button_unlock(next_view)
-        self.stop()
 
     async def on_timeout(self) -> None:
         """
         通關結果介面逾時後保存進度並解除爬塔介面鎖定。
         """
-        if self.finished:
-            return
-        self.finished = True
-        for member_id in self.progress.get("member_ids") or []:
-            await self.cog.clear_tower_session(str(member_id))
+        member_ids = [str(member_id) for member_id in self.progress.get("member_ids") or []]
+        async with self.cog.tower_lock:
+            if self.finished:
+                return
+            existing = await self.cog.tower_load_shared_progress(member_ids)
+            if existing is None:
+                return
+            self.finished = True
+            self.stop()
+            for member_id in member_ids:
+                await self.cog.clear_tower_session(member_id)
         floor_view = JuiceBattleTowerFloorView(cog=self.cog, progress=self.progress)
         for child in floor_view.children:
             child.disabled = True
@@ -4763,7 +4951,6 @@ class JuiceBattleTowerNextFloorView(discord.ui.View):
                 )
             except Exception:
                 pass
-        self.stop()
 
 
 class JuiceBattleTowerAttackButton(discord.ui.Button):
@@ -4984,7 +5171,8 @@ class JuiceBattleTowerView(discord.ui.View):
         if self.monster.get("hellfire_offset", 0) > 0:
             monster_status.append(f"業火攻擊偏移 +{self.monster['hellfire_offset']}")
         if self.monster.get("poison_remaining", 0) > 0:
-            monster_status.append(f"中毒 {self.monster['poison_remaining']}")
+            poison_damage = int(self.monster.get("poison_damage", self.cog.poison_base_damage))
+            monster_status.append(f"中毒({poison_damage}) {self.monster['poison_remaining']}")
         # 黏液：面板顯示閃避偏移；攻擊階段發動中則預覽 -1
         monster_dodge_offset = int(self.monster.get("dodge_offset", 0))
         slime_preview = False
@@ -5015,7 +5203,8 @@ class JuiceBattleTowerView(discord.ui.View):
             if fighter.get("stun_remaining", 0) > 0:
                 status.append("暈眩")
             if fighter.get("poison_remaining", 0) > 0:
-                status.append(f"中毒 {fighter['poison_remaining']}")
+                poison_damage = int(fighter.get("poison_damage", self.cog.poison_base_damage))
+                status.append(f"中毒({poison_damage}) {fighter['poison_remaining']}")
             if fighter.get("berserk_triggered"):
                 status.append("暴走")
             if int(fighter.get("dodge_offset", 0)) != 0:
@@ -5287,8 +5476,11 @@ class JuiceBattleTowerView(discord.ui.View):
         self.cog.tower_clear_skill_armed(fighter)
         fighter["dodge_offset"] = 0
         if int(fighter.get("poison_remaining", 0)) > 0:
-            damage = self.apply_damage(fighter, 1)
+            tick_damage = int(fighter.get("poison_damage", self.cog.poison_base_damage))
+            damage = self.apply_damage(fighter, tick_damage)
             fighter["poison_remaining"] = max(0, int(fighter["poison_remaining"]) - 1)
+            if fighter["poison_remaining"] <= 0:
+                fighter["poison_damage"] = 0
             self.append_log(
                 f"{fighter['display_name']} 中毒，受到 **{damage}** 點傷害（剩餘 {fighter['poison_remaining']} 回合）"
             )
@@ -5546,8 +5738,11 @@ class JuiceBattleTowerView(discord.ui.View):
                 break
             if attacker.get("pending_poison") and self.last_attack_damage > 0:
                 if self.monster.get("id") != "poison_bubble_bug":
-                    self.monster["poison_remaining"] = 3
-                    results.append("怪物中毒（持續 3 回合）。")
+                    self.cog.apply_poison(self.monster)
+                    results.append(
+                        f"怪物中毒（每跳 {self.monster['poison_damage']}，"
+                        f"剩餘 {self.monster['poison_remaining']} 回合）。"
+                    )
                 attacker["pending_poison"] = False
         attacker["pending_poison"] = False
         self.log_text = "\n".join(results)
@@ -5568,8 +5763,11 @@ class JuiceBattleTowerView(discord.ui.View):
             await self.cog.tower_finish_defeat(self, "所有我方成員都已死亡。")
             return
         if int(self.monster.get("poison_remaining", 0)) > 0:
-            poison_damage = self.apply_damage(self.monster, 1)
+            tick_damage = int(self.monster.get("poison_damage", self.cog.poison_base_damage))
+            poison_damage = self.apply_damage(self.monster, tick_damage)
             self.monster["poison_remaining"] = max(0, int(self.monster["poison_remaining"]) - 1)
+            if self.monster["poison_remaining"] <= 0:
+                self.monster["poison_damage"] = 0
             self.append_log(
                 f"{self.monster['name']} 中毒，受到 **{poison_damage}** 點傷害"
                 f"（剩餘 {self.monster['poison_remaining']} 回合）"
@@ -5763,28 +5961,43 @@ class JuiceBattleTowerView(discord.ui.View):
         """
         戰鬥操作逾時時保留樓層進度，解除隊伍的進行中鎖定。
         """
-        if self.finished:
-            return
-        self.finished = True
-        self.timed_out = True
-        await self.save_battle_state()
+        async with self.cog.tower_lock:
+            if self.finished:
+                return
+            self.finished = True
+            self.timed_out = True
+            self.stop()
+            # 已死亡／結算清掉進度後，禁止再寫回進度或覆寫結算畫面
+            if not self.living_fighters():
+                await self.cog.tower_clear_progress(self.member_ids)
+                show_timeout_embed = False
+            else:
+                existing = await self.cog.tower_load_shared_progress(self.member_ids)
+                if existing is None:
+                    return
+                await self.save_battle_state()
+                for member_id in self.member_ids:
+                    await self.cog.clear_tower_session(member_id)
+                show_timeout_embed = True
         self.rebuild_buttons()
-
-        # 清除本場爬塔介面鎖定，但保留已保存的樓層、戰利品與進度。
-        for member_id in self.member_ids:
-            await self.cog.clear_tower_session(member_id)
-
-        if self.message is not None:
-            try:
-                embed = self.build_embed()
-                embed.description = "戰鬥操作逾時，已保存本場戰鬥狀態；請重新使用指令繼續。"
+        if self.message is None:
+            return
+        try:
+            if not show_timeout_embed:
                 await self.message.edit(
-                    embed=embed,
+                    embed=Embed(
+                        title="Juice Battle｜爬塔失敗",
+                        description="所有我方成員都已死亡。\n本次爬塔的蛋糕、裝備與進度全部消失。",
+                        color=common.bot_error_color,
+                    ),
                     view=None,
                 )
-            except Exception:
-                pass
-        self.stop()
+                return
+            embed = self.build_embed()
+            embed.description = "戰鬥操作逾時，已保存本場戰鬥狀態；請重新使用指令繼續。"
+            await self.message.edit(embed=embed, view=None)
+        except Exception:
+            pass
 
 
 class JuiceBattleTowerClaimButton(discord.ui.Button):
@@ -6006,6 +6219,7 @@ class JuiceBattleTowerRewardView(discord.ui.View):
         total = len(self.progress.get("pending_equipment") or [])
         # 尚有下一件裝備：進入下一張領取介面
         if self.pending_index + 1 < total:
+            self.stop()
             next_view = JuiceBattleTowerRewardView(
                 cog=self.cog,
                 progress=self.progress,
@@ -6015,21 +6229,25 @@ class JuiceBattleTowerRewardView(discord.ui.View):
             next_view.message = self.message
             await interaction.response.edit_message(embed=next_view.build_embed(), view=next_view)
             self.cog.schedule_tower_button_unlock(next_view)
-            self.stop()
             return
-        # 全部決定完畢：發放並顯示結算
+        # 全部決定完畢：先 stop 再發放，避免逾時與結算競態
+        self.stop()
         await self.cog.tower_grant_rewards(self.progress, self.recipients)
         await interaction.response.edit_message(embed=self.build_settle_embed(), view=None)
-        self.stop()
 
     async def on_timeout(self) -> None:
         """
         領取介面逾時時將未決定裝備交給隊伍第一位成員；已丟棄者不發放。
         """
-        if self.claimed:
+        if self.claimed or self.is_finished():
             return
         self.claimed = True
+        self.stop()
         member_ids = [str(member_id) for member_id in self.progress.get("member_ids") or []]
+        async with self.cog.tower_lock:
+            existing = await self.cog.tower_load_shared_progress(member_ids)
+            if existing is None:
+                return
         fallback_id = member_ids[0] if member_ids else None
         while len(self.recipients) < len(self.progress.get("pending_equipment") or []):
             self.recipients.append(fallback_id)

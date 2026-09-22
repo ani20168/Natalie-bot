@@ -1486,7 +1486,7 @@ class General(commands.Cog):
         message = Embed(title="我是Natalie!",description="你好!我是Natalie!\n你可以在這裡查看個人資料及指令表。",color=common.bot_color)
         cake_emoji = common.cake_emoji
         cake_commands_list = [
-            f"/eat 餵食Natalie一些{cake_emoji} (1 cake = 1 exp)",
+            f"/eat 餵食Natalie一些{cake_emoji} (1 cake = 1 exp，支援 all)",
             f"/cake_give 給予他人{cake_emoji}",
             "/red_packet 發紅包(蛋糕)",
             "/robbery 掠奪別人的蛋糕",
@@ -1536,21 +1536,31 @@ class General(commands.Cog):
         await interaction.response.send_message(embed=message)
 
     @app_commands.command(name = "eat", description = "餵食Natalie!")
-    @app_commands.describe(eat_cake="要餵食的蛋糕數量，1蛋糕=1經驗值")
+    @app_commands.describe(eat_cake="要餵食的蛋糕數量，1蛋糕=1經驗值（支援 all）")
     @app_commands.rename(eat_cake="數量")
-    async def eat(self,interaction,eat_cake: int):
-        # 檢查餵食數量是否有效
-        if eat_cake <= 0:
+    async def eat(self,interaction,eat_cake: str):
+        # 解析數量：all = 全部持有蛋糕；否則須為正整數（與遊戲賭注 all 慣例相同，大小寫敏感）
+        userid = str(interaction.user.id)
+        userdata_collection = common.mongo_storage.get_collection("userdata")
+        eat_cake_text = str(eat_cake).strip()
+        if eat_cake_text == "all":
+            user_doc = await userdata_collection.find_one({"_id": userid}, {"cake": 1})
+            cake_balance = int((user_doc or {}).get("cake", 0))
+            if cake_balance <= 0:
+                await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="你自己都沒蛋糕了還想餵我??",color=common.bot_error_color))
+                return
+            eat_amount = cake_balance
+        elif eat_cake_text.isdigit() and int(eat_cake_text) >= 1:
+            eat_amount = int(eat_cake_text)
+        else:
             await interaction.response.send_message(embed=Embed(title='餵食Natalie',description="錯誤:請輸入有效的數量",color=common.bot_error_color))
             return
 
         # 原子扣除蛋糕並暫加經驗（之後再依等級上限校正）
-        userid = str(interaction.user.id)
-        userdata_collection = common.mongo_storage.get_collection("userdata")
         defaults = common.mongo_storage.get_user_defaults()
         consume_result = await userdata_collection.find_one_and_update(
-            {"_id": userid, "cake": {"$gte": eat_cake}},
-            {"$setOnInsert": {key: value for key, value in defaults.items() if key not in {"cake", "level_exp"}}, "$inc": {"cake": -eat_cake, "level_exp": eat_cake}},
+            {"_id": userid, "cake": {"$gte": eat_amount}},
+            {"$setOnInsert": {key: value for key, value in defaults.items() if key not in {"cake", "level_exp"}}, "$inc": {"cake": -eat_amount, "level_exp": eat_amount}},
             upsert=False,
             return_document=common.ReturnDocument.AFTER,
         )
@@ -1562,12 +1572,12 @@ class General(commands.Cog):
         userlevel = common.LevelSystem()
         max_level = userlevel.max_level
         max_level_exp = userlevel.max_level_exp()
-        previous_exp = consume_result.get("level_exp", 0) - eat_cake
+        previous_exp = consume_result.get("level_exp", 0) - eat_amount
         if previous_exp < 0:
             previous_exp = 0
         exp_room = max(0, max_level_exp - previous_exp)
-        actual_gained = min(eat_cake, exp_room)
-        refund_cake = eat_cake - actual_gained
+        actual_gained = min(eat_amount, exp_room)
+        refund_cake = eat_amount - actual_gained
 
         # 套用實際獲得的經驗，準備等級結算
         userlevel.level = consume_result.get("level", 1)

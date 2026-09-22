@@ -746,6 +746,7 @@ class ShopHouse:
             juice_battle["equipped_armor_slot"] = None
         bag[slot] = None
         juice_battle["bag"] = bag
+        juice_cog.sort_juice_battle_bag(juice_battle)
         await common.mongo_storage.replace_user(str(user_id), user_data)
         return instance
 
@@ -771,6 +772,7 @@ class ShopHouse:
             return False
         bag[empty_index] = restored
         juice_battle["bag"] = bag
+        juice_cog.sort_juice_battle_bag(juice_battle)
         await common.mongo_storage.replace_user(str(user_id), user_data)
         return True
 
