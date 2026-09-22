@@ -1393,6 +1393,24 @@ class ShopHouse:
         skill_lines = self.skill_pickaxe_public_lines(skills) if instance is not None and "skills" in (instance or {}) else []
         skill_keys = [key for key, value in skills.items() if value]
         offsets = self.juice_battle_offsets_public(instance) if instance is not None and "item_id" in instance else None
+        display_name = str(order.get("product_name") or order.get("product_id") or "")
+        enhancement_level = None
+        protection_count = None
+        if instance is not None and "item_id" in instance:
+            juice_cog = self.bot.get_cog("JuiceBattle")
+            if juice_cog is not None:
+                enhancement_level = juice_cog.equipment_enhancement_level(instance)
+                protection_count = juice_cog.equipment_protection_trigger_count(instance)
+            else:
+                try:
+                    enhancement_level = max(0, int(instance.get("enhancement_level", 0) or 0))
+                except (TypeError, ValueError):
+                    enhancement_level = 0
+                try:
+                    protection_count = max(0, int(instance.get("enhancement_protection_count", 0) or 0))
+                except (TypeError, ValueError):
+                    protection_count = 0
+            display_name = f"{display_name} +{enhancement_level}"
         remark = str(order.get("remark") or "").strip()
         return {
             "order_id": int(order.get("order_id") or 0),
@@ -1405,6 +1423,9 @@ class ShopHouse:
             "skill_keys": skill_keys,
             "offsets": offsets,
             "has_offsets": offsets is not None,
+            "display_name": display_name,
+            "enhancement_level": enhancement_level,
+            "protection_count": protection_count,
             "remark": remark,
         }
 

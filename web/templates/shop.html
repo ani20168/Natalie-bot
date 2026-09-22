@@ -607,6 +607,9 @@
             "</p>";
         }
         var offsetBlock = order.has_offsets ? renderOffsetBlock(order.offsets) : "";
+        var protectionBlock = order.protection_count !== null && order.protection_count !== undefined
+          ? '<p class="shop-order-offsets shop-order-protection">保護石懲罰:' + order.protection_count + "</p>"
+          : "";
         var qtyBlock = (order.skill_lines && order.skill_lines.length) || order.has_offsets
           ? ""
           : '<div><dt>數量</dt><dd>' + order.quantity + '</dd></div>';
@@ -620,9 +623,10 @@
         return (
           '<article class="auction-card shop-order-card">' +
             '<div class="shop-order-main">' +
-              '<h4>' + escapeHtml(productName) + '</h4>' +
+              '<h4>' + escapeHtml(order.display_name || productName) + '</h4>' +
               skillBlock +
               offsetBlock +
+              protectionBlock +
               '<dl class="auction-meta">' +
                 '<div><dt>賣家</dt><dd>' + escapeHtml(order.user_name) + '</dd></div>' +
                 '<div><dt>價格</dt><dd>' + order.price + cakeIcon() + '</dd></div>' +
@@ -1011,9 +1015,10 @@
         var sellerName = sellOrder ? sellOrder.user_name : "賣家";
         var unitPrice = sellOrder ? sellOrder.price : button.getAttribute("data-price");
         var maxQty = sellOrder ? sellOrder.quantity : button.getAttribute("data-qty");
+        var listingName = sellOrder && sellOrder.display_name ? sellOrder.display_name : product.name;
         if (product.kind === "animation_color_pass" || isBagSlotProduct(product)) maxQty = 1;
         var buyLead = "向 <strong>" + escapeHtml(sellerName) + "</strong> 購買 <strong>" +
-          escapeHtml(product.name) + "</strong>，單價 " + unitPrice + cakeIcon() +
+          escapeHtml(listingName) + "</strong>，單價 " + unitPrice + cakeIcon() +
           "，最多 " + maxQty + " 個。";
         if (isSkillPickaxe(product)) buyLead += "<br>購買後會放進挖礦背包，背包需要有空位。";
         if (isJuiceBattleEquipment(product)) {

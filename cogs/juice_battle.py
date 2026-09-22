@@ -18,6 +18,35 @@ class JuiceBattle(commands.Cog):
         self.challenge_timeout = 120.0
         self.battle_timeout = 180.0
         self.bag_view_timeout = 180.0
+        self.enhancement_max_level = 5
+        self.enhancement_costs = {
+            0: 10000,
+            1: 20000,
+            2: 40000,
+            3: 70000,
+            4: 100000,
+        }
+        self.enhancement_success_rates = {
+            0: 0.8,
+            1: 0.7,
+            2: 0.6,
+            3: 0.4,
+            4: 0.2,
+        }
+        self.enhancement_protection_base_cost = 10000
+        self.enhancement_protection_cost_step = 10000
+        self.enhancement_offset_keys = (
+            "hp_offset",
+            "atk_offset",
+            "def_offset",
+            "agi_offset",
+        )
+        self.enhancement_offset_labels = {
+            "hp_offset": "生命",
+            "atk_offset": "攻擊",
+            "def_offset": "防禦",
+            "agi_offset": "敏捷",
+        }
         self.tower_view_timeout = 1200.0
         self.tower_button_unlock_delay = 1.0
         self.tower_floor_min = 1
@@ -1212,6 +1241,73 @@ class JuiceBattle(commands.Cog):
             return self.armors.get(item_id)
         return None
 
+    def equipment_enhancement_level(self, entry: dict | None) -> int:
+        """
+        取得裝備強化等級；舊資料沒有欄位時視為 +0。
+
+        Args:
+            entry (dict | None): "背包中的裝備實例"
+
+        Returns:
+            level (int): "0 到目前強化上限的整數等級"
+        """
+        if not isinstance(entry, dict):
+            return 0
+        try:
+            level = int(entry.get("enhancement_level", 0) or 0)
+        except (TypeError, ValueError):
+            level = 0
+        return max(0, min(self.enhancement_max_level, level))
+
+    def equipment_protection_trigger_count(self, entry: dict | None) -> int:
+        """
+        取得同一件裝備已觸發保護石的次數。
+
+        Args:
+            entry (dict | None): "背包中的裝備實例"
+
+        Returns:
+            count (int): "非負的保護石觸發次數"
+        """
+        if not isinstance(entry, dict):
+            return 0
+        try:
+            count = int(entry.get("enhancement_protection_count", 0) or 0)
+        except (TypeError, ValueError):
+            count = 0
+        return max(0, count)
+
+    def equipment_protection_cost(self, entry: dict | None) -> int:
+        """
+        計算該件裝備下一次使用保護石的費用。
+
+        Args:
+            entry (dict | None): "背包中的裝備實例"
+
+        Returns:
+            cost (int): "下一次保護石費用"
+        """
+        count = self.equipment_protection_trigger_count(entry)
+        return self.enhancement_protection_base_cost + (
+            count * self.enhancement_protection_cost_step
+        )
+
+    def equipment_display_name(self, entry: dict | None) -> str:
+        """
+        組出含強化等級的裝備名稱。
+
+        Args:
+            entry (dict | None): "背包中的裝備實例"
+
+        Returns:
+            name (str): "例如：長劍 +5"
+        """
+        if not isinstance(entry, dict):
+            return "未知裝備 +0"
+        template = self.item_template(entry.get("kind"), entry.get("item_id"))
+        base_name = template["name"] if template is not None else str(entry.get("item_id") or "未知裝備")
+        return f"{base_name} +{self.equipment_enhancement_level(entry)}"
+
     def equipment_stat_offsets(self, entry: dict) -> dict | None:
         """
         取得背包裝備的四項偏移；優先用實例欄位，否則用模板。
@@ -1258,6 +1354,8 @@ class JuiceBattle(commands.Cog):
             "atk_offset": offsets["atk_offset"],
             "def_offset": offsets["def_offset"],
             "agi_offset": offsets["agi_offset"],
+            "enhancement_level": self.equipment_enhancement_level(entry),
+            "enhancement_protection_count": self.equipment_protection_trigger_count(entry),
         }
 
     def offsets_from_juice(self, juice_battle: dict) -> dict:
@@ -1979,10 +2077,11 @@ class JuiceBattle(commands.Cog):
             if template.get("starter"):
                 tags.append("初始")
             tag_text = f"（{'／'.join(tags)}）" if tags else ""
+            offsets = self.equipment_stat_offsets(entry) or {}
             value = (
                 f"{kind_text}{tag_text}\n"
-                f"生命偏移 {template['hp_offset']:+d}｜攻擊 {template['atk_offset']:+d}｜"
-                f"防禦 {template['def_offset']:+d}｜敏捷 {template['agi_offset']:+d}"
+                f"生命偏移 {offsets['hp_offset']:+d}｜攻擊 {offsets['atk_offset']:+d}｜"
+                f"防禦 {offsets['def_offset']:+d}｜敏捷 {offsets['agi_offset']:+d}"
             )
             ability = template.get("ability")
             abilities = self.template_abilities(template)
@@ -1994,19 +2093,75 @@ class JuiceBattle(commands.Cog):
                 value += f"\n{ability_text}"
             elif isinstance(ability, dict):
                 value += f"\n能力：{ability.get('name', '無')}｜{ability.get('description', '')}"
-            embed.add_field(name=f"[{slot_label}] {template['name']}", value=value, inline=False)
+            embed.add_field(name=f"[{slot_label}] {self.equipment_display_name(entry)}", value=value, inline=False)
         if discard_confirm_slot is not None:
             entry = bag[discard_confirm_slot] if 0 <= discard_confirm_slot < len(bag) else None
             name = "未知"
             if isinstance(entry, dict):
                 template = self.item_template(entry.get("kind"), entry.get("item_id"))
                 if template is not None:
-                    name = template["name"]
+                    name = self.equipment_display_name(entry)
             embed.add_field(
                 name="丟棄確認",
                 value=f"確定要丟棄第 **{discard_confirm_slot + 1}** 格的 **{name}** 嗎？此操作無法復原。",
                 inline=False,
             )
+        return embed
+
+    def build_enhance_embed(self, juice_battle: dict, protection_enabled: dict | None = None) -> Embed:
+        """
+        建立目前裝備的強化介面 Embed。
+
+        Args:
+            juice_battle (dict): "玩家的 Juice Battle 資料"
+            protection_enabled (dict | None): "各部位是否在下一次強化使用保護石"
+
+        Returns:
+            embed (Embed): "Juice Battle｜裝備強化"
+        """
+        protection_enabled = protection_enabled if isinstance(protection_enabled, dict) else {}
+        embed = Embed(
+            title="Juice Battle｜裝備強化",
+            description="每次強化都會收取強化費用；可切換下一次強化是否使用保護石。",
+            color=common.bot_color,
+        )
+        bag = juice_battle.get("bag") or []
+        for kind, slot_key, kind_text in (
+            ("weapon", "equipped_weapon_slot", "武器"),
+            ("armor", "equipped_armor_slot", "防具"),
+        ):
+            slot = juice_battle.get(slot_key)
+            entry = bag[slot] if isinstance(slot, int) and 0 <= slot < len(bag) else None
+            template = self.item_template(kind, entry.get("item_id")) if isinstance(entry, dict) else None
+            if template is None:
+                embed.add_field(name=kind_text, value="目前沒有裝備。", inline=False)
+                continue
+            offsets = self.equipment_stat_offsets(entry) or {}
+            level = self.equipment_enhancement_level(entry)
+            value_lines = [
+                f"名稱：**{self.equipment_display_name(entry)}**",
+                f"等級：**+{level}**",
+                (
+                    f"偏移：生命 {offsets['hp_offset']:+d}｜攻擊 {offsets['atk_offset']:+d}｜"
+                    f"防禦 {offsets['def_offset']:+d}｜敏捷 {offsets['agi_offset']:+d}"
+                ),
+            ]
+            if level >= self.enhancement_max_level:
+                value_lines.append(f"已達最高強化等級 **+{self.enhancement_max_level}**。")
+            else:
+                enhancement_cost = self.enhancement_costs[level]
+                success_rate = self.enhancement_success_rates[level]
+                protection_cost = self.equipment_protection_cost(entry)
+                protection_text = "啟用" if protection_enabled.get(kind, False) else "未啟用"
+                value_lines.extend(
+                    [
+                        f"強化費用：**{enhancement_cost}** {common.cake_emoji}",
+                        f"成功率：**{success_rate:.0%}**",
+                        f"保護石費用：**{protection_cost}** {common.cake_emoji}",
+                        f"下一次強化保護石：**{protection_text}**",
+                    ]
+                )
+            embed.add_field(name=kind_text, value="\n".join(value_lines), inline=False)
         return embed
 
     def resolve_initiative(self, fighter_a: dict, fighter_b: dict) -> tuple[dict, dict, str]:
@@ -2209,6 +2364,28 @@ class JuiceBattle(commands.Cog):
             embed = self.build_bag_embed(juice_battle, 0)
             view = JuiceBattleBagView(cog=self, userid=userid, page=0)
             await view.attach_slot_buttons(juice_battle)
+        await interaction.response.send_message(embed=embed, view=view)
+
+    @app_commands.command(name="juice_battle_enhance", description="強化目前裝備中的 Juice Battle 武器或防具")
+    async def juice_battle_enhance(self, interaction: discord.Interaction):
+        """
+        開啟目前武器與防具的強化介面。
+
+        Args:
+            interaction (discord.Interaction): "slash 互動"
+        """
+        userid = str(interaction.user.id)
+        async with common.jsonio_lock:
+            user_data = await self.load_user(userid)
+            juice_battle = user_data["juice_battle"]
+            await common.mongo_storage.replace_user(userid, user_data)
+        view = JuiceBattleEnhanceView(
+            cog=self,
+            userid=userid,
+            juice_battle=juice_battle,
+            protection_enabled={"weapon": False, "armor": False},
+        )
+        embed = self.build_enhance_embed(juice_battle, view.protection_enabled)
         await interaction.response.send_message(embed=embed, view=view)
 
     @app_commands.command(name="juice_battle", description="發起 Juice Battle 對戰")
@@ -3977,6 +4154,276 @@ class JuiceBattleBagView(discord.ui.View):
             juice_battle = user_data["juice_battle"]
         self.discard_confirm_slot = None
         await self.refresh_message(interaction, juice_battle)
+
+
+class JuiceBattleEnhanceButton(discord.ui.Button):
+    """強化武器或防具按鈕。"""
+
+    def __init__(self, *, kind: str, disabled: bool):
+        """
+        建立指定部位的強化按鈕。
+
+        Args:
+            kind (str): "weapon 或 armor"
+            disabled (bool): "是否停用按鈕"
+        """
+        label = "強化武器" if kind == "weapon" else "強化防具"
+        super().__init__(label=label, style=discord.ButtonStyle.success, row=0, disabled=disabled)
+        self.kind = kind
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        執行指定部位的強化。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: JuiceBattleEnhanceView = self.view  # type: ignore[assignment]
+        await view.on_enhance(interaction, self.kind)
+
+
+class JuiceBattleEnhanceProtectionButton(discord.ui.Button):
+    """切換武器或防具保護石按鈕。"""
+
+    def __init__(self, *, kind: str, enabled: bool, disabled: bool):
+        """
+        建立指定部位的保護石切換按鈕。
+
+        Args:
+            kind (str): "weapon 或 armor"
+            enabled (bool): "下一次強化是否使用保護石"
+            disabled (bool): "是否停用按鈕"
+        """
+        kind_text = "武器" if kind == "weapon" else "防具"
+        state_text = "取消保護石" if enabled else "使用保護石"
+        super().__init__(
+            label=f"{kind_text}{state_text}",
+            style=discord.ButtonStyle.secondary,
+            row=1,
+            disabled=disabled,
+        )
+        self.kind = kind
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        切換下一次強化的保護石設定。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: JuiceBattleEnhanceView = self.view  # type: ignore[assignment]
+        await view.on_toggle_protection(interaction, self.kind)
+
+
+class JuiceBattleEnhanceView(discord.ui.View):
+    """Juice Battle 裝備強化介面。"""
+
+    def __init__(
+        self,
+        *,
+        cog: JuiceBattle,
+        userid: str,
+        juice_battle: dict,
+        protection_enabled: dict,
+    ):
+        """
+        建立裝備強化 View。
+
+        Args:
+            cog (JuiceBattle): "Juice Battle cog"
+            userid (str): "使用者 ID"
+            juice_battle (dict): "玩家的 Juice Battle 資料"
+            protection_enabled (dict): "各部位下一次是否使用保護石"
+        """
+        super().__init__(timeout=cog.bag_view_timeout)
+        self.cog = cog
+        self.userid = userid
+        self.protection_enabled = {
+            "weapon": bool(protection_enabled.get("weapon", False)),
+            "armor": bool(protection_enabled.get("armor", False)),
+        }
+        bag = juice_battle.get("bag") or []
+        for kind, slot_key in (
+            ("weapon", "equipped_weapon_slot"),
+            ("armor", "equipped_armor_slot"),
+        ):
+            slot = juice_battle.get(slot_key)
+            entry = bag[slot] if isinstance(slot, int) and 0 <= slot < len(bag) else None
+            has_equipment = self.cog.item_template(
+                kind,
+                entry.get("item_id") if isinstance(entry, dict) else "",
+            ) is not None
+            level = self.cog.equipment_enhancement_level(entry)
+            disabled = not has_equipment or level >= self.cog.enhancement_max_level
+            self.add_item(JuiceBattleEnhanceButton(kind=kind, disabled=disabled))
+            self.add_item(
+                JuiceBattleEnhanceProtectionButton(
+                    kind=kind,
+                    enabled=self.protection_enabled[kind],
+                    disabled=disabled,
+                )
+            )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """
+        只允許本人操作強化介面。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+
+        Returns:
+            allowed (bool): "True"
+        """
+        if str(interaction.user.id) == self.userid:
+            return True
+        await interaction.response.send_message(
+            embed=Embed(title="Juice Battle", description="這不是你的裝備強化介面。", color=common.bot_error_color),
+            ephemeral=True,
+        )
+        return False
+
+    async def on_toggle_protection(self, interaction: discord.Interaction, kind: str):
+        """
+        切換指定部位下一次強化是否使用保護石。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+            kind (str): "weapon 或 armor"
+        """
+        slot_key = "equipped_weapon_slot" if kind == "weapon" else "equipped_armor_slot"
+        async with common.jsonio_lock:
+            user_data = await self.cog.load_user(self.userid)
+            juice_battle = user_data["juice_battle"]
+            bag = juice_battle.get("bag") or []
+            slot = juice_battle.get(slot_key)
+            entry = bag[slot] if isinstance(slot, int) and 0 <= slot < len(bag) else None
+            template = self.cog.item_template(
+                kind,
+                entry.get("item_id") if isinstance(entry, dict) else "",
+            )
+            level = self.cog.equipment_enhancement_level(entry)
+            if template is None:
+                await interaction.response.send_message(
+                    embed=Embed(title="Juice Battle", description="目前沒有可強化的裝備。", color=common.bot_error_color),
+                    ephemeral=True,
+                )
+                return
+            if level >= self.cog.enhancement_max_level:
+                await interaction.response.send_message(
+                    embed=Embed(
+                        title="Juice Battle",
+                        description=f"該裝備已達最高強化等級 +{self.cog.enhancement_max_level}。",
+                        color=common.bot_error_color,
+                    ),
+                    ephemeral=True,
+                )
+                return
+            self.protection_enabled[kind] = not self.protection_enabled[kind]
+        new_view = JuiceBattleEnhanceView(
+            cog=self.cog,
+            userid=self.userid,
+            juice_battle=juice_battle,
+            protection_enabled=self.protection_enabled,
+        )
+        await interaction.response.edit_message(
+            embed=self.cog.build_enhance_embed(juice_battle, new_view.protection_enabled),
+            view=new_view,
+        )
+        self.stop()
+
+    async def on_enhance(self, interaction: discord.Interaction, kind: str):
+        """
+        扣除費用並結算指定部位的一次強化。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+            kind (str): "weapon 或 armor"
+        """
+        slot_key = "equipped_weapon_slot" if kind == "weapon" else "equipped_armor_slot"
+        kind_text = "武器" if kind == "weapon" else "防具"
+        result_text = ""
+        async with common.jsonio_lock:
+            user_data = await self.cog.load_user(self.userid)
+            juice_battle = user_data["juice_battle"]
+            bag = juice_battle.get("bag") or []
+            slot = juice_battle.get(slot_key)
+            entry = bag[slot] if isinstance(slot, int) and 0 <= slot < len(bag) else None
+            template = self.cog.item_template(
+                kind,
+                entry.get("item_id") if isinstance(entry, dict) else "",
+            )
+            if template is None:
+                await interaction.response.send_message(
+                    embed=Embed(title="Juice Battle", description=f"目前沒有可強化的{kind_text}。", color=common.bot_error_color),
+                    ephemeral=True,
+                )
+                return
+            level = self.cog.equipment_enhancement_level(entry)
+            if level >= self.cog.enhancement_max_level:
+                await interaction.response.send_message(
+                    embed=Embed(
+                        title="Juice Battle",
+                        description=f"{kind_text}已達最高強化等級 +{self.cog.enhancement_max_level}。",
+                        color=common.bot_error_color,
+                    ),
+                    ephemeral=True,
+                )
+                return
+            enhancement_cost = self.cog.enhancement_costs[level]
+            use_protection = bool(self.protection_enabled.get(kind, False))
+            protection_cost = self.cog.equipment_protection_cost(entry) if use_protection else 0
+            total_cost = enhancement_cost + protection_cost
+            cake = int(user_data.get("cake", 0) or 0)
+            if cake < total_cost:
+                await interaction.response.send_message(
+                    embed=Embed(
+                        title="Juice Battle",
+                        description=(
+                            f"{common.cake_emoji}不足，無法強化{kind_text}。"
+                            f"\n需要 **{total_cost}**，目前只有 **{cake}**。"
+                        ),
+                        color=common.bot_error_color,
+                    ),
+                    ephemeral=True,
+                )
+                return
+
+            user_data["cake"] = cake - total_cost
+            selected_offset_key = random.choice(self.cog.enhancement_offset_keys)
+            selected_offset_label = self.cog.enhancement_offset_labels[selected_offset_key]
+            success = random.random() < self.cog.enhancement_success_rates[level]
+            if success:
+                entry["enhancement_level"] = level + 1
+                offsets = self.cog.equipment_stat_offsets(entry) or {}
+                entry[selected_offset_key] = offsets[selected_offset_key] + 1
+                result_text = (
+                    f"{kind_text}強化成功！達到 **+{level + 1}**，"
+                    f"{selected_offset_label}偏移 **+1**。"
+                )
+            elif use_protection:
+                trigger_count = self.cog.equipment_protection_trigger_count(entry)
+                entry["enhancement_protection_count"] = trigger_count + 1
+                result_text = f"{kind_text}強化失敗，保護石生效，未受到偏移量懲罰。"
+            else:
+                offsets = self.cog.equipment_stat_offsets(entry) or {}
+                entry[selected_offset_key] = offsets[selected_offset_key] - 1
+                result_text = (
+                    f"{kind_text}強化失敗，{selected_offset_label}偏移 **-1**。"
+                )
+            await common.mongo_storage.replace_user(self.userid, user_data)
+
+        protection_enabled = dict(self.protection_enabled)
+        protection_enabled[kind] = False
+        new_view = JuiceBattleEnhanceView(
+            cog=self.cog,
+            userid=self.userid,
+            juice_battle=juice_battle,
+            protection_enabled=protection_enabled,
+        )
+        embed = self.cog.build_enhance_embed(juice_battle, new_view.protection_enabled)
+        embed.description = f"{result_text}\n\n{embed.description}"
+        await interaction.response.edit_message(embed=embed, view=new_view)
+        self.stop()
 
 
 class JuiceBattleChallengeView(discord.ui.View):
