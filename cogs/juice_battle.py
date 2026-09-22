@@ -4636,12 +4636,12 @@ class JuiceBattleView(discord.ui.View):
             self.cog.tower_consume_skill(actor, ability_id)
             self_damage = self.apply_incoming_damage(actor, cost)
             self.append_log(
-                f"{actor['display_name']} 發動祭血術，自損 **{self_damage}** HP（消耗 {cost}）"
+                f"{actor['display_name']} 發動祭血術，自損 **{self_damage}** HP"
             )
             # 對對方：跳過防守，傷害不可被吸收背心擋下
             dealt = self.apply_incoming_damage(opponent, cost * 2, absorbable=False)
             self.append_log(
-                f"祭血術對 {opponent['display_name']} 造成 **{dealt}** 點傷害（跳過防守）"
+                f"祭血術對 {opponent['display_name']} 造成 **{dealt}** 點傷害"
             )
             # 施術者先扣血：若已倒下則施術者輸（含雙死）
             if actor["hp"] <= 0:
@@ -4729,13 +4729,11 @@ class JuiceBattleView(discord.ui.View):
         use_dodge_roll = self.attack_uses_dodge_roll
         self.attack_uses_dodge_roll = False
         _dice, total, attack_label = self.cog.roll_attack(attacker, use_dodge_roll=use_dodge_roll)
-        # 毒性蔓延：最終攻擊值加上中毒剩餘回合，並延長 1 回合
+        # 毒性蔓延：最終攻擊值加上中毒剩餘回合，並延長 1 回合（加成已併入 total，log 不另標）
         if self.cog.fighter_has_ability(attacker, "toxic_spread") and int(defender.get("poison_remaining", 0)) > 0:
             poison_bonus = int(defender["poison_remaining"])
             total += poison_bonus
             defender["poison_remaining"] = poison_bonus + 1
-            spread_note = f"（毒性蔓延 +{poison_bonus}）"
-            skill_note = f"{skill_note}{spread_note}" if skill_note else spread_note
         if attacker.get("stance_swap_attack") and not use_dodge_roll:
             attacker["stance_swap_attack"] = False
             skill_note = f"{skill_note}（架式對調攻擊）" if skill_note else "（架式對調攻擊）"
@@ -4932,7 +4930,7 @@ class JuiceBattleView(discord.ui.View):
             condemn_damage = int(self.pending_condemn) * self.cog.blood_feast_damage_per_stack
             self.pending_condemn = None
             condemn_actual = self.apply_incoming_damage(defender, condemn_damage)
-            self.append_log(f"斷罪造成 **{condemn_actual}** 點傷害（無視防禦／閃避）")
+            self.append_log(f"斷罪造成 **{condemn_actual}** 點傷害")
 
         if "life_conversion" in ability_ids and defender["hp"] > 0:
             self.cog.tower_add_hp(defender, defense_total)
@@ -5048,12 +5046,12 @@ class JuiceBattleView(discord.ui.View):
                 self.cog.tower_consume_skill(attacker, "blood_rite")
                 self_damage = self.apply_incoming_damage(attacker, cost)
                 self.append_log(
-                    f"{attacker['display_name']} 發動祭血術，自損 **{self_damage}** HP（消耗 {cost}）"
+                    f"{attacker['display_name']} 發動祭血術，自損 **{self_damage}** HP"
                 )
                 # 對對方：跳過防守，傷害不可被吸收背心擋下
                 dealt = self.apply_incoming_damage(opponent, cost * 2, absorbable=False)
                 self.append_log(
-                    f"祭血術對 {opponent['display_name']} 造成 **{dealt}** 點傷害（跳過防守）"
+                    f"祭血術對 {opponent['display_name']} 造成 **{dealt}** 點傷害"
                 )
                 if attacker["hp"] <= 0:
                     await self.finish_battle(
@@ -6191,20 +6189,18 @@ class JuiceBattleTowerView(discord.ui.View):
         _dice, attack_total, attack_label = self.cog.roll_attack(attacker, use_dodge_roll=use_dodge_roll)
         if attacker.get("stance_swap_attack"):
             attacker["stance_swap_attack"] = False
-        # 毒性蔓延：最終攻擊值加上中毒剩餘回合，並延長 1 回合
-        spread_note = ""
+        # 毒性蔓延：最終攻擊值加上中毒剩餘回合，並延長 1 回合（加成已併入 attack_total，log 不另標）
         if self.cog.fighter_has_ability(attacker, "toxic_spread") and int(self.monster.get("poison_remaining", 0)) > 0:
             poison_bonus = int(self.monster["poison_remaining"])
             attack_total += poison_bonus
             self.monster["poison_remaining"] = poison_bonus + 1
-            spread_note = f"（毒性蔓延 +{poison_bonus}）"
         mode = self.choose_monster_defense(attack_total, bound)
         if mode == "stunned":
             damage = self.apply_damage(self.monster, attack_total)
             self.last_attack_damage = damage
             self.monster["stun_remaining"] = max(0, int(self.monster.get("stun_remaining", 0)) - 1)
             result = (
-                f"{attacker['display_name']} {attack_label} **{attack_total}**{spread_note}，"
+                f"{attacker['display_name']} {attack_label} **{attack_total}**，"
                 f"怪物暈眩，無法防禦，造成 **{damage}** 傷害"
             )
         elif mode == "defend":
@@ -6226,7 +6222,7 @@ class JuiceBattleTowerView(discord.ui.View):
             actual_damage = self.apply_damage(self.monster, damage)
             self.last_attack_damage = actual_damage
             result = (
-                f"{attacker['display_name']} {attack_label} **{attack_total}**{spread_note}，"
+                f"{attacker['display_name']} {attack_label} **{attack_total}**，"
                 f"怪物防禦 **{defense_total}**，受到 **{actual_damage}** 傷害{hardening_text}"
             )
         else:
@@ -6244,13 +6240,13 @@ class JuiceBattleTowerView(discord.ui.View):
                 damage = self.apply_damage(self.monster, attack_total)
                 self.last_attack_damage = damage
                 result = (
-                    f"{attacker['display_name']} {attack_label} **{attack_total}**{spread_note}，"
+                    f"{attacker['display_name']} {attack_label} **{attack_total}**，"
                     f"怪物閃避 **{dodge_total}**，失敗，受到 **{damage}** 傷害"
                 )
             else:
                 self.last_attack_damage = 0
                 result = (
-                    f"{attacker['display_name']} {attack_label} **{attack_total}**{spread_note}，"
+                    f"{attacker['display_name']} {attack_label} **{attack_total}**，"
                     f"怪物閃避 **{dodge_total}**，成功，無傷"
                 )
             self.monster["sprint_armed"] = False
@@ -6314,12 +6310,12 @@ class JuiceBattleTowerView(discord.ui.View):
             self.cog.tower_consume_skill(actor, ability_id)
             self_damage = self.apply_damage(actor, cost)
             self.append_log(
-                f"{actor['display_name']} 發動祭血術，自損 **{self_damage}** HP（消耗 {cost}）"
+                f"{actor['display_name']} 發動祭血術，自損 **{self_damage}** HP"
             )
             # 對怪物：跳過防守，傷害不可被吸收背心擋下
             dealt = self.apply_damage(self.monster, cost * 2, absorbable=False)
             self.append_log(
-                f"祭血術對 {self.monster['name']} 造成 **{dealt}** 點傷害（跳過防守）"
+                f"祭血術對 {self.monster['name']} 造成 **{dealt}** 點傷害"
             )
             # 施術者先扣血：全滅則判敗（含雙死）；否則怪物死則通關
             if not self.living_fighters():
@@ -6401,7 +6397,7 @@ class JuiceBattleTowerView(discord.ui.View):
             results.append(result)
             if condemn_damage is not None:
                 condemn_actual = self.apply_damage(self.monster, condemn_damage)
-                results.append(f"斷罪造成 **{condemn_actual}** 點傷害（無視防禦／閃避）")
+                results.append(f"斷罪造成 **{condemn_actual}** 點傷害")
                 condemn_damage = None
             if self.monster["hp"] <= 0:
                 break
