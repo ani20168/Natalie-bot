@@ -4968,7 +4968,7 @@ class JuiceBattleEnhanceView(discord.ui.View):
             protection_enabled=self.protection_enabled,
         )
         embed = self.cog.build_enhance_embed(juice_battle, new_view.protection_enabled)
-        embed.description = f"{result_text}\n\n{embed.description}"
+        embed.insert_field_at(0, name="結果", value=result_text, inline=False)
         await interaction.response.edit_message(embed=embed, view=new_view)
         self.stop()
 
