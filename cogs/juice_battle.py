@@ -5881,22 +5881,32 @@ class JuiceBattleView(discord.ui.View):
         attacker = self.fighter_by_id(self.attacker_id)
         defender = self.fighter_by_id(self.defender_id)
         attack_total = self.pending_attack_total or 0
-        abilities = self.cog.tower_consume_armed_skills(defender)
-        ability_ids = {ability.get("id") for ability in abilities}
-        stance_swap_defend = "stance_swap" in ability_ids
-        fridge_armed = "fridge" in ability_ids
-        if abilities:
-            names = "、".join(ability["name"] for ability in abilities)
-            skill_note = f"（發動 {names}）"
-        else:
+        defender_stunned = int(defender.get("stun_remaining", 0)) > 0
+        if defender_stunned:
+            abilities = []
+            ability_ids = set()
+            stance_swap_defend = False
+            fridge_armed = False
             skill_note = ""
+            defense_total = 0
+            damage = attack_total
+            outcome_line = f"{defender['display_name']} 暈眩，無法防禦"
+        else:
+            abilities = self.cog.tower_consume_armed_skills(defender)
+            ability_ids = {ability.get("id") for ability in abilities}
+            stance_swap_defend = "stance_swap" in ability_ids
+            fridge_armed = "fridge" in ability_ids
+            if abilities:
+                names = "、".join(ability["name"] for ability in abilities)
+                skill_note = f"（發動 {names}）"
+            else:
+                skill_note = ""
 
         # 計算傷害（攻擊行已由 execute_attack 寫入；此處只 append 防守結果，避免星爆連擊被覆寫成單筆）
-        defense_total = 0
-        if "izanami_blessing" in ability_ids:
+        if not defender_stunned and "izanami_blessing" in ability_ids:
             defender["def_offset_multiplier"] = self.cog.offset_blessing_multiplier
             defender["def_offset_blessing_remaining"] = self.cog.izanagi_blessing_duration
-        if mode == "defend":
+        if not defender_stunned and mode == "defend":
             def_base, def_offset = self.cog.defense_roll_stats(defender, stance_swap_defend=stance_swap_defend)
             def_offset_multiplier = int(defender.get("def_offset_multiplier", 1))
             _dice, defense_total = self.cog.roll_stat(
@@ -5915,7 +5925,7 @@ class JuiceBattleView(discord.ui.View):
             if "copper_wall" in ability_ids and defense_total > attack_total:
                 attacker["stun_remaining"] = 1
                 outcome_line += "，銅牆鐵壁成功"
-        else:
+        elif not defender_stunned:
             dodge_offset = int(defender.get("agi_offset", 0)) + int(defender.get("dodge_offset", 0))
             _dice, dodge_total = self.cog.roll_stat(defender["agi"], dodge_offset)
             if attack_total >= dodge_total:
@@ -7606,7 +7616,6 @@ class JuiceBattleTowerView(discord.ui.View):
         if mode == "stunned":
             damage = self.apply_damage(self.monster, attack_total)
             self.last_attack_damage = damage
-            self.monster["stun_remaining"] = max(0, int(self.monster.get("stun_remaining", 0)) - 1)
             result = (
                 f"{attacker['display_name']} {attack_label} **{attack_total}**，"
                 f"怪物暈眩，無法防禦，造成 **{damage}** 傷害"
@@ -7911,6 +7920,11 @@ class JuiceBattleTowerView(discord.ui.View):
             self.cog.tower_add_hp(self.monster, 1)
             self.append_log("蘑菇的增殖發動，怪物回復 **1 HP**。")
         self.prepare_monster_skill_cooldowns()
+        if int(self.monster.get("stun_remaining", 0)) > 0:
+            self.monster["stun_remaining"] = max(0, int(self.monster["stun_remaining"]) - 1)
+            self.append_log(f"{self.monster['name']} 暈眩，跳過本次攻擊。")
+            await self.enter_next_player()
+            return
         target = random.choice(living)
         self.pending_bind = False
         self.pending_monster_extra_attacks = 0
@@ -7951,15 +7965,8 @@ class JuiceBattleTowerView(discord.ui.View):
                 ephemeral=True,
             )
             return
-        abilities = self.cog.tower_consume_armed_skills(defender)
-        ability_ids = {ability.get("id") for ability in abilities}
         attack_total = int(self.pending_attack_total)
-        damage = 0
-        if abilities:
-            names = "、".join(ability["name"] for ability in abilities)
-            defender_skill_note = f"（發動 {names}）"
-        else:
-            defender_skill_note = ""
+        defender_stunned = int(defender.get("stun_remaining", 0)) > 0
         bind_ability = self.monster_ability("bind")
         monster_skill_note = (
             f"（發動 {bind_ability['name']}）"
@@ -7969,7 +7976,22 @@ class JuiceBattleTowerView(discord.ui.View):
         log_parts = [f"{self.monster['name']} 攻擊 **{attack_total}**{monster_skill_note}"]
         defense_dice = 0
         defense_total = 0
-        if mode == "dodge":
+        if defender_stunned:
+            abilities = []
+            ability_ids = set()
+            defender_skill_note = ""
+            damage = attack_total
+            log_parts.append(f"{defender['display_name']} 暈眩，無法防禦")
+        else:
+            abilities = self.cog.tower_consume_armed_skills(defender)
+            ability_ids = {ability.get("id") for ability in abilities}
+            damage = 0
+            if abilities:
+                names = "、".join(ability["name"] for ability in abilities)
+                defender_skill_note = f"（發動 {names}）"
+            else:
+                defender_skill_note = ""
+        if not defender_stunned and mode == "dodge":
             defense_dice, dodge_total, _dodge_text = self.cog.tower_roll(
                 defender,
                 defender["agi"],
@@ -7991,7 +8013,7 @@ class JuiceBattleTowerView(discord.ui.View):
                     if gained > 0:
                         dodge_success_line += f"，靈活身位 +{gained} HP"
                 log_parts.append(dodge_success_line)
-        else:
+        elif not defender_stunned:
             if "izanami_blessing" in ability_ids:
                 for fighter in self.living_fighters():
                     fighter["def_offset_multiplier"] = self.cog.offset_blessing_multiplier
@@ -8023,7 +8045,11 @@ class JuiceBattleTowerView(discord.ui.View):
                 log_parts.append("銅牆鐵壁成功，怪物暈眩一回合")
             if stance_swap:
                 defender["stance_swap_attack"] = True
-        trap_triggered = self.monster_ability("trap") is not None and defense_dice == 1
+        trap_triggered = (
+            not defender_stunned
+            and self.monster_ability("trap") is not None
+            and defense_dice == 1
+        )
         if trap_triggered:
             damage = attack_total
             defender["stun_remaining"] = 1
