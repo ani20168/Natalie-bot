@@ -208,7 +208,7 @@ class JuiceBattle(commands.Cog):
                     "name": "銅牆鐵壁",
                     "phase": "defend",
                     "cd": 3,
-                    "description": "本回合使用防禦時，若最終防禦值大於敵人最終攻擊值，暈眩對手一回合；仍依現有傷害流程結算。",
+                    "description": "本回合使用防禦時，若防禦值大於敵人攻擊值，暈眩對手一回合。",
                 },
             },
             "blood_blade": {
@@ -222,7 +222,7 @@ class JuiceBattle(commands.Cog):
                     "name": "出血",
                     "phase": "passive",
                     "cd": None,
-                    "description": "攻擊命中時對目標疊加一層流血；達三層立即血爆，造成 6 點傷害後清除流血。",
+                    "description": "攻擊成功時，賦予對方一層流血效果(可疊加)。流血狀態達到三層時會觸發血爆，造成流血層數2倍的傷害，之後清除流血狀態",
                 },
             },
             "dual_blades": {
@@ -286,7 +286,7 @@ class JuiceBattle(commands.Cog):
                     "name": "伊邪那岐的祝福",
                     "phase": "attack",
                     "cd": 6,
-                    "description": "爬塔使我方所有成員、PvP／Natalie 戰使自己接下來 3 回合的攻擊偏移量變為 2 倍。",
+                    "description": "我方所有成員攻擊偏移量變為2倍，持續3回合",
                 },
             },
             "izanami_underworld_staff": {
@@ -300,7 +300,7 @@ class JuiceBattle(commands.Cog):
                     "name": "伊邪那美的祝福",
                     "phase": "defend",
                     "cd": 6,
-                    "description": "爬塔使我方所有成員、PvP／Natalie 戰使自己接下來 3 回合的防禦偏移量變為 2 倍。",
+                    "description": "我方所有成員防禦偏移量變為2倍，持續3回合",
                 },
             },
             "iris_condemn_scythe": {
@@ -362,7 +362,7 @@ class JuiceBattle(commands.Cog):
                     "name": "靈活身位",
                     "phase": "passive",
                     "cd": None,
-                    "description": "閃避成功時自身回復 1 HP。",
+                    "description": "閃避成功時，自身+1HP",
                 },
             },
             "lion_armor": {
@@ -376,7 +376,7 @@ class JuiceBattle(commands.Cog):
                     "name": "震懾",
                     "phase": "attack",
                     "cd": 5,
-                    "description": "對方普通攻擊的最終攻擊值減半，無條件捨去，持續對方接下來 2 回合。",
+                    "description": "賦予震懾效果，對方的最終攻擊值減半，持續2回合",
                 },
             },
             "metal_armor": {
