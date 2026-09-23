@@ -222,7 +222,7 @@ class JuiceBattle(commands.Cog):
                     "name": "出血",
                     "phase": "passive",
                     "cd": None,
-                    "description": "攻擊成功時，賦予對方一層流血效果(可疊加)。流血狀態達到三層時會觸發血爆，造成流血層數2倍的傷害，之後清除流血狀態",
+                    "description": "攻擊成功時，賦予對方一層流血效果(可疊加)",
                 },
             },
             "dual_blades": {
