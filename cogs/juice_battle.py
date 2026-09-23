@@ -1179,18 +1179,26 @@ class JuiceBattle(commands.Cog):
         if getattr(view, "restart_paused", False):
             return
         view.restart_paused = True
-        if save_battle and isinstance(view, JuiceBattleTowerView) and not getattr(view, "finished", False):
-            try:
-                await self.tower_save_battle(view)
-            except Exception:
-                pass
-        progress = getattr(view, "progress", None)
-        if isinstance(progress, dict) and progress.get("member_ids"):
-            try:
-                await self.tower_save_progress(progress)
-            except Exception:
-                pass
         member_ids = self.restart_tower_member_ids(view)
+        # 戰鬥 View 僅寫入含 battle 快照的存檔；已正常結束者記憶體 progress 可能落後，不可覆寫
+        if isinstance(view, JuiceBattleTowerView):
+            if save_battle and (
+                not getattr(view, "finished", False) or getattr(view, "timed_out", False)
+            ):
+                try:
+                    await self.tower_save_battle(view)
+                except Exception:
+                    pass
+        else:
+            progress = getattr(view, "progress", None)
+            # 進度已在 DB 清掉（結算／失敗）時，禁止把 View 殘留快照寫回造成回溯
+            if isinstance(progress, dict) and progress.get("member_ids") and member_ids:
+                try:
+                    existing = await self.tower_load_shared_progress(member_ids)
+                    if existing is not None:
+                        await self.tower_save_progress(progress)
+                except Exception:
+                    pass
         if hasattr(view, "settled"):
             view.settled = True
         for child in view.children:
