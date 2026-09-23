@@ -64,6 +64,11 @@ class JuiceBattle(commands.Cog):
         self.blood_feast_damage_per_stack = 1
         self.last_dance_hp_threshold = 5
         self.toxic_revival_heal = 1
+        self.bleed_trigger_stacks = 3
+        self.blood_explosion_damage = 6
+        self.offset_blessing_multiplier = 2
+        self.izanagi_blessing_duration = 3
+        self.intimidation_duration = 2
         self.characters = {
             "ownerless": {
                 "name": "一無所有者",
@@ -192,6 +197,34 @@ class JuiceBattle(commands.Cog):
                     "description": "本回合防禦值與敵人攻擊值相同時，暈眩對手一回合。",
                 },
             },
+            "large_round_shield": {
+                "name": "大圓盾",
+                "hp_offset": 1,
+                "atk_offset": 0,
+                "def_offset": 3,
+                "agi_offset": -1,
+                "ability": {
+                    "id": "copper_wall",
+                    "name": "銅牆鐵壁",
+                    "phase": "defend",
+                    "cd": 3,
+                    "description": "本回合使用防禦時，若最終防禦值大於敵人最終攻擊值，暈眩對手一回合；仍依現有傷害流程結算。",
+                },
+            },
+            "blood_blade": {
+                "name": "血刃",
+                "hp_offset": 0,
+                "atk_offset": 3,
+                "def_offset": 1,
+                "agi_offset": 0,
+                "ability": {
+                    "id": "bleed",
+                    "name": "出血",
+                    "phase": "passive",
+                    "cd": None,
+                    "description": "攻擊命中時對目標疊加一層流血；達三層立即血爆，造成 6 點傷害後清除流血。",
+                },
+            },
             "dual_blades": {
                 "name": "雙刀",
                 "hp_offset": 0,
@@ -242,6 +275,34 @@ class JuiceBattle(commands.Cog):
                     "description": "我方所有成員回復 3 HP。",
                 },
             },
+            "izanagi_light_sword": {
+                "name": "伊邪那岐的流光劍",
+                "hp_offset": 3,
+                "atk_offset": 2,
+                "def_offset": 0,
+                "agi_offset": 0,
+                "ability": {
+                    "id": "izanagi_blessing",
+                    "name": "伊邪那岐的祝福",
+                    "phase": "attack",
+                    "cd": 6,
+                    "description": "爬塔使我方所有成員、PvP／Natalie 戰使自己接下來 3 回合的攻擊偏移量變為 2 倍。",
+                },
+            },
+            "izanami_underworld_staff": {
+                "name": "伊邪那美的冥華杖",
+                "hp_offset": 3,
+                "atk_offset": 0,
+                "def_offset": 3,
+                "agi_offset": 0,
+                "ability": {
+                    "id": "izanami_blessing",
+                    "name": "伊邪那美的祝福",
+                    "phase": "defend",
+                    "cd": 6,
+                    "description": "爬塔使我方所有成員、PvP／Natalie 戰使自己接下來 3 回合的防禦偏移量變為 2 倍。",
+                },
+            },
             "iris_condemn_scythe": {
                 "name": "伊莉絲的斷罪之鐮",
                 "hp_offset": 3,
@@ -289,6 +350,34 @@ class JuiceBattle(commands.Cog):
                 "agi_offset": 0,
                 "ability": None,
                 "starter": True,
+            },
+            "sports_vest": {
+                "name": "運動背心",
+                "hp_offset": 1,
+                "atk_offset": 0,
+                "def_offset": -1,
+                "agi_offset": 2,
+                "ability": {
+                    "id": "agile_position",
+                    "name": "靈活身位",
+                    "phase": "passive",
+                    "cd": None,
+                    "description": "閃避成功時自身回復 1 HP。",
+                },
+            },
+            "lion_armor": {
+                "name": "獅子鎧甲",
+                "hp_offset": 3,
+                "atk_offset": 2,
+                "def_offset": 2,
+                "agi_offset": -3,
+                "ability": {
+                    "id": "intimidation",
+                    "name": "震懾",
+                    "phase": "attack",
+                    "cd": 5,
+                    "description": "對方普通攻擊的最終攻擊值減半，無條件捨去，持續對方接下來 2 回合。",
+                },
             },
             "metal_armor": {
                 "name": "金屬盔甲",
@@ -434,11 +523,22 @@ class JuiceBattle(commands.Cog):
             {
                 "id": "poison_bubble_bug",
                 "name": "毒泡蟲",
-                "ability": {
-                    "id": "poison_immunity",
-                    "name": "中毒免疫",
-                    "description": "免疫中毒。",
-                },
+                "abilities": [
+                    {
+                        "id": "poison_immunity",
+                        "name": "中毒免疫",
+                        "phase": "passive",
+                        "cd": None,
+                        "description": "免疫中毒。",
+                    },
+                    {
+                        "id": "poison",
+                        "name": "中毒",
+                        "phase": "passive",
+                        "cd": None,
+                        "description": "本次攻擊成功時，賦予對方中毒效果，對方回合開始時 -1 HP，持續 3 回合。",
+                    },
+                ],
             },
             {"id": "bat", "name": "蝙蝠", "ability": None},
             {
@@ -518,11 +618,22 @@ class JuiceBattle(commands.Cog):
             {
                 "id": "tribal_archer",
                 "name": "部落弓箭手",
-                "ability": {
-                    "id": "poison",
-                    "name": "中毒",
-                    "description": "[被動]本次攻擊成功時，賦予對方中毒效果，對方回合開始時-1HP，持續3回合。",
-                },
+                "abilities": [
+                    {
+                        "id": "poison",
+                        "name": "中毒",
+                        "phase": "passive",
+                        "cd": None,
+                        "description": "本次攻擊成功時，賦予對方中毒效果，對方回合開始時 -1 HP，持續 3 回合。",
+                    },
+                    {
+                        "id": "rapid_fire",
+                        "name": "連發弩",
+                        "phase": "attack",
+                        "cd": 2,
+                        "description": "攻擊階段可進行第二次攻擊。",
+                    },
+                ],
             },
         ]
 
@@ -605,6 +716,7 @@ class JuiceBattle(commands.Cog):
             "is_boss": is_boss,
             "attack_offset": 0,
             "skill_cd": 0,
+            "skill_cds": {},
             "skill_used_once": False,
             "stun_remaining": 0,
             "poison_remaining": 0,
@@ -612,6 +724,12 @@ class JuiceBattle(commands.Cog):
             "dodge_offset": 0,
             "two_dice": template["id"] == "old_jin",
             "hardening_armed": False,
+            "bleed_stacks": 0,
+            "attack_offset_multiplier": 1,
+            "attack_offset_blessing_remaining": 0,
+            "def_offset_multiplier": 1,
+            "def_offset_blessing_remaining": 0,
+            "intimidation_remaining": 0,
         }
 
     def tower_roll(self, fighter: dict, base: int, offset: int = 0, *, offset_multiplier: int = 1) -> tuple[int, int, str]:
@@ -856,7 +974,7 @@ class JuiceBattle(commands.Cog):
             fighter (dict): "玩家或怪物戰鬥狀態"
             phase (str): "attack 或 defend"
         """
-        sources = ("character", "weapon") if phase == "attack" else ("character", "armor", "weapon")
+        sources = ("character", "weapon", "armor")
         for source in sources:
             for ability in self.fighter_abilities(fighter, source):
                 if ability.get("phase") != phase or ability.get("cd") is None:
@@ -1552,6 +1670,12 @@ class JuiceBattle(commands.Cog):
             "stun_remaining": 0,
             "dodge_offset": 0,
             "hellfire_offset": 0,
+            "bleed_stacks": 0,
+            "attack_offset_multiplier": 1,
+            "attack_offset_blessing_remaining": 0,
+            "def_offset_multiplier": 1,
+            "def_offset_blessing_remaining": 0,
+            "intimidation_remaining": 0,
         }
 
     def character_ability(self, character_id: str) -> dict | None:
@@ -1570,19 +1694,31 @@ class JuiceBattle(commands.Cog):
                 return ability
         return abilities[0] if abilities else None
 
-    def apply_poison(self, target: dict):
+    def apply_poison(self, target: dict) -> bool:
         """
         對目標施加中毒：首次為基準持續／每跳傷害；已有中毒則回合疊加且每跳傷害 +1。
 
         Args:
             target (dict): "{'poison_remaining': 0, 'poison_damage': 0}"
+
+        Returns:
+            applied (bool): "是否成功施加中毒；具備中毒免疫時為 False"
         """
+        target_abilities = target.get("abilities")
+        if not isinstance(target_abilities, list):
+            target_abilities = self.normalize_abilities(target.get("ability"))
+        if any(
+            isinstance(ability, dict) and ability.get("id") == "poison_immunity"
+            for ability in target_abilities
+        ):
+            return False
         if int(target.get("poison_remaining", 0)) > 0:
             target["poison_remaining"] = int(target["poison_remaining"]) + self.poison_duration
             target["poison_damage"] = int(target.get("poison_damage", self.poison_base_damage)) + 1
-            return
+            return True
         target["poison_remaining"] = self.poison_duration
         target["poison_damage"] = self.poison_base_damage
+        return True
 
     def skill_is_ready(self, fighter: dict, phase: str) -> bool:
         """
@@ -1734,19 +1870,20 @@ class JuiceBattle(commands.Cog):
             is_bot=True,
         )
 
-    def roll_stat(self, base: int, offset: int) -> tuple[int, int]:
+    def roll_stat(self, base: int, offset: int, *, offset_multiplier: int = 1) -> tuple[int, int]:
         """
         擲 1d6 並加上基礎值與偏移。
 
         Args:
             base (int): "3"
             offset (int): "2"
+            offset_multiplier (int): "偏移倍率，例如伊邪那岐祝福為 2"
 
         Returns:
             result (tuple[int, int]): "(dice, total) 例如 (3, 8)"
         """
         dice = random.randint(1, 6)
-        return dice, dice + base + offset
+        return dice, dice + base + (offset * offset_multiplier)
 
     def multi_attack_plan(self, attacker: dict, ability_ids: set) -> list[dict]:
         """
@@ -1780,15 +1917,22 @@ class JuiceBattle(commands.Cog):
         Returns:
             result (tuple[int, int, str]): "(dice, total, label) 例如 (5, 13, '閃避骰')"
         """
+        attack_offset_multiplier = int(attacker.get("attack_offset_multiplier", 1))
         if use_dodge_roll:
             dice, total, _text = self.tower_roll(
                 attacker,
                 attacker["agi"],
                 attacker.get("agi_offset", 0),
+                offset_multiplier=attack_offset_multiplier,
             )
             return dice, total, "閃避骰"
         base, offset = self.attack_roll_stats(attacker)
-        dice, total, _text = self.tower_roll(attacker, base, offset)
+        dice, total, _text = self.tower_roll(
+            attacker,
+            base,
+            offset,
+            offset_multiplier=attack_offset_multiplier,
+        )
         return dice, total, "攻擊"
 
     async def load_user(self, userid: str) -> dict:
@@ -2292,8 +2436,22 @@ class JuiceBattle(commands.Cog):
                     status_parts.append(f"中毒({poison_damage}) {fighter['poison_remaining']}")
             if int(fighter.get("blood_feast_stacks", 0)) > 0:
                 status_parts.append(f"血宴 {fighter['blood_feast_stacks']}")
+            if int(fighter.get("bleed_stacks", 0)) > 0:
+                status_parts.append(f"流血 {fighter['bleed_stacks']}")
             if fighter.get("stun_remaining", 0) > 0:
                 status_parts.append("暈眩")
+            if int(fighter.get("attack_offset_blessing_remaining", 0)) > 0:
+                status_parts.append(
+                    f"攻擊偏移×{int(fighter.get('attack_offset_multiplier', 1))}"
+                    f"（{fighter['attack_offset_blessing_remaining']}回合）"
+                )
+            if int(fighter.get("def_offset_blessing_remaining", 0)) > 0:
+                status_parts.append(
+                    f"防禦偏移×{int(fighter.get('def_offset_multiplier', 1))}"
+                    f"（{fighter['def_offset_blessing_remaining']}回合）"
+                )
+            if int(fighter.get("intimidation_remaining", 0)) > 0:
+                status_parts.append(f"震懾（{fighter['intimidation_remaining']}回合）")
             if fighter.get("berserk_triggered"):
                 status_parts.append("暴走")
             if int(fighter.get("dodge_offset", 0)) != 0:
@@ -2848,6 +3006,7 @@ class JuiceBattle(commands.Cog):
         )
         view.pending_attack_dice = str(battle.get("pending_attack_dice") or "")
         view.pending_bind = bool(battle.get("pending_bind", False))
+        view.pending_monster_extra_attacks = int(battle.get("pending_monster_extra_attacks", 0))
         view.last_attack_damage = int(battle.get("last_attack_damage", 0))
         view.log_text = str(battle.get("log_text") or "")
         if view.monster_turn_id not in view.turn_order:
@@ -3226,7 +3385,9 @@ class JuiceBattle(commands.Cog):
         """
         monster = progress.get("monster") or {}
         floor = int(progress.get("floor", self.tower_floor_min))
-        ability = monster.get("ability") if isinstance(monster.get("ability"), dict) else None
+        abilities = monster.get("abilities")
+        if not isinstance(abilities, list):
+            abilities = self.normalize_abilities(monster.get("ability"))
         description = f"目前第 **{floor} 層**，遇到 **{monster.get('name', '未知怪物')}**。"
         if floor == self.tower_floor_min:
             description += "\n這是第一層，不能逃跑。"
@@ -3243,10 +3404,14 @@ class JuiceBattle(commands.Cog):
             ),
             inline=False,
         )
-        if ability:
+        if abilities:
             embed.add_field(
-                name=f"技能：{ability.get('name', '被動')}",
-                value=str(ability.get("description") or "—"),
+                name="技能",
+                value="\n".join(
+                    f"**{ability.get('name', '被動')}**：{ability.get('description') or '—'}"
+                    for ability in abilities
+                    if isinstance(ability, dict)
+                ),
                 inline=False,
             )
         pending_equipment = progress.get("pending_equipment") or []
@@ -3427,6 +3592,36 @@ class JuiceBattle(commands.Cog):
             jade_name = house.status_labels[house.status_jade_bracelet] if house is not None else "玉手鐲"
             embed.add_field(name=jade_name, value="\n".join(jade_lines), inline=False)
 
+    def tower_failure_embed(self, progress: dict, reason: str) -> Embed:
+        """
+        建立爬塔失敗回覆 embed，顯示失敗樓層與參戰隊伍。
+
+        Args:
+            progress (dict): "失敗時的爬塔進度快照"
+            reason (str): "顯示給玩家的失敗原因"
+
+        Returns:
+            embed (Embed): "爬塔失敗回覆"
+        """
+        floor = int(progress.get("floor", self.tower_floor_min))
+        party_names = self.tower_party_names(progress)
+        embed = Embed(
+            title="Juice Battle｜爬塔失敗",
+            description=f"{reason}\n本次爬塔的蛋糕、裝備與進度全部消失。",
+            color=common.bot_error_color,
+        )
+        embed.add_field(
+            name="失敗樓層",
+            value=f"第 **{floor}** 層",
+            inline=False,
+        )
+        embed.add_field(
+            name="參戰隊伍",
+            value="、".join(party_names) if party_names else "未知隊伍",
+            inline=False,
+        )
+        return embed
+
     async def tower_finish_defeat(self, view: "JuiceBattleTowerView", reason: str):
         """
         清除全員死亡的爬塔進度。
@@ -3446,11 +3641,7 @@ class JuiceBattle(commands.Cog):
         if view.message is not None:
             try:
                 await view.message.edit(
-                    embed=Embed(
-                        title="Juice Battle｜爬塔失敗",
-                        description=f"{reason}\n本次爬塔的蛋糕、裝備與進度全部消失。",
-                        color=common.bot_error_color,
-                    ),
+                    embed=self.tower_failure_embed(view.progress, reason),
                     view=None,
                 )
             except Exception:
@@ -4860,6 +5051,13 @@ class JuiceBattleView(discord.ui.View):
         attacker = self.fighter_by_id(self.attacker_id)
         self.cog.tower_prepare_skill_cooldowns(attacker, "attack")
         self.cog.tower_clear_skill_armed(attacker)
+        # 攻擊偏移祝福回合遞減
+        attack_blessing_remaining = int(attacker.get("attack_offset_blessing_remaining", 0))
+        if attack_blessing_remaining > 0:
+            attack_blessing_remaining -= 1
+            attacker["attack_offset_blessing_remaining"] = attack_blessing_remaining
+            if attack_blessing_remaining <= 0:
+                attacker["attack_offset_multiplier"] = 1
 
         # 中毒：攻擊階段開始時跳傷；翠毒披肩改為回復
         if int(attacker.get("poison_remaining", 0)) > 0:
@@ -4893,6 +5091,13 @@ class JuiceBattleView(discord.ui.View):
         defender = self.fighter_by_id(self.defender_id)
         self.cog.tower_prepare_skill_cooldowns(defender, "defend")
         self.cog.tower_clear_skill_armed(defender)
+        # 防禦偏移祝福回合遞減
+        def_blessing_remaining = int(defender.get("def_offset_blessing_remaining", 0))
+        if def_blessing_remaining > 0:
+            def_blessing_remaining -= 1
+            defender["def_offset_blessing_remaining"] = def_blessing_remaining
+            if def_blessing_remaining <= 0:
+                defender["def_offset_multiplier"] = 1
 
     def apply_incoming_damage(self, target: dict, damage: int, *, count_damage: bool = True, absorbable: bool = True) -> int:
         """
@@ -4938,7 +5143,7 @@ class JuiceBattleView(discord.ui.View):
             if attacker.get("is_bot"):
                 return
             self.add_item(JuiceBattleAttackButton())
-            for source in ("character", "weapon"):
+            for source in ("character", "weapon", "armor"):
                 for ability in self.cog.fighter_abilities(attacker, source):
                     button = self.build_skill_button(attacker, source, ability, "attack")
                     if button is not None:
@@ -5248,6 +5453,11 @@ class JuiceBattleView(discord.ui.View):
                 self.cog.tower_add_hp(attacker, 3)
                 gained = int(attacker.get("hp", 0)) - before_hp
                 skill_note = f"{skill_note}（聖光 +{gained} HP）" if skill_note else f"（聖光 +{gained} HP）"
+            if "izanagi_blessing" in ability_ids:
+                attacker["attack_offset_multiplier"] = self.cog.offset_blessing_multiplier
+                attacker["attack_offset_blessing_remaining"] = self.cog.izanagi_blessing_duration
+            if "intimidation" in ability_ids:
+                defender["intimidation_remaining"] = self.cog.intimidation_duration
             # 星爆／絕地反擊段數與爬塔共用 multi_attack_plan；第一段當場打，其餘排隊
             attack_plan = self.cog.multi_attack_plan(attacker, ability_ids)
             self.pending_extra_attacks = list(attack_plan[1:])
@@ -5257,6 +5467,14 @@ class JuiceBattleView(discord.ui.View):
         use_dodge_roll = self.attack_uses_dodge_roll
         self.attack_uses_dodge_roll = False
         _dice, total, attack_label = self.cog.roll_attack(attacker, use_dodge_roll=use_dodge_roll)
+        # 震懾：僅普通攻擊（未發動攻擊階段技能、非連擊後續段）減半最終攻擊值
+        if (
+            not is_followup
+            and int(attacker.get("intimidation_remaining", 0)) > 0
+            and not any(ability.get("phase") == "attack" for ability in abilities)
+        ):
+            total = total // 2
+            skill_note = f"{skill_note}（震懾減半）" if skill_note else "（震懾減半）"
         # 毒性蔓延：最終攻擊值加上中毒剩餘回合，並延長 1 回合（加成已併入 total，log 不另標）
         if self.cog.fighter_has_ability(attacker, "toxic_spread") and int(defender.get("poison_remaining", 0)) > 0:
             poison_bonus = int(defender["poison_remaining"])
@@ -5398,9 +5616,17 @@ class JuiceBattleView(discord.ui.View):
 
         # 計算傷害（攻擊行已由 execute_attack 寫入；此處只 append 防守結果，避免星爆連擊被覆寫成單筆）
         defense_total = 0
+        if "izanami_blessing" in ability_ids:
+            defender["def_offset_multiplier"] = self.cog.offset_blessing_multiplier
+            defender["def_offset_blessing_remaining"] = self.cog.izanagi_blessing_duration
         if mode == "defend":
             def_base, def_offset = self.cog.defense_roll_stats(defender, stance_swap_defend=stance_swap_defend)
-            _dice, defense_total = self.cog.roll_stat(def_base, def_offset)
+            def_offset_multiplier = int(defender.get("def_offset_multiplier", 1))
+            _dice, defense_total = self.cog.roll_stat(
+                def_base,
+                def_offset,
+                offset_multiplier=def_offset_multiplier,
+            )
             if "life_conversion" in ability_ids:
                 damage = attack_total
             else:
@@ -5409,6 +5635,9 @@ class JuiceBattleView(discord.ui.View):
             if "shield_counter" in ability_ids and defense_total == attack_total:
                 attacker["stun_remaining"] = 1
                 outcome_line += "，盾反成功"
+            if "copper_wall" in ability_ids and defense_total > attack_total:
+                attacker["stun_remaining"] = 1
+                outcome_line += "，銅牆鐵壁成功"
         else:
             dodge_offset = int(defender.get("agi_offset", 0)) + int(defender.get("dodge_offset", 0))
             _dice, dodge_total = self.cog.roll_stat(defender["agi"], dodge_offset)
@@ -5418,6 +5647,12 @@ class JuiceBattleView(discord.ui.View):
             else:
                 damage = 0
                 outcome_line = f"{defender['display_name']} 閃避 **{dodge_total}**{skill_note}，成功，無傷！"
+                if self.cog.fighter_has_ability(defender, "agile_position"):
+                    before_hp = int(defender.get("hp", 0))
+                    self.cog.tower_add_hp(defender, 1)
+                    gained = int(defender.get("hp", 0)) - before_hp
+                    if gained > 0:
+                        outcome_line += f"，靈活身位 +{gained} HP"
 
         # 冰箱：致死傷害改為回復
         actual_damage = 0
@@ -5485,6 +5720,31 @@ class JuiceBattleView(discord.ui.View):
             self.cog.apply_poison(defender)
             self.append_log(f"{defender['display_name']} 中毒")
             self.pending_poison = False
+        # 出血：攻擊命中疊流血，三層血爆（不經防禦減傷）
+        if actual_damage > 0 and self.cog.fighter_has_ability(attacker, "bleed"):
+            defender["bleed_stacks"] = int(defender.get("bleed_stacks", 0)) + 1
+            if int(defender["bleed_stacks"]) >= self.cog.bleed_trigger_stacks:
+                bleed_actual = self.apply_incoming_damage(
+                    defender,
+                    self.cog.blood_explosion_damage,
+                    absorbable=False,
+                )
+                defender["bleed_stacks"] = 0
+                self.append_log(f"血爆造成 **{bleed_actual}** 點傷害")
+                if defender["hp"] <= 0:
+                    await self.finish_battle(
+                        winner=attacker,
+                        reason="血爆擊倒對手。",
+                        interaction=interaction if respond else None,
+                    )
+                    return
+                if attacker["hp"] <= 0:
+                    await self.finish_battle(
+                        winner=defender,
+                        reason="對手生命歸零。",
+                        interaction=interaction if respond else None,
+                    )
+                    return
 
         # 黏液：連擊期間維持，整段攻擊結束後清除
         if not self.pending_extra_attacks:
@@ -5517,6 +5777,10 @@ class JuiceBattleView(discord.ui.View):
                 new_view = await self.replace_with_fresh_view(None)
                 await new_view.execute_attack(None)
             return
+
+        # 震懾：受影響者完成一次攻擊回合後遞減
+        if int(attacker.get("intimidation_remaining", 0)) > 0:
+            attacker["intimidation_remaining"] = max(0, int(attacker["intimidation_remaining"]) - 1)
 
         # 攻守互換並準備下一攻擊階段
         self.attacker_id, self.defender_id = self.defender_id, self.attacker_id
@@ -5601,8 +5865,8 @@ class JuiceBattleView(discord.ui.View):
                     )
                     return
 
-        # 自動發動攻擊階段可用技能（角色／武器；祭血術已立即結算，不進 armed）
-        for source in ("character", "weapon"):
+        # 自動發動攻擊階段可用技能（角色／武器／防具；祭血術已立即結算，不進 armed）
+        for source in ("character", "weapon", "armor"):
             for ability in self.cog.fighter_abilities(attacker, source):
                 ability_id = str(ability.get("id") or "")
                 if not ability_id or ability.get("phase") != "attack":
@@ -6372,6 +6636,7 @@ class JuiceBattleTowerView(discord.ui.View):
         self.pending_attack_total: int | None = None
         self.pending_attack_dice = ""
         self.pending_bind = False
+        self.pending_monster_extra_attacks = 0
         self.last_attack_damage = 0
         self.log_text = ""
         self.finished = False
@@ -6446,6 +6711,7 @@ class JuiceBattleTowerView(discord.ui.View):
             "pending_attack_total": self.pending_attack_total,
             "pending_attack_dice": self.pending_attack_dice,
             "pending_bind": self.pending_bind,
+            "pending_monster_extra_attacks": self.pending_monster_extra_attacks,
             "last_attack_damage": self.last_attack_damage,
             "log_text": self.log_text,
         }
@@ -6469,10 +6735,16 @@ class JuiceBattleTowerView(discord.ui.View):
             description=f"第 **{self.round_number}** 回合",
             color=common.bot_color,
         )
-        monster_ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else None
+        monster_abilities = self.monster.get("abilities")
+        if not isinstance(monster_abilities, list):
+            monster_abilities = self.cog.normalize_abilities(self.monster.get("ability"))
         monster_status = []
+        if int(self.monster.get("bleed_stacks", 0)) > 0:
+            monster_status.append(f"流血 {self.monster['bleed_stacks']}")
         if self.monster.get("stun_remaining", 0) > 0:
             monster_status.append("暈眩")
+        if int(self.monster.get("intimidation_remaining", 0)) > 0:
+            monster_status.append(f"震懾（{self.monster['intimidation_remaining']}回合）")
         if self.monster.get("hellfire_offset", 0) > 0:
             monster_status.append(f"業火攻擊偏移 +{self.monster['hellfire_offset']}")
         if self.monster.get("poison_remaining", 0) > 0:
@@ -6495,15 +6767,35 @@ class JuiceBattleTowerView(discord.ui.View):
             f"防禦 {self.monster['defense']}｜"
             f"敏捷 {self.monster['agi']}({monster_dodge_offset:+d})"
         )
-        if monster_ability:
-            monster_text += f"\n技能：{monster_ability.get('name', '被動')}"
+        if monster_abilities:
+            ability_names = "／".join(
+                str(ability.get("name") or "被動")
+                for ability in monster_abilities
+                if isinstance(ability, dict)
+            )
+            if ability_names:
+                monster_text += f"\n技能：{ability_names}"
         if monster_status:
             monster_text += f"\n狀態：{'／'.join(monster_status)}"
         embed.add_field(name=f"怪物｜{self.monster['name']}", value=monster_text, inline=False)
         for fighter in self.fighters:
             status = []
+            if int(fighter.get("bleed_stacks", 0)) > 0:
+                status.append(f"流血 {fighter['bleed_stacks']}")
             if fighter.get("stun_remaining", 0) > 0:
                 status.append("暈眩")
+            if int(fighter.get("attack_offset_blessing_remaining", 0)) > 0:
+                status.append(
+                    f"攻擊偏移×{int(fighter.get('attack_offset_multiplier', 1))}"
+                    f"（{fighter['attack_offset_blessing_remaining']}回合）"
+                )
+            if int(fighter.get("def_offset_blessing_remaining", 0)) > 0:
+                status.append(
+                    f"防禦偏移×{int(fighter.get('def_offset_multiplier', 1))}"
+                    f"（{fighter['def_offset_blessing_remaining']}回合）"
+                )
+            if int(fighter.get("intimidation_remaining", 0)) > 0:
+                status.append(f"震懾（{fighter['intimidation_remaining']}回合）")
             if fighter.get("poison_remaining", 0) > 0:
                 if self.cog.fighter_has_ability(fighter, "toxic_revival"):
                     status.append(f"毒性回生 {fighter['poison_remaining']}")
@@ -6602,7 +6894,7 @@ class JuiceBattleTowerView(discord.ui.View):
             if actor is None:
                 return
             self.add_item(JuiceBattleTowerAttackButton())
-            for source in ("character", "weapon"):
+            for source in ("character", "weapon", "armor"):
                 for ability in self.cog.fighter_abilities(actor, source):
                     button = self.build_skill_button(actor, source, ability, "attack")
                     if button is not None:
@@ -6794,6 +7086,13 @@ class JuiceBattleTowerView(discord.ui.View):
         self.cog.tower_prepare_skill_cooldowns(fighter, "attack")
         self.cog.tower_clear_skill_armed(fighter)
         fighter["dodge_offset"] = 0
+        # 攻擊偏移祝福回合遞減
+        attack_blessing_remaining = int(fighter.get("attack_offset_blessing_remaining", 0))
+        if attack_blessing_remaining > 0:
+            attack_blessing_remaining -= 1
+            fighter["attack_offset_blessing_remaining"] = attack_blessing_remaining
+            if attack_blessing_remaining <= 0:
+                fighter["attack_offset_multiplier"] = 1
         # 中毒跳傷；翠毒披肩改為毒性回生
         if int(fighter.get("poison_remaining", 0)) > 0:
             if self.cog.fighter_has_ability(fighter, "toxic_revival"):
@@ -6851,26 +7150,107 @@ class JuiceBattleTowerView(discord.ui.View):
                     target["attack_offset"] = 0
         return actual_damage
 
-    def monster_skill_ready(self, phase: str) -> bool:
+    def monster_abilities(self) -> list[dict]:
         """
-        判斷目前怪物技能是否能在指定階段使用。
+        取得怪物的全部技能，並相容只有單一 ability 的舊資料。
+
+        Returns:
+            abilities (list[dict]): "怪物技能定義清單"
+        """
+        abilities = self.monster.get("abilities")
+        if isinstance(abilities, list):
+            return [ability for ability in abilities if isinstance(ability, dict)]
+        ability = self.monster.get("ability")
+        return [ability] if isinstance(ability, dict) else []
+
+    def monster_ability(self, ability_id: str) -> dict | None:
+        """
+        依技能 ID 取得怪物技能。
+
+        Args:
+            ability_id (str): "rapid_fire"
+
+        Returns:
+            ability (dict | None): "技能定義；找不到時為 None"
+        """
+        for ability in self.monster_abilities():
+            if ability.get("id") == ability_id:
+                return ability
+        return None
+
+    def monster_skill_cooldown(self, ability_id: str) -> int:
+        """
+        取得怪物指定技能的剩餘 CD，並相容舊的單一 skill_cd 欄位。
+
+        Args:
+            ability_id (str): "rapid_fire"
+
+        Returns:
+            cd_left (int): "剩餘回合數"
+        """
+        skill_cds = self.monster.get("skill_cds")
+        if isinstance(skill_cds, dict) and ability_id in skill_cds:
+            return max(0, int(skill_cds.get(ability_id, 0)))
+        primary_ability = self.monster.get("ability")
+        if isinstance(primary_ability, dict) and primary_ability.get("id") == ability_id:
+            return max(0, int(self.monster.get("skill_cd", 0)))
+        return 0
+
+    def monster_skill_ready(self, phase: str, ability_id: str | None = None) -> bool:
+        """
+        判斷怪物指定階段技能是否能使用。
 
         Args:
             phase (str): "attack 或 defend"
+            ability_id (str | None): "rapid_fire；省略時使用該階段第一個 CD 技能"
 
         Returns:
             ready (bool): "是否可使用"
         """
-        ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
-        return ability.get("phase") == phase and int(self.monster.get("skill_cd", 0)) <= 0
+        ability = self.monster_ability(ability_id) if ability_id else None
+        if ability is None:
+            for candidate in self.monster_abilities():
+                if candidate.get("phase") == phase and candidate.get("cd") is not None:
+                    ability = candidate
+                    break
+        if ability is None or ability.get("phase") != phase or ability.get("cd") is None:
+            return False
+        return self.monster_skill_cooldown(str(ability.get("id") or "")) <= 0
 
-    def monster_consume_skill(self):
+    def monster_consume_skill(self, ability_id: str | None = None):
         """
-        消耗目前怪物的 CD 技能。
+        消耗怪物指定的 CD 技能。
+
+        Args:
+            ability_id (str | None): "rapid_fire；省略時使用舊的主要技能"
         """
-        ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
-        if ability.get("cd") is not None:
-            self.monster["skill_cd"] = int(ability["cd"])
+        if ability_id:
+            ability = self.monster_ability(ability_id)
+        else:
+            ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else None
+        if ability is None or ability.get("cd") is None or not ability.get("id"):
+            return
+        skill_cds = self.monster.get("skill_cds")
+        if not isinstance(skill_cds, dict):
+            skill_cds = {}
+            self.monster["skill_cds"] = skill_cds
+        skill_cds[str(ability["id"])] = int(ability["cd"])
+        self.monster["skill_cd"] = int(ability["cd"])
+
+    def prepare_monster_skill_cooldowns(self):
+        """
+        在怪物回合開始時遞減所有 CD 技能。
+        """
+        skill_cds = self.monster.get("skill_cds")
+        if not isinstance(skill_cds, dict):
+            skill_cds = {}
+            self.monster["skill_cds"] = skill_cds
+        if skill_cds:
+            for ability_id, cd_left in list(skill_cds.items()):
+                skill_cds[ability_id] = max(0, int(cd_left) - 1)
+            self.monster["skill_cd"] = min(skill_cds.values(), default=0)
+        elif int(self.monster.get("skill_cd", 0)) > 0:
+            self.monster["skill_cd"] = int(self.monster["skill_cd"]) - 1
 
     def choose_monster_defense(self, attack_total: int, bound: bool) -> str:
         """
@@ -6883,19 +7263,17 @@ class JuiceBattleTowerView(discord.ui.View):
         Returns:
             mode (str): "defend、dodge 或 stunned"
         """
-        ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
         if self.monster.get("stun_remaining", 0) > 0:
             return "stunned"
         if bound:
             return "defend"
         # 大跑就緒且閃避 > 0 時強制閃避（閃避為 0 不發動）
         if (
-            self.monster_skill_ready("defend")
-            and ability.get("id") == "sprint"
+            self.monster_skill_ready("defend", "sprint")
             and int(self.monster.get("agi", 0)) != 0
         ):
             self.monster["sprint_armed"] = True
-            self.monster_consume_skill()
+            self.monster_consume_skill("sprint")
             return "dodge"
         if int(self.monster.get("hp", 0)) == 1:
             return "dodge"
@@ -6959,10 +7337,9 @@ class JuiceBattleTowerView(discord.ui.View):
                 0,
             )
             damage = max(1, attack_total - defense_total)
-            ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
             hardening_text = ""
-            if ability.get("id") == "hardened_shell" and self.monster_skill_ready("defend"):
-                self.monster_consume_skill()
+            if self.monster_skill_ready("defend", "hardened_shell"):
+                self.monster_consume_skill("hardened_shell")
                 if damage <= 3:
                     damage = 0
                     hardening_text = "，硬化甲殼使傷害無效"
@@ -7134,6 +7511,14 @@ class JuiceBattleTowerView(discord.ui.View):
                 gained = int(fighter.get("hp", 0)) - before_hp
                 heal_parts.append(f"{fighter['display_name']} +{gained}")
             results.append(f"聖光發動，存活隊員回復：**{'／'.join(heal_parts)}**")
+        if "izanagi_blessing" in ability_ids:
+            for fighter in self.living_fighters():
+                fighter["attack_offset_multiplier"] = self.cog.offset_blessing_multiplier
+                fighter["attack_offset_blessing_remaining"] = self.cog.izanagi_blessing_duration
+            results.append("伊邪那岐的祝福發動，我方攻擊偏移量倍增")
+        if "intimidation" in ability_ids:
+            self.monster["intimidation_remaining"] = self.cog.intimidation_duration
+            results.append(f"{self.monster['name']} 受到震懾")
         # 星爆／絕地反擊段數與挑戰戰共用 multi_attack_plan
         attack_plan = self.cog.multi_attack_plan(attacker, ability_ids)
         for attack_index, plan_entry in enumerate(attack_plan):
@@ -7155,12 +7540,23 @@ class JuiceBattleTowerView(discord.ui.View):
                 else:
                     results.append(f"斷罪造成 **{condemn_actual}** 點傷害")
                 condemn_damage = None
+            if self.last_attack_damage > 0 and self.cog.fighter_has_ability(attacker, "bleed"):
+                self.monster["bleed_stacks"] = int(self.monster.get("bleed_stacks", 0)) + 1
+                if int(self.monster["bleed_stacks"]) >= self.cog.bleed_trigger_stacks:
+                    bleed_actual = self.apply_damage(
+                        self.monster,
+                        self.cog.blood_explosion_damage,
+                        absorbable=False,
+                    )
+                    self.monster["bleed_stacks"] = 0
+                    results.append(f"血爆造成 **{bleed_actual}** 點傷害")
             if self.monster["hp"] <= 0:
                 break
             if attacker.get("pending_poison") and self.last_attack_damage > 0:
-                if self.monster.get("id") != "poison_bubble_bug":
-                    self.cog.apply_poison(self.monster)
+                if self.cog.apply_poison(self.monster):
                     results.append(f"{self.monster['name']} 中毒")
+                else:
+                    results.append(f"{self.monster['name']} 中毒免疫")
                 attacker["pending_poison"] = False
         attacker["pending_poison"] = False
         self.log_text = "\n".join(results)
@@ -7171,6 +7567,43 @@ class JuiceBattleTowerView(discord.ui.View):
             return
         # 不在此清空按鈕，交給 enter_next_player 刷新下一動作者介面
         await self.enter_next_player()
+
+    def prepare_monster_attack(self, target: dict, *, skill_note: str = "", prepare_defense: bool = True):
+        """
+        建立一次怪物攻擊，並切換到指定玩家的防守階段。
+
+        Args:
+            target (dict): "本次被攻擊的玩家"
+            skill_note (str): "本次攻擊發動的技能名稱"
+            prepare_defense (bool): "是否遞減並清除玩家防守技能狀態"
+        """
+        _attack_dice, attack_total, attack_dice_text = self.cog.tower_roll(
+            self.monster,
+            self.monster["atk"],
+            self.monster.get("attack_offset", 0),
+        )
+        # 震懾：怪物普通攻擊（本段無攻擊技能）最終攻擊值減半
+        if int(self.monster.get("intimidation_remaining", 0)) > 0 and not skill_note:
+            attack_total = attack_total // 2
+        self.pending_target_id = target["user_id"]
+        self.pending_attack_total = attack_total
+        self.pending_attack_dice = attack_dice_text
+        self.phase = "player_defend"
+        if prepare_defense:
+            self.cog.tower_prepare_skill_cooldowns(target, "defend")
+            self.cog.tower_clear_skill_armed(target)
+            # 防禦偏移祝福回合遞減
+            def_blessing_remaining = int(target.get("def_offset_blessing_remaining", 0))
+            if def_blessing_remaining > 0:
+                def_blessing_remaining -= 1
+                target["def_offset_blessing_remaining"] = def_blessing_remaining
+                if def_blessing_remaining <= 0:
+                    target["def_offset_multiplier"] = 1
+        if self.monster.get("id") == "hell_wraith":
+            self.monster["hellfire_offset"] = int(self.monster.get("hellfire_offset", 0)) + 1
+            self.monster["attack_offset"] = self.monster["hellfire_offset"]
+        skill_text = f"（發動 {skill_note}）" if skill_note else ""
+        self.append_log(f"{self.monster['name']} 攻擊 **{attack_total}**{skill_text}")
 
     async def run_monster_turn(self):
         """
@@ -7195,31 +7628,25 @@ class JuiceBattleTowerView(discord.ui.View):
         if self.monster.get("id") == "mushroom":
             self.cog.tower_add_hp(self.monster, 1)
             self.append_log("蘑菇的增殖發動，怪物回復 **1 HP**。")
-        if int(self.monster.get("skill_cd", 0)) > 0:
-            self.monster["skill_cd"] = int(self.monster["skill_cd"]) - 1
+        self.prepare_monster_skill_cooldowns()
         target = random.choice(living)
-        self.pending_target_id = target["user_id"]
-        ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
         self.pending_bind = False
-        if ability.get("id") == "bind" and self.monster_skill_ready("attack"):
-            self.monster_consume_skill()
+        self.pending_monster_extra_attacks = 0
+        attack_skill_names = []
+        bind_ability = self.monster_ability("bind")
+        if bind_ability is not None and self.monster_skill_ready("attack", "bind"):
+            self.monster_consume_skill("bind")
             self.pending_bind = True
-        _attack_dice, attack_total, attack_dice_text = self.cog.tower_roll(
-            self.monster,
-            self.monster["atk"],
-            self.monster.get("attack_offset", 0),
+            attack_skill_names.append(bind_ability["name"])
+        rapid_fire_ability = self.monster_ability("rapid_fire")
+        if rapid_fire_ability is not None and self.monster_skill_ready("attack", "rapid_fire"):
+            self.monster_consume_skill("rapid_fire")
+            self.pending_monster_extra_attacks = 1
+            attack_skill_names.append(rapid_fire_ability["name"])
+        self.prepare_monster_attack(
+            target,
+            skill_note="、".join(attack_skill_names),
         )
-        self.pending_attack_total = attack_total
-        self.pending_attack_dice = attack_dice_text
-        self.phase = "player_defend"
-        # 對齊挑戰玩家：進入防守階段時防守技能 CD-1
-        self.cog.tower_prepare_skill_cooldowns(target, "defend")
-        self.cog.tower_clear_skill_armed(target)
-        if self.monster.get("id") == "hell_wraith":
-            self.monster["hellfire_offset"] = int(self.monster.get("hellfire_offset", 0)) + 1
-            self.monster["attack_offset"] = self.monster["hellfire_offset"]
-        skill_note = f"（發動 {ability['name']}）" if self.pending_bind else ""
-        self.append_log(f"{self.monster['name']} 攻擊 **{attack_total}**{skill_note}")
         self.rebuild_buttons()
         if self.message is not None:
             await self.message.edit(embed=self.build_embed(), view=self)
@@ -7251,8 +7678,12 @@ class JuiceBattleTowerView(discord.ui.View):
             defender_skill_note = f"（發動 {names}）"
         else:
             defender_skill_note = ""
-        monster_ability = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
-        monster_skill_note = f"（發動 {monster_ability['name']}）" if self.pending_bind else ""
+        bind_ability = self.monster_ability("bind")
+        monster_skill_note = (
+            f"（發動 {bind_ability['name']}）"
+            if self.pending_bind and bind_ability is not None
+            else ""
+        )
         log_parts = [f"{self.monster['name']} 攻擊 **{attack_total}**{monster_skill_note}"]
         defense_dice = 0
         defense_total = 0
@@ -7268,20 +7699,34 @@ class JuiceBattleTowerView(discord.ui.View):
                     f"{defender['display_name']} 閃避 **{dodge_total}**{defender_skill_note}，失敗"
                 )
             else:
-                log_parts.append(
+                dodge_success_line = (
                     f"{defender['display_name']} 閃避 **{dodge_total}**{defender_skill_note}，成功，無傷"
                 )
+                if self.cog.fighter_has_ability(defender, "agile_position"):
+                    before_hp = int(defender.get("hp", 0))
+                    self.cog.tower_add_hp(defender, 1)
+                    gained = int(defender.get("hp", 0)) - before_hp
+                    if gained > 0:
+                        dodge_success_line += f"，靈活身位 +{gained} HP"
+                log_parts.append(dodge_success_line)
         else:
+            if "izanami_blessing" in ability_ids:
+                for fighter in self.living_fighters():
+                    fighter["def_offset_multiplier"] = self.cog.offset_blessing_multiplier
+                    fighter["def_offset_blessing_remaining"] = self.cog.izanagi_blessing_duration
+                log_parts.append("伊邪那美的祝福發動，我方防禦偏移量倍增")
             stance_swap = "stance_swap" in ability_ids
             # 架式只對調角色數值，防禦偏移維持原欄位
             defense_base, defense_offset = self.cog.defense_roll_stats(
                 defender,
                 stance_swap_defend=stance_swap,
             )
+            def_offset_multiplier = int(defender.get("def_offset_multiplier", 1))
             defense_dice, defense_total, _defense_text = self.cog.tower_roll(
                 defender,
                 defense_base,
                 defense_offset,
+                offset_multiplier=def_offset_multiplier,
             )
             if "life_conversion" in ability_ids:
                 damage = attack_total
@@ -7291,10 +7736,12 @@ class JuiceBattleTowerView(discord.ui.View):
             if "shield_counter" in ability_ids and defense_total == attack_total:
                 self.monster["stun_remaining"] = 1
                 log_parts.append("盾反成功，怪物暈眩一回合")
+            if "copper_wall" in ability_ids and defense_total > attack_total:
+                self.monster["stun_remaining"] = 1
+                log_parts.append("銅牆鐵壁成功，怪物暈眩一回合")
             if stance_swap:
                 defender["stance_swap_attack"] = True
-        trap = self.monster.get("ability") if isinstance(self.monster.get("ability"), dict) else {}
-        trap_triggered = trap.get("id") == "trap" and defense_dice == 1
+        trap_triggered = self.monster_ability("trap") is not None and defense_dice == 1
         if trap_triggered:
             damage = attack_total
             defender["stun_remaining"] = 1
@@ -7333,10 +7780,12 @@ class JuiceBattleTowerView(discord.ui.View):
         ):
             defender["dodge_offset"] = -1
             log_parts.append(f"{defender['display_name']} 被黏液黏住，閃避偏移 -1")
-        # 部落弓箭手：攻擊成功時賦予中毒（對齊 apply_poison）
-        if monster_ability.get("id") == "poison" and actual_damage > 0:
-            self.cog.apply_poison(defender)
-            log_parts.append(f"{defender['display_name']} 中毒")
+        # 中毒被動：攻擊成功時施加中毒，於對方回合開始扣血 3 回合
+        if self.monster_ability("poison") is not None and actual_damage > 0:
+            if self.cog.apply_poison(defender):
+                log_parts.append(f"{defender['display_name']} 中毒")
+            else:
+                log_parts.append(f"{defender['display_name']} 中毒免疫")
         self.log_text = "\n".join(log_parts)
         self.pending_attack_total = None
         self.pending_attack_dice = ""
@@ -7347,6 +7796,28 @@ class JuiceBattleTowerView(discord.ui.View):
         if self.monster["hp"] <= 0:
             await self.cog.tower_finish_floor(self, self.log_text)
             return
+        # 連發弩：第一次防守結算後，保留同一怪物回合再攻擊一次
+        if self.pending_monster_extra_attacks > 0:
+            self.pending_monster_extra_attacks -= 1
+            living = self.living_fighters()
+            if not living:
+                await self.cog.tower_finish_defeat(self, "所有我方成員都已死亡。")
+                return
+            next_target = defender if defender["hp"] > 0 else random.choice(living)
+            self.pending_bind = False
+            self.prepare_monster_attack(
+                next_target,
+                skill_note="連發弩",
+                prepare_defense=next_target is not defender,
+            )
+            self.rebuild_buttons()
+            await self.save_battle_state()
+            if self.message is not None:
+                await self.message.edit(embed=self.build_embed(), view=self)
+            return
+        # 震懾：怪物完成一次攻擊回合後遞減
+        if int(self.monster.get("intimidation_remaining", 0)) > 0:
+            self.monster["intimidation_remaining"] = max(0, int(self.monster["intimidation_remaining"]) - 1)
         await self.enter_next_player()
         if interaction.response.is_done():
             return
@@ -7406,10 +7877,9 @@ class JuiceBattleTowerView(discord.ui.View):
         try:
             if not show_timeout_embed:
                 await self.message.edit(
-                    embed=Embed(
-                        title="Juice Battle｜爬塔失敗",
-                        description="所有我方成員都已死亡。\n本次爬塔的蛋糕、裝備與進度全部消失。",
-                        color=common.bot_error_color,
+                    embed=self.cog.tower_failure_embed(
+                        self.progress,
+                        "所有我方成員都已死亡。",
                     ),
                     view=None,
                 )
