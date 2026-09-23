@@ -169,7 +169,11 @@ class Startup(commands.Cog):
                     {"_id": userid},
                     {
                         "$setOnInsert": defaults_without_blackjack,
-                        "$set": {"blackjack_playing": False},
+                        "$set": {
+                            "blackjack_playing": False,
+                            "squid_playing": False,
+                            "poker_playing": False,
+                        },
                         "$unset": {"afk_start": ""},
                     },
                     upsert=True,
