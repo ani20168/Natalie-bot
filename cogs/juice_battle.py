@@ -261,7 +261,7 @@ class JuiceBattle(commands.Cog):
                         "name": "斷罪",
                         "phase": "attack",
                         "cd": 1,
-                        "description": "消耗所有血宴狀態，在本次攻擊後，另外造成等同血宴傷害的傷害值。不可防禦或閃避。",
+                        "description": "消耗所有血宴狀態，在本次攻擊後，另外造成等同血宴傷害的傷害值並吸血。不可防禦或閃避。",
                     },
                 ],
             },
@@ -1117,6 +1117,7 @@ class JuiceBattle(commands.Cog):
             "character_stats": {},
             "tower_progress": None,
             "tower_records": [],
+            "tower_unlocked_floor": self.tower_floor_min,
         }
 
     def ensure_juice_battle(self, user_data: dict) -> dict:
@@ -1168,6 +1169,13 @@ class JuiceBattle(commands.Cog):
             tower_progress["battle"] = None
         if not isinstance(juice_battle.get("tower_records"), list):
             juice_battle["tower_records"] = []
+        try:
+            juice_battle["tower_unlocked_floor"] = max(
+                self.tower_floor_min,
+                int(juice_battle.get("tower_unlocked_floor", self.tower_floor_min)),
+            )
+        except (TypeError, ValueError):
+            juice_battle["tower_unlocked_floor"] = self.tower_floor_min
         user_data["juice_battle"] = juice_battle
         return juice_battle
 
@@ -2007,6 +2015,53 @@ class JuiceBattle(commands.Cog):
         if isinstance(view, JuiceBattleTowerFloorView):
             self.schedule_tower_button_unlock(view)
 
+    async def tower_begin_start_selection(
+        self,
+        interaction: discord.Interaction,
+        member_ids: list[str],
+        member_names: dict[str, str],
+        max_unlocked_floor: int,
+        *,
+        edit_message: bool,
+    ):
+        """
+        顯示新一輪爬塔的起始樓層選擇介面。
+
+        Args:
+            interaction (discord.Interaction): "slash 或雙人同意互動"
+            member_ids (list[str]): "爬塔隊伍成員 ID"
+            member_names (dict[str, str]): "隊員顯示名稱"
+            max_unlocked_floor (int): "隊伍可選的最高起始樓層"
+            edit_message (bool): "True 時編輯雙人邀請訊息"
+        """
+        view = JuiceBattleTowerStartView(
+            cog=self,
+            member_ids=member_ids,
+            member_names=member_names,
+            max_unlocked_floor=max_unlocked_floor,
+        )
+        embed = view.build_embed()
+        if edit_message:
+            await interaction.response.edit_message(embed=embed, view=view)
+            message = interaction.message
+        else:
+            await interaction.response.send_message(embed=embed, view=view)
+            message = await interaction.original_response()
+        view.message = message
+        session = {
+            "tower": True,
+            "tower_members": [str(member_id) for member_id in member_ids],
+            "guild_id": str(interaction.guild_id) if interaction.guild_id else "@me",
+            "channel_id": str(message.channel.id),
+            "message_id": str(message.id),
+        }
+        async with self.tower_lock:
+            await self.tower_set_playing(
+                [str(member_id) for member_id in member_ids],
+                session,
+            )
+        self.schedule_tower_button_unlock(view)
+
     def schedule_tower_button_unlock(self, view: discord.ui.View):
         """
         排程解除爬塔按鈕鎖定，避免剛出現就誤觸。
@@ -2552,17 +2607,18 @@ class JuiceBattle(commands.Cog):
             jump_url = message.jump_url
             await self.notify_challenge_dm(opponent, challenger, jump_url, bet=stake)
 
-    def tower_default_progress(self, member_ids: list[str]) -> dict:
+    def tower_default_progress(self, member_ids: list[str], *, start_floor: int | None = None) -> dict:
         """
         建立一份新的爬塔進度。
 
         Args:
             member_ids (list[str]): "隊伍成員 ID，單人時只有一個"
+            start_floor (int | None): "本次爬塔起始樓層，未指定時從第一層開始"
 
         Returns:
             progress (dict): "可寫入玩家資料的爬塔快照"
         """
-        floor = self.tower_floor_min
+        floor = max(self.tower_floor_min, int(start_floor or self.tower_floor_min))
         self.tower_aborted_teams.discard(self.tower_team_key(member_ids))
         return {
             "member_ids": [str(member_id) for member_id in member_ids],
@@ -2639,6 +2695,25 @@ class JuiceBattle(commands.Cog):
                 return copy.deepcopy(progress)
         return None
 
+    async def tower_max_unlocked_floor(self, member_ids: list[str]) -> int:
+        """
+        取得隊伍成員個人跳關解鎖層的最高值。
+
+        Args:
+            member_ids (list[str]): "隊伍成員 ID"
+
+        Returns:
+            max_floor (int): "隊伍可選的最高起始樓層"
+        """
+        max_floor = self.tower_floor_min
+        for member_id in member_ids:
+            user_data = await self.load_user(str(member_id))
+            unlocked_floor = int(
+                user_data["juice_battle"].get("tower_unlocked_floor", self.tower_floor_min)
+            )
+            max_floor = max(max_floor, unlocked_floor)
+        return max_floor
+
     async def tower_find_progress_for_user(self, userid: str) -> dict | None:
         """
         讀取玩家目前的未完成爬塔進度。
@@ -2667,6 +2742,29 @@ class JuiceBattle(commands.Cog):
             user_data = await self.load_user(member_id)
             user_data["juice_battle"]["tower_progress"] = copy.deepcopy(progress)
             await common.mongo_storage.replace_user(member_id, user_data)
+
+    async def tower_unlock_next_floor(self, member_ids: list[str], unlocked_floor: int):
+        """
+        為隊伍成員保存個人最高爬塔跳關樓層。
+
+        Args:
+            member_ids (list[str]): "隊伍成員 ID"
+            unlocked_floor (int): "解鎖的起始樓層"
+        """
+        if self.tower_is_aborted(member_ids):
+            return
+        unlocked_floor = max(self.tower_floor_min, int(unlocked_floor))
+        for member_id in member_ids:
+            user_data = await self.load_user(str(member_id))
+            juice_battle = user_data["juice_battle"]
+            current_floor = max(
+                self.tower_floor_min,
+                int(juice_battle.get("tower_unlocked_floor", self.tower_floor_min)),
+            )
+            if current_floor >= unlocked_floor:
+                continue
+            juice_battle["tower_unlocked_floor"] = unlocked_floor
+            await common.mongo_storage.replace_user(str(member_id), user_data)
 
     async def tower_save_battle(self, view: "JuiceBattleTowerView"):
         """
@@ -3383,6 +3481,7 @@ class JuiceBattle(commands.Cog):
                 if item_id:
                     progress.setdefault("pending_equipment", []).append(item_id)
                     equipment_reward = item_id
+                await self.tower_unlock_next_floor(progress.get("member_ids") or [], floor + 1)
             progress["member_hp"] = {fighter["user_id"]: max(0, int(fighter["hp"])) for fighter in view.fighters}
             progress["dead_ids"] = [fighter["user_id"] for fighter in view.fighters if fighter["hp"] <= 0]
             progress["floor"] = floor + 1
@@ -3476,6 +3575,8 @@ class JuiceBattle(commands.Cog):
             teammate (discord.Member | None): "可選的隊友"
         """
         userid = str(interaction.user.id)
+        start_selection_floor = None
+        start_selection_names = {}
         if teammate is not None and (teammate.bot or str(teammate.id) == userid):
             await interaction.response.send_message(
                 embed=Embed(title="Juice Battle｜爬塔", description="隊友不能是自己或機器人。", color=common.bot_error_color),
@@ -3604,13 +3705,28 @@ class JuiceBattle(commands.Cog):
 
             # 單人：直接開始或繼續
             if progress is None:
-                progress = self.tower_default_progress(member_ids)
-            # 新開局寫入角色／裝備快照
-            user_data_map = {str(member_id): await self.load_user(str(member_id)) for member_id in member_ids}
-            self.tower_ensure_member_loadouts(progress, user_data_map)
-            progress.setdefault("member_names", {})[userid] = interaction.user.display_name
-            await self.tower_save_progress(progress)
+                max_unlocked_floor = await self.tower_max_unlocked_floor(member_ids)
+                if max_unlocked_floor > self.tower_floor_min:
+                    start_selection_floor = max_unlocked_floor
+                    start_selection_names = {userid: interaction.user.display_name}
+                else:
+                    progress = self.tower_default_progress(member_ids)
+            if start_selection_floor is None:
+                # 新開局寫入角色／裝備快照
+                user_data_map = {str(member_id): await self.load_user(str(member_id)) for member_id in member_ids}
+                self.tower_ensure_member_loadouts(progress, user_data_map)
+                progress.setdefault("member_names", {})[userid] = interaction.user.display_name
+                await self.tower_save_progress(progress)
 
+        if start_selection_floor is not None:
+            await self.tower_begin_start_selection(
+                interaction,
+                member_ids,
+                start_selection_names,
+                start_selection_floor,
+                edit_message=False,
+            )
+            return
         await self.tower_begin_session(interaction, progress, edit_message=False)
 
     @app_commands.command(name="juice_battle_leaderboard", description="Juice Battle 勝率與爬塔排行榜")
@@ -5337,12 +5453,20 @@ class JuiceBattleView(discord.ui.View):
             if gained > 0:
                 self.append_log(f"最後一舞吸血 **{gained}** HP")
 
-        # 斷罪：攻擊結算後追加傷害（不可防禦／閃避；與普攻是否命中無關）
+        # 斷罪：攻擊結算後追加傷害並吸血（不可防禦／閃避；與普攻是否命中無關）
         if self.pending_condemn is not None:
             condemn_damage = int(self.pending_condemn) * self.cog.blood_feast_damage_per_stack
             self.pending_condemn = None
             condemn_actual = self.apply_incoming_damage(defender, condemn_damage)
-            self.append_log(f"斷罪造成 **{condemn_actual}** 點傷害")
+            if condemn_actual > 0 and int(attacker.get("hp", 0)) > 0:
+                before_hp = int(attacker.get("hp", 0))
+                self.cog.tower_add_hp(attacker, condemn_actual)
+                gained = int(attacker.get("hp", 0)) - before_hp
+                self.append_log(
+                    f"斷罪造成 **{condemn_actual}** 點傷害，吸血 **{gained}** HP"
+                )
+            else:
+                self.append_log(f"斷罪造成 **{condemn_actual}** 點傷害")
 
         if "life_conversion" in ability_ids and defender["hp"] > 0:
             self.cog.tower_add_hp(defender, defense_total)
@@ -5587,7 +5711,7 @@ class JuiceBattleTowerInviteView(discord.ui.View):
     @discord.ui.button(label="同意爬塔", style=discord.ButtonStyle.success)
     async def accept_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         """
-        隊友同意後建立或恢復爬塔進度並開始。
+        隊友同意後建立、恢復或選擇爬塔進度並開始。
 
         Args:
             interaction (discord.Interaction): "按鈕互動"
@@ -5596,6 +5720,11 @@ class JuiceBattleTowerInviteView(discord.ui.View):
         if self.accepted:
             return
         member_ids = [self.inviter_id, self.teammate_id]
+        start_selection_floor = None
+        start_selection_names = {
+            self.inviter_id: self.inviter_name,
+            self.teammate_id: self.teammate_name,
+        }
         async with self.cog.tower_lock:
             for member_id in member_ids:
                 member_data = await self.cog.load_user(member_id)
@@ -5640,19 +5769,34 @@ class JuiceBattleTowerInviteView(discord.ui.View):
             else:
                 progress = await self.cog.tower_load_shared_progress(member_ids)
                 if progress is None:
-                    progress = self.cog.tower_default_progress(member_ids)
+                    max_unlocked_floor = await self.cog.tower_max_unlocked_floor(member_ids)
+                    if max_unlocked_floor > self.cog.tower_floor_min:
+                        start_selection_floor = max_unlocked_floor
+                    else:
+                        progress = self.cog.tower_default_progress(member_ids)
 
-            progress.setdefault("member_names", {})
-            progress["member_names"][self.inviter_id] = self.inviter_name
-            progress["member_names"][self.teammate_id] = interaction.user.display_name
-            # 新開局／續爬補齊開局角色裝備快照
-            user_data_map = {str(member_id): await self.cog.load_user(str(member_id)) for member_id in member_ids}
-            self.cog.tower_ensure_member_loadouts(progress, user_data_map)
-            await self.cog.tower_save_progress(progress)
+            if start_selection_floor is None:
+                progress.setdefault("member_names", {})
+                progress["member_names"][self.inviter_id] = self.inviter_name
+                progress["member_names"][self.teammate_id] = interaction.user.display_name
+                # 新開局／續爬補齊開局角色裝備快照
+                user_data_map = {str(member_id): await self.cog.load_user(str(member_id)) for member_id in member_ids}
+                self.cog.tower_ensure_member_loadouts(progress, user_data_map)
+                await self.cog.tower_save_progress(progress)
             self.accepted = True
             button.disabled = True
 
-        await self.cog.tower_begin_session(interaction, progress, edit_message=True)
+        if start_selection_floor is not None:
+            start_selection_names[self.teammate_id] = interaction.user.display_name
+            await self.cog.tower_begin_start_selection(
+                interaction,
+                member_ids,
+                start_selection_names,
+                start_selection_floor,
+                edit_message=True,
+            )
+        else:
+            await self.cog.tower_begin_session(interaction, progress, edit_message=True)
         self.stop()
 
     async def on_timeout(self) -> None:
@@ -5674,6 +5818,201 @@ class JuiceBattleTowerInviteView(discord.ui.View):
             await self.message.edit(embed=embed, view=self)
         except Exception:
             pass
+
+
+class JuiceBattleTowerStartButton(discord.ui.Button):
+    """爬塔起始樓層選擇按鈕。"""
+
+    def __init__(self, *, start_floor: int, label: str, style: discord.ButtonStyle):
+        """
+        建立爬塔起始樓層按鈕。
+
+        Args:
+            start_floor (int): "按下後的起始樓層"
+            label (str): "按鈕文字"
+            style (discord.ButtonStyle): "按鈕樣式"
+        """
+        super().__init__(label=label, style=style, disabled=True)
+        self.start_floor = start_floor
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        處理玩家選擇的起始樓層。
+
+        Args:
+            interaction (discord.Interaction): "起始樓層按鈕互動"
+        """
+        view: JuiceBattleTowerStartView = self.view  # type: ignore[assignment]
+        await view.on_start_floor(interaction, self.start_floor)
+
+
+class JuiceBattleTowerStartView(discord.ui.View):
+    """新一輪爬塔的起始樓層選擇介面。"""
+
+    def __init__(
+        self,
+        *,
+        cog: JuiceBattle,
+        member_ids: list[str],
+        member_names: dict[str, str],
+        max_unlocked_floor: int,
+    ):
+        """
+        建立起始樓層選擇 View。
+
+        Args:
+            cog (JuiceBattle): "Juice Battle cog"
+            member_ids (list[str]): "爬塔隊伍成員 ID"
+            member_names (dict[str, str]): "隊員顯示名稱"
+            max_unlocked_floor (int): "隊伍可選的最高起始樓層"
+        """
+        super().__init__(timeout=cog.tower_view_timeout)
+        self.cog = cog
+        self.member_ids = [str(member_id) for member_id in member_ids]
+        self.member_names = {
+            str(member_id): str(name)
+            for member_id, name in member_names.items()
+        }
+        self.max_unlocked_floor = max(
+            cog.tower_floor_min,
+            int(max_unlocked_floor),
+        )
+        self.start_floors = [cog.tower_floor_min]
+        self.start_floors.extend(
+            range(cog.tower_floor_min + 5, self.max_unlocked_floor + 1, 5)
+        )
+        self.message: discord.Message | None = None
+        self.settled = False
+        self.add_item(
+            JuiceBattleTowerStartButton(
+                start_floor=cog.tower_floor_min,
+                label="不跳關",
+                style=discord.ButtonStyle.secondary,
+            )
+        )
+        for start_floor in self.start_floors[1:]:
+            self.add_item(
+                JuiceBattleTowerStartButton(
+                    start_floor=start_floor,
+                    label=f"第 {start_floor} 層開始",
+                    style=discord.ButtonStyle.success,
+                )
+            )
+
+    def build_embed(self) -> Embed:
+        """
+        建立起始樓層選擇提示。
+
+        Returns:
+            embed (Embed): "起始樓層選擇 Embed"
+        """
+        available_floors = "、".join(f"第 {floor} 層" for floor in self.start_floors)
+        return Embed(
+            title="Juice Battle｜爬塔",
+            description=(
+                "請選擇本次爬塔的起始樓層。\n"
+                f"可選樓層：{available_floors}\n"
+                "跳過的樓層不會發放蛋糕或裝備，並會以滿血開始。"
+            ),
+            color=common.bot_color,
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        """
+        只允許爬塔隊員選擇起始樓層。
+
+        Args:
+            interaction (discord.Interaction): "起始樓層按鈕互動"
+
+        Returns:
+            allowed (bool): "是否允許操作"
+        """
+        if await self.cog.tower_reject_if_aborted(interaction, self.member_ids):
+            return False
+        if str(interaction.user.id) not in self.member_ids:
+            await interaction.response.send_message(
+                embed=Embed(
+                    title="Juice Battle｜爬塔",
+                    description="只有本次爬塔隊員可以選擇起始樓層。",
+                    color=common.bot_error_color,
+                ),
+                ephemeral=True,
+            )
+            return False
+        return True
+
+    async def on_start_floor(self, interaction: discord.Interaction, start_floor: int):
+        """
+        建立所選起始樓層的新爬塔進度。
+
+        Args:
+            interaction (discord.Interaction): "起始樓層按鈕互動"
+            start_floor (int): "本次爬塔起始樓層"
+        """
+        if start_floor not in self.start_floors:
+            await interaction.response.send_message(
+                embed=Embed(
+                    title="Juice Battle｜爬塔",
+                    description="這個起始樓層尚未解鎖。",
+                    color=common.bot_error_color,
+                ),
+                ephemeral=True,
+            )
+            return
+        async with self.cog.tower_lock:
+            if self.settled:
+                return
+            existing = await self.cog.tower_load_shared_progress(self.member_ids)
+            if existing is not None:
+                self.settled = True
+                self.stop()
+                await interaction.response.send_message(
+                    embed=Embed(
+                        title="Juice Battle｜爬塔",
+                        description="這組隊伍已有未完成的爬塔進度，請先繼續目前進度。",
+                        color=common.bot_error_color,
+                    ),
+                    ephemeral=True,
+                )
+                return
+            self.settled = True
+            self.stop()
+            progress = self.cog.tower_default_progress(
+                self.member_ids,
+                start_floor=start_floor,
+            )
+            progress["member_names"] = copy.deepcopy(self.member_names)
+            user_data_map = {
+                member_id: await self.cog.load_user(member_id)
+                for member_id in self.member_ids
+            }
+            self.cog.tower_ensure_member_loadouts(progress, user_data_map)
+            await self.cog.tower_save_progress(progress)
+        await self.cog.tower_begin_session(interaction, progress, edit_message=True)
+
+    async def on_timeout(self) -> None:
+        """
+        起始樓層選擇逾時後解除爬塔介面鎖定。
+        """
+        async with self.cog.tower_lock:
+            if self.settled:
+                return
+            existing = await self.cog.tower_load_shared_progress(self.member_ids)
+            if existing is not None:
+                return
+            self.settled = True
+            self.stop()
+            for member_id in self.member_ids:
+                await self.cog.clear_tower_session(member_id)
+        for child in self.children:
+            child.disabled = True
+        if self.message is not None:
+            try:
+                embed = self.build_embed()
+                embed.description += "\n\n操作逾時，請重新使用指令開始爬塔。"
+                await self.message.edit(embed=embed, view=self)
+            except Exception:
+                pass
 
 
 class JuiceBattleTowerChallengeButton(discord.ui.Button):
@@ -6778,7 +7117,7 @@ class JuiceBattleTowerView(discord.ui.View):
             bind = True
         if "poison" in ability_ids:
             attacker["pending_poison"] = True
-        # 斷罪：消耗血宴，於首次攻擊後追加傷害
+        # 斷罪：消耗血宴，於首次攻擊後追加傷害並吸血
         condemn_damage = None
         if "condemn" in ability_ids:
             condemn_damage = int(attacker.get("blood_feast_stacks", 0)) * self.cog.blood_feast_damage_per_stack
@@ -6806,7 +7145,15 @@ class JuiceBattleTowerView(discord.ui.View):
             results.append(result)
             if condemn_damage is not None:
                 condemn_actual = self.apply_damage(self.monster, condemn_damage)
-                results.append(f"斷罪造成 **{condemn_actual}** 點傷害")
+                if condemn_actual > 0 and int(attacker.get("hp", 0)) > 0:
+                    before_hp = int(attacker.get("hp", 0))
+                    self.cog.tower_add_hp(attacker, condemn_actual)
+                    gained = int(attacker.get("hp", 0)) - before_hp
+                    results.append(
+                        f"斷罪造成 **{condemn_actual}** 點傷害，吸血 **{gained}** HP"
+                    )
+                else:
+                    results.append(f"斷罪造成 **{condemn_actual}** 點傷害")
                 condemn_damage = None
             if self.monster["hp"] <= 0:
                 break
