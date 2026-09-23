@@ -144,22 +144,42 @@
         "｜防禦" + item.def_offset + "｜敏捷" + item.agi_offset;
     }
 
+    function itemAbilities(item) {
+      if (Array.isArray(item.abilities) && item.abilities.length) {
+        return item.abilities;
+      }
+      if (item.ability && (item.ability.name || item.ability.description)) {
+        return [item.ability];
+      }
+      return [];
+    }
+
+    function abilityTooltipHtml(item) {
+      var abilities = itemAbilities(item);
+      if (!abilities.length) {
+        return "<b>沒有特殊技能</b><br>這件裝備沒有額外技能。";
+      }
+      return abilities.map(function (ability) {
+        return "<b>" + escapeHtml(ability.name || "未命名技能") + "</b><br>" +
+          escapeHtml(ability.description || "沒有技能說明。");
+      }).join("<br><br>");
+    }
+
     function equipmentSearchText(item) {
-      var ability = item.ability || {};
+      var abilityParts = itemAbilities(item).reduce(function (parts, ability) {
+        parts.push(ability.name || "");
+        parts.push(ability.description || "");
+        return parts;
+      }, []);
       return [
         item.name,
         item.kind === "weapon" ? "武器" : "防具",
-        equipmentStats(item),
-        ability.name || "",
-        ability.description || ""
-      ].join(" ").toLowerCase();
+        equipmentStats(item)
+      ].concat(abilityParts).join(" ").toLowerCase();
     }
 
     function equipmentOption(item, selected) {
       var checked = selected.indexOf(item.item_id) >= 0 ? " checked" : "";
-      var ability = item.ability || {};
-      var abilityName = ability.name || "沒有特殊技能";
-      var abilityDescription = ability.description || "這件裝備沒有額外技能。";
       return "<label class=\"tower-equipment-option\" data-equipment-text=\"" +
         escapeHtml(equipmentSearchText(item)) + "\">" +
         "<input type=\"checkbox\" data-item-id=\"" + escapeHtml(item.item_id) + "\"" + checked + ">" +
@@ -167,8 +187,7 @@
         "<strong>" + escapeHtml(item.name) + "</strong>" +
         "<small>" + escapeHtml(equipmentStats(item)) + "</small>" +
         "<span class=\"tower-equipment-tooltip\" role=\"tooltip\">" +
-        "<b>" + escapeHtml(abilityName) + "</b><br>" +
-        escapeHtml(abilityDescription) + "</span>" +
+        abilityTooltipHtml(item) + "</span>" +
         "</span></label>";
     }
 

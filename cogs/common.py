@@ -28,6 +28,32 @@ marshmallow_emoji = "<:marshmallow:1539284797753532447> " #棉花糖emoji
 
 asf_api_url = "http://asf:1242/Api/Command"
 
+
+def restart_cancel_description(has_bet: bool) -> str:
+    """
+    重啟準備階段取消遊戲時的 embed 說明。
+
+    Args:
+        has_bet (bool): "True"
+
+    Returns:
+        description (str): "機器人即將重啟，遊戲已取消。"
+    """
+    description = "機器人即將重啟，遊戲已取消。"
+    if has_bet:
+        description += "\n蛋糕已退還"
+    return description
+
+
+def restart_tower_pause_description() -> str:
+    """
+    重啟準備階段暫停爬塔介面時的 embed 說明。
+
+    Returns:
+        description (str): "機器人即將重啟，爬塔介面已暫停；進度已保留，重啟後請重新使用指令繼續。"
+    """
+    return "機器人即將重啟，爬塔介面已暫停；進度已保留，重啟後請重新使用指令繼續。"
+
 # 搶紅包允許發佈的文字頻道 ID：大廳、機器人指令區、日誌
 red_packet_allowed_channel_ids = [
     419108485435883533,  # 大廳

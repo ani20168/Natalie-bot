@@ -19,6 +19,14 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Request bot restart before deploy
+        continue-on-error: true
+        run: |
+          curl -sS -X POST \
+            --max-time 5 \
+            -H "Authorization: Bearer ${{ secrets.RESTART_API_TOKEN }}" \
+            "https://fake-sister.ani20168.com/api/restart" || true
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:

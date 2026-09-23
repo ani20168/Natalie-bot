@@ -231,6 +231,7 @@ class WebPanel:
         self.session_max_age = 10 * 365 * 24 * 60 * 60
         self.auction_hub = AuctionSocketHub(self)
         self.restart_page_path = "/restart"
+        self.restart_api_token = str(self.secret_config.get("RESTART_API_TOKEN") or "")
         self.app = self.create_app()
 
     def is_restart_pending(self) -> bool:
@@ -265,6 +266,7 @@ class WebPanel:
         app.add_api_route("/auth/callback", self.auth_callback, methods=["GET"], name="auth_callback")
         app.add_api_route("/auth/logout", self.auth_logout, methods=["GET"], name="auth_logout")
         app.add_api_route("/restart", self.restart_page, methods=["GET"], response_class=HTMLResponse, name="restart")
+        app.add_api_route("/api/restart", self.restart_api, methods=["POST"], name="restart_api")
         app.add_api_route("/panel", self.panel, methods=["GET"], response_class=HTMLResponse, name="panel")
         app.add_api_route("/auction", self.auction_page, methods=["GET"], response_class=HTMLResponse, name="auction")
         app.add_api_route("/api/auction/list", self.auction_list, methods=["GET"], name="auction_list")
@@ -370,6 +372,32 @@ class WebPanel:
             "restart.html",
             {"title": "伺服器暫時休息中", "preview": preview},
         )
+
+    async def restart_api(self, request: Request):
+        """
+        觸發重啟流程，效果等同 Discord /restart 指令。
+
+        Args:
+            request (Request): FastAPI request
+
+        Returns:
+            response (JSONResponse): "{'ok': True, 'message': '已標記準備重新啟動'}"
+        """
+        token = ""
+        auth_header = request.headers.get("Authorization") or ""
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:].strip()
+        if not token:
+            token = (request.headers.get("X-Restart-Token") or "").strip()
+        if not self.restart_api_token or token != self.restart_api_token:
+            return JSONResponse({"ok": False, "error": "未授權"}, status_code=401)
+        cog = self.bot.get_cog("BotSystem")
+        if cog is None:
+            return JSONResponse({"ok": False, "error": "BotSystem 尚未就緒"}, status_code=503)
+        if self.is_restart_pending():
+            return JSONResponse({"ok": True, "message": "重啟程序已在進行中"})
+        await cog.mark_restart_pending("Web API")
+        return JSONResponse({"ok": True, "message": "已標記準備重新啟動"})
 
     async def auth_login(self, request: Request):
         """

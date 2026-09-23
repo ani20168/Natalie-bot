@@ -2077,7 +2077,9 @@ class BlackJack(commands.Cog):
             message.description = f"本局邊注:**{side_bet_amount}**塊{cake_emoji}"
         message.set_footer(text=await self.win_rate_show(userid))
         cake_after_bet = data[userid]['cake']
-        await interaction.followup.send(embed=message,view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards,cake_after_bet=cake_after_bet,side_bet_amount=side_bet_amount,cake_emoji=cake_emoji))
+        blackjack_view = BlackJackButton(user=interaction,bet=bet,player_cards=player_cards,bot_cards=bot_cards,playing_deck=playing_deck,client=self.bot,display_bot_points=display_bot_points,display_bot_cards=display_bot_cards,cake_after_bet=cake_after_bet,side_bet_amount=side_bet_amount,cake_emoji=cake_emoji)
+        blackjack_message = await interaction.followup.send(embed=message, view=blackjack_view)
+        blackjack_view.message = blackjack_message
         await self.send_blackjack_peek(interaction, peek_text)
 
 
@@ -2156,7 +2158,54 @@ class BlackJackButton(discord.ui.View):
         self.insurance_bet_amount = bet // 2
         self.insurance_purchased = False
         self.player_moved_for_insurance = False
+        self.message = None
+        self.restart_cancelled = False
         self.configure_insurance_button_state(cake_after_bet)
+        bot_system = client.get_cog("BotSystem")
+        if bot_system is not None:
+            bot_system.register_restart_view(self)
+
+    def stop(self):
+        """
+        結束 View 並自重啟收場清單移除。
+        """
+        bot_system = self.bot.get_cog("BotSystem")
+        if bot_system is not None:
+            bot_system.unregister_restart_view(self)
+        super().stop()
+
+    async def cancel_for_restart(self) -> None:
+        """
+        重啟準備階段取消本局並退還賭注。
+        """
+        if self.restart_cancelled:
+            return
+        self.restart_cancelled = True
+        userid = str(self.command_interaction.user.id)
+        refund_amount = int(self.bet) + int(self.side_bet_amount or 0)
+        if self.insurance_purchased:
+            refund_amount += int(self.insurance_bet_amount)
+        has_bet = refund_amount > 0
+        async with common.jsonio_lock:
+            user_data = await common.mongo_storage.get_user(userid)
+            if user_data is not None:
+                user_data["cake"] = int(user_data.get("cake", 0)) + refund_amount
+                user_data["blackjack_playing"] = False
+                await common.mongo_storage.replace_user(userid, user_data)
+        for child in self.children:
+            child.disabled = True
+        self.stop()
+        if self.message is None:
+            return
+        embed = Embed(
+            title="Natalie 21點",
+            description=common.restart_cancel_description(has_bet),
+            color=common.bot_error_color,
+        )
+        try:
+            await self.message.edit(embed=embed, view=self)
+        except Exception:
+            pass
 
     def configure_insurance_button_state(self, cake_balance: int):
         """配置保險按鈕的狀態
@@ -2847,7 +2896,9 @@ class PokerGame(commands.Cog):
         message.add_field(name="Natalie的手牌", value=bot_display, inline=False)
         message.set_footer(text=await self.win_rate_show(userid))
 
-        await interaction.followup.send(embed=message, view=PokerButton(user=interaction, bet=bet, player_cards=player_cards, bot_cards=bot_cards, client=self.bot))
+        poker_view = PokerButton(user=interaction, bet=bet, player_cards=player_cards, bot_cards=bot_cards, client=self.bot)
+        poker_message = await interaction.followup.send(embed=message, view=poker_view)
+        poker_view.message = poker_message
 
     @app_commands.command(name="poker_leaderboard", description="撲克牌勝率排行榜")
     async def poker_leaderboard(self, interaction):
@@ -2967,6 +3018,51 @@ class PokerButton(discord.ui.View):
         self.bot_cards = bot_cards
         self.bot = client
         self.cake_emoji = common.cake_emoji
+        self.message = None
+        self.restart_cancelled = False
+        bot_system = client.get_cog("BotSystem")
+        if bot_system is not None:
+            bot_system.register_restart_view(self)
+
+    def stop(self):
+        """
+        結束 View 並自重啟收場清單移除。
+        """
+        bot_system = self.bot.get_cog("BotSystem")
+        if bot_system is not None:
+            bot_system.unregister_restart_view(self)
+        super().stop()
+
+    async def cancel_for_restart(self) -> None:
+        """
+        重啟準備階段取消本局並退還賭注。
+        """
+        if self.restart_cancelled:
+            return
+        self.restart_cancelled = True
+        userid = str(self.command_interaction.user.id)
+        refund_amount = int(self.bet)
+        has_bet = refund_amount > 0
+        async with common.jsonio_lock:
+            user_data = await common.mongo_storage.get_user(userid)
+            if user_data is not None:
+                user_data["cake"] = int(user_data.get("cake", 0)) + refund_amount
+                user_data["poker_playing"] = False
+                await common.mongo_storage.replace_user(userid, user_data)
+        for child in self.children:
+            child.disabled = True
+        self.stop()
+        if self.message is None:
+            return
+        embed = Embed(
+            title="撲克牌比大小",
+            description=common.restart_cancel_description(has_bet),
+            color=common.bot_error_color,
+        )
+        try:
+            await self.message.edit(embed=embed, view=self)
+        except Exception:
+            pass
 
     async def result_message(self, double: bool = False):
         userid = str(self.command_interaction.user.id)
@@ -3524,6 +3620,52 @@ class SquidRPSView(discord.ui.View):
         self.hand_selected = False
         # 追蹤已扣下的扳機次數
         self.shots_fired = 0
+        self.restart_cancelled = False
+        bot_system = client.get_cog("BotSystem")
+        if bot_system is not None:
+            bot_system.register_restart_view(self)
+
+    def stop(self):
+        """
+        結束 View 並自重啟收場清單移除。
+        """
+        bot_system = self.bot.get_cog("BotSystem")
+        if bot_system is not None:
+            bot_system.unregister_restart_view(self)
+        super().stop()
+
+    async def cancel_for_restart(self) -> None:
+        """
+        重啟準備階段取消本局並退還賭注。
+        """
+        if self.restart_cancelled:
+            return
+        self.restart_cancelled = True
+        if self.keep_task is not None and not self.keep_task.done():
+            self.keep_task.cancel()
+        userid = str(self.command_interaction.user.id)
+        refund_amount = int(self.bet)
+        has_bet = refund_amount > 0
+        async with common.jsonio_lock:
+            user_data = await common.mongo_storage.get_user(userid)
+            if user_data is not None:
+                user_data["cake"] = int(user_data.get("cake", 0)) + refund_amount
+                user_data["squid_playing"] = False
+                await common.mongo_storage.replace_user(userid, user_data)
+        for child in self.children:
+            child.disabled = True
+        self.stop()
+        if self.message is None:
+            return
+        embed = Embed(
+            title="魷魚猜拳",
+            description=common.restart_cancel_description(has_bet),
+            color=common.bot_error_color,
+        )
+        try:
+            await self.message.edit(embed=embed, view=self)
+        except Exception:
+            pass
 
     def hp_display(self) -> str:
         """顯示Natalie目前血量"""

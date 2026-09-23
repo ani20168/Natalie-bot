@@ -1,6 +1,7 @@
 import asyncio
 import copy
 import random
+import weakref
 
 from discord import app_commands, Embed
 from discord.ext import commands
@@ -48,6 +49,7 @@ class JuiceBattle(commands.Cog):
             "agi_offset": "敏捷",
         }
         self.tower_view_timeout = 1200.0
+        self.restart_views = weakref.WeakSet()
         self.tower_button_unlock_delay = 1.0
         self.tower_floor_min = 1
         self.tower_lock = asyncio.Lock()
@@ -1101,6 +1103,277 @@ class JuiceBattle(commands.Cog):
             amount (int): "回復量"
         """
         fighter["hp"] = min(fighter["max_hp"], max(0, int(fighter.get("hp", 0)) + amount))
+
+    def track_restart_view(self, view: discord.ui.View) -> None:
+        """
+        登記進行中的 Juice Battle View，供重啟準備階段收場。
+
+        Args:
+            view (discord.ui.View): "進行中的 View"
+        """
+        self.restart_views.add(view)
+
+    async def prepare_for_restart(self) -> None:
+        """
+        重啟準備階段收場：爬塔保留進度並暫停介面，挑戰對戰取消並退還賭注。
+        """
+        handled_message_ids = set()
+        for view in list(self.restart_views):
+            try:
+                if isinstance(view, JuiceBattleTowerView):
+                    await self.restart_pause_tower_view(view, save_battle=True, handled_message_ids=handled_message_ids)
+                elif isinstance(
+                    view,
+                    (
+                        JuiceBattleTowerFloorView,
+                        JuiceBattleTowerNextFloorView,
+                        JuiceBattleTowerStartView,
+                        JuiceBattleTowerInviteView,
+                        JuiceBattleTowerRewardView,
+                    ),
+                ):
+                    await self.restart_pause_tower_view(view, save_battle=False, handled_message_ids=handled_message_ids)
+                elif isinstance(view, JuiceBattleView):
+                    await self.restart_cancel_challenge_view(view, handled_message_ids=handled_message_ids)
+                elif isinstance(view, JuiceBattleChallengeView):
+                    await self.restart_cancel_challenge_invite_view(view, handled_message_ids=handled_message_ids)
+            except Exception:
+                pass
+        await self.restart_cleanup_stored_sessions(handled_message_ids)
+
+    def restart_tower_member_ids(self, view: discord.ui.View) -> list[str]:
+        """
+        從爬塔 View 取得隊伍成員 ID。
+
+        Args:
+            view (discord.ui.View): "爬塔 View"
+
+        Returns:
+            member_ids (list[str]): "['4108']"
+        """
+        if isinstance(view, JuiceBattleTowerInviteView):
+            return [view.inviter_id, view.teammate_id]
+        member_ids = getattr(view, "member_ids", None)
+        if isinstance(member_ids, list) and member_ids:
+            return [str(member_id) for member_id in member_ids]
+        progress = getattr(view, "progress", None)
+        if isinstance(progress, dict):
+            return [str(member_id) for member_id in progress.get("member_ids") or []]
+        return []
+
+    async def restart_pause_tower_view(
+        self,
+        view: discord.ui.View,
+        *,
+        save_battle: bool,
+        handled_message_ids: set[int],
+    ) -> None:
+        """
+        重啟準備階段暫停爬塔介面並保留進度。
+
+        Args:
+            view (discord.ui.View): "爬塔 View"
+            save_battle (bool): "是否寫入戰鬥快照"
+            handled_message_ids (set[int]): "已處理訊息 ID"
+        """
+        if getattr(view, "restart_paused", False):
+            return
+        view.restart_paused = True
+        if save_battle and isinstance(view, JuiceBattleTowerView) and not getattr(view, "finished", False):
+            try:
+                await self.tower_save_battle(view)
+            except Exception:
+                pass
+        progress = getattr(view, "progress", None)
+        if isinstance(progress, dict) and progress.get("member_ids"):
+            try:
+                await self.tower_save_progress(progress)
+            except Exception:
+                pass
+        member_ids = self.restart_tower_member_ids(view)
+        if hasattr(view, "settled"):
+            view.settled = True
+        for child in view.children:
+            child.disabled = True
+        view.stop()
+        message = getattr(view, "message", None)
+        if message is not None:
+            handled_message_ids.add(int(message.id))
+            embed = Embed(
+                title="Juice Battle｜爬塔",
+                description=common.restart_tower_pause_description(),
+                color=common.bot_error_color,
+            )
+            try:
+                await message.edit(embed=embed, view=view)
+            except Exception:
+                pass
+        for member_id in member_ids:
+            await self.clear_tower_session(str(member_id))
+
+    async def restart_cancel_challenge_view(
+        self,
+        view: "JuiceBattleView",
+        *,
+        handled_message_ids: set[int],
+    ) -> None:
+        """
+        重啟準備階段取消進行中的挑戰對戰並退還賭注。
+
+        Args:
+            view (JuiceBattleView): "挑戰對戰 View"
+            handled_message_ids (set[int]): "已處理訊息 ID"
+        """
+        if getattr(view, "restart_cancelled", False) or view.finished:
+            return
+        view.restart_cancelled = True
+        view.finished = True
+        has_bet = view.bet > 0 and not view.vs_bot and not view.bet_settled
+        async with common.jsonio_lock:
+            if has_bet:
+                for fighter in (view.fighter_a, view.fighter_b):
+                    if fighter.get("is_bot"):
+                        continue
+                    fighter_data = await self.load_user(str(fighter["user_id"]))
+                    fighter_data["cake"] = int(fighter_data.get("cake", 0)) + view.bet
+                    await common.mongo_storage.replace_user(str(fighter["user_id"]), fighter_data)
+            await self.clear_session(view.fighter_a["user_id"])
+            if not view.fighter_b.get("is_bot"):
+                await self.clear_session(view.fighter_b["user_id"])
+        for child in view.children:
+            child.disabled = True
+        view.stop()
+        if view.message is not None:
+            handled_message_ids.add(int(view.message.id))
+            embed = Embed(
+                title="Juice Battle",
+                description=common.restart_cancel_description(has_bet),
+                color=common.bot_error_color,
+            )
+            try:
+                await view.message.edit(embed=embed, view=view)
+            except Exception:
+                pass
+
+    async def restart_cancel_challenge_invite_view(
+        self,
+        view: "JuiceBattleChallengeView",
+        *,
+        handled_message_ids: set[int],
+    ) -> None:
+        """
+        重啟準備階段取消等待同意的挑戰邀請。
+
+        Args:
+            view (JuiceBattleChallengeView): "挑戰邀請 View"
+            handled_message_ids (set[int]): "已處理訊息 ID"
+        """
+        if getattr(view, "restart_cancelled", False) or view.accepted:
+            return
+        view.restart_cancelled = True
+        view.accepted = True
+        for child in view.children:
+            child.disabled = True
+        view.stop()
+        if view.message is not None:
+            handled_message_ids.add(int(view.message.id))
+            embed = Embed(
+                title="Juice Battle",
+                description=common.restart_cancel_description(False),
+                color=common.bot_error_color,
+            )
+            try:
+                await view.message.edit(embed=embed, view=view)
+            except Exception:
+                pass
+
+    async def restart_cleanup_stored_sessions(self, handled_message_ids: set[int]) -> None:
+        """
+        掃描 DB 中殘留 session，補收場尚未由 View 處理的爬塔／挑戰狀態。
+
+        Args:
+            handled_message_ids (set[int]): "已處理訊息 ID"
+        """
+        collection = common.mongo_storage.get_collection("userdata")
+        if collection is None:
+            return
+        cursor = collection.find(
+            {
+                "$or": [
+                    {"juice_battle.playing": True},
+                    {"juice_battle.tower_session": {"$type": "object"}},
+                    {"juice_battle.session.tower": True},
+                ]
+            }
+        )
+        async for document in cursor:
+            juice_battle = document.get("juice_battle") or {}
+            user_id = str(document.get("_id"))
+            sessions = []
+            challenge_session = juice_battle.get("session")
+            if isinstance(challenge_session, dict):
+                sessions.append(challenge_session)
+            tower_session = juice_battle.get("tower_session")
+            if isinstance(tower_session, dict):
+                sessions.append(tower_session)
+            for session in sessions:
+                message_id = session.get("message_id")
+                channel_id = session.get("channel_id")
+                is_tower = bool(session.get("tower"))
+                bet = int(session.get("bet", 0) or 0)
+                refunded = False
+                if (
+                    not is_tower
+                    and bet > 0
+                    and not session.get("vs_bot")
+                    and not session.get("bet_settled")
+                ):
+                    cake = int(document.get("cake", 0)) + bet
+                    try:
+                        await collection.update_one({"_id": user_id}, {"$set": {"cake": cake}})
+                        refunded = True
+                    except Exception:
+                        pass
+                if channel_id is None or message_id is None:
+                    continue
+                if int(message_id) in handled_message_ids:
+                    continue
+                channel = self.bot.get_channel(int(channel_id))
+                if channel is None:
+                    try:
+                        channel = await self.bot.fetch_channel(int(channel_id))
+                    except Exception:
+                        continue
+                try:
+                    message = await channel.fetch_message(int(message_id))
+                    if is_tower:
+                        description = common.restart_tower_pause_description()
+                        title = "Juice Battle｜爬塔"
+                    else:
+                        has_bet = refunded
+                        description = common.restart_cancel_description(has_bet)
+                        title = "Juice Battle"
+                    embed = Embed(title=title, description=description, color=common.bot_error_color)
+                    await message.edit(embed=embed, view=None)
+                    handled_message_ids.add(int(message_id))
+                except Exception:
+                    pass
+        await collection.update_many(
+            {
+                "$or": [
+                    {"juice_battle.playing": True},
+                    {"juice_battle.tower_session": {"$exists": True}},
+                    {"juice_battle.session.tower": True},
+                ]
+            },
+            {
+                "$set": {"juice_battle.playing": False},
+                "$unset": {
+                    "juice_battle.session": "",
+                    "juice_battle.tower_session": "",
+                },
+            },
+        )
 
     async def cog_load(self):
         """
@@ -4722,6 +4995,8 @@ class JuiceBattleChallengeView(discord.ui.View):
         self.bet = max(0, int(bet))
         self.message: discord.Message | None = None
         self.accepted = False
+        self.restart_cancelled = False
+        cog.track_restart_view(self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """
@@ -4999,7 +5274,9 @@ class JuiceBattleView(discord.ui.View):
         self.resolving_followup = False
         self.message: discord.Message | None = None
         self.finished = phase == "ended"
+        self.restart_cancelled = False
         self.rebuild_buttons()
+        cog.track_restart_view(self)
 
     def fighter_by_id(self, user_id: str) -> dict:
         """
@@ -5953,6 +6230,7 @@ class JuiceBattleTowerInviteView(discord.ui.View):
         self.existing_progress = copy.deepcopy(existing_progress) if isinstance(existing_progress, dict) else None
         self.message: discord.Message | None = None
         self.accepted = False
+        cog.track_restart_view(self)
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         """
@@ -6147,6 +6425,7 @@ class JuiceBattleTowerStartView(discord.ui.View):
         )
         self.message: discord.Message | None = None
         self.settled = False
+        cog.track_restart_view(self)
         self.add_item(
             JuiceBattleTowerStartButton(
                 start_floor=cog.tower_floor_min,
@@ -6331,6 +6610,7 @@ class JuiceBattleTowerFloorView(discord.ui.View):
         self.progress = copy.deepcopy(progress)
         self.message: discord.Message | None = None
         self.settled = False
+        cog.track_restart_view(self)
         self.add_item(JuiceBattleTowerChallengeButton())
         if int(self.progress.get("floor", cog.tower_floor_min)) > cog.tower_floor_min:
             self.add_item(JuiceBattleTowerEscapeButton())
@@ -6443,6 +6723,7 @@ class JuiceBattleTowerNextFloorView(discord.ui.View):
         self.progress = copy.deepcopy(progress)
         self.message: discord.Message | None = None
         self.finished = False
+        cog.track_restart_view(self)
         self.add_item(JuiceBattleTowerNextFloorButton())
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -6643,6 +6924,7 @@ class JuiceBattleTowerView(discord.ui.View):
         self.timed_out = False
         self.message: discord.Message | None = None
         self.rebuild_buttons()
+        cog.track_restart_view(self)
 
     def fighter_by_id(self, user_id: str) -> dict | None:
         """
@@ -7958,6 +8240,7 @@ class JuiceBattleTowerRewardView(discord.ui.View):
         self.claimed = False
         self.bonus_report: dict | None = None
         self.rebuild_buttons()
+        cog.track_restart_view(self)
 
     def equipment_name(self, item_id: str) -> str:
         """
