@@ -52,7 +52,7 @@ def restart_tower_pause_description() -> str:
     Returns:
         description (str): "機器人即將重啟，爬塔介面已暫停；進度已保留，重啟後請重新使用指令繼續。"
     """
-    return "機器人即將重啟，爬塔介面已暫停；進度已保留，重啟後請重新使用指令繼續。"
+    return "機器人即將重啟，爬塔介面已暫停；已通關樓層的 checkpoint 已保留，重啟後請重新使用指令從挑戰前畫面繼續。"
 
 # 搶紅包允許發佈的文字頻道 ID：大廳、機器人指令區、日誌
 red_packet_allowed_channel_ids = [
