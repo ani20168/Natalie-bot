@@ -2205,6 +2205,107 @@ class JuiceBattle(commands.Cog):
         user_data["juice_battle"].pop("tower_session", None)
         await common.mongo_storage.replace_user(userid, user_data)
 
+    async def tower_supersede_active_session(self, member_ids: list[str]) -> bool:
+        """
+        關閉指定隊伍進行中的爬塔介面（保留 checkpoint），供重新開啟新介面。
+
+        Args:
+            member_ids (list[str]): "要檢查的隊員 ID"
+
+        Returns:
+            superseded (bool): "是否有關閉進行中的介面"
+        """
+        normalized_ids = [str(member_id) for member_id in member_ids if str(member_id)]
+        if not normalized_ids:
+            return False
+        session = None
+        team_member_ids = normalized_ids
+        for member_id in normalized_ids:
+            user_data = await self.load_user(member_id)
+            juice_battle = user_data["juice_battle"]
+            current_session = juice_battle.get("tower_session")
+            if isinstance(current_session, dict):
+                session = current_session
+                stored_members = current_session.get("tower_members")
+                if isinstance(stored_members, list) and stored_members:
+                    team_member_ids = [str(value) for value in stored_members]
+                break
+            legacy_session = juice_battle.get("session")
+            if isinstance(legacy_session, dict) and legacy_session.get("tower"):
+                session = legacy_session
+                stored_members = legacy_session.get("tower_members")
+                if isinstance(stored_members, list) and stored_members:
+                    team_member_ids = [str(value) for value in stored_members]
+                break
+        if session is None:
+            return False
+        for member_id in team_member_ids:
+            await self.clear_tower_session(member_id)
+        # 停止記憶體中的 View，避免舊按鈕或背景戰鬥再寫回
+        message_id = session.get("message_id")
+        target_message_id = int(message_id) if message_id is not None else None
+        team_member_set = {str(member_id) for member_id in team_member_ids}
+        for view in list(self.restart_views):
+            try:
+                if not isinstance(
+                    view,
+                    (
+                        JuiceBattleTowerView,
+                        JuiceBattleTowerFloorView,
+                        JuiceBattleTowerNextFloorView,
+                        JuiceBattleTowerStartView,
+                        JuiceBattleTowerInviteView,
+                        JuiceBattleTowerRewardView,
+                    ),
+                ):
+                    continue
+                view_message = getattr(view, "message", None)
+                view_member_ids = {str(member_id) for member_id in self.restart_tower_member_ids(view)}
+                matched = False
+                if target_message_id is not None and view_message is not None:
+                    matched = int(view_message.id) == target_message_id
+                elif view_member_ids and view_member_ids == team_member_set:
+                    matched = True
+                if not matched or getattr(view, "superseded", False):
+                    continue
+                view.superseded = True
+                if hasattr(view, "finished"):
+                    view.finished = True
+                if hasattr(view, "settled"):
+                    view.settled = True
+                if hasattr(view, "accepted"):
+                    view.accepted = True
+                if hasattr(view, "claimed"):
+                    view.claimed = True
+                for child in view.children:
+                    child.disabled = True
+                view.stop()
+            except Exception:
+                pass
+        # 將舊 Discord 訊息標為作廢
+        channel_id = session.get("channel_id")
+        if channel_id is not None and message_id is not None:
+            channel = self.bot.get_channel(int(channel_id))
+            if channel is None:
+                try:
+                    channel = await self.bot.fetch_channel(int(channel_id))
+                except Exception:
+                    channel = None
+            if channel is not None:
+                try:
+                    message = await channel.fetch_message(int(message_id))
+                    await message.edit(
+                        embed=Embed(
+                            title="Juice Battle｜爬塔",
+                            description="已重新開啟爬塔介面，此訊息已作廢。",
+                            color=common.bot_error_color,
+                        ),
+                        view=None,
+                    )
+                except Exception:
+                    pass
+        return True
+
     async def set_playing_session(self, userid: str, session: dict):
         """
         標記玩家進入挑戰對戰並寫入 session（不覆寫爬塔介面）。
@@ -3916,17 +4017,12 @@ class JuiceBattle(commands.Cog):
             own_data = await self.load_user(userid)
             own_juice = own_data["juice_battle"]
             own_progress = own_juice.get("tower_progress")
-            # 爬塔介面仍活著時請用原訊息，不可再開一份（與挑戰 playing 互不干擾）
+            # 已有爬塔介面時關閉舊 embed，改以新指令重新開啟
             if isinstance(own_juice.get("tower_session"), dict):
-                await interaction.response.send_message(
-                    embed=Embed(
-                        title="Juice Battle｜爬塔",
-                        description=self.tower_session_block_description(own_juice),
-                        color=common.bot_error_color,
-                    ),
-                    ephemeral=True,
-                )
-                return
+                await self.tower_supersede_active_session([userid])
+                own_data = await self.load_user(userid)
+                own_juice = own_data["juice_battle"]
+                own_progress = own_juice.get("tower_progress")
 
             # 決定隊伍成員與進度
             if isinstance(own_progress, dict):
@@ -3996,19 +4092,19 @@ class JuiceBattle(commands.Cog):
                         ephemeral=True,
                     )
                     return
+                has_active_session = False
                 for member_id in member_ids:
                     member_data = await self.load_user(str(member_id))
                     member_juice = member_data["juice_battle"]
                     if isinstance(member_juice.get("tower_session"), dict):
-                        await interaction.response.send_message(
-                            embed=Embed(
-                                title="Juice Battle｜爬塔",
-                                description=f"<@{member_id}> 目前已有進行中的爬塔介面。",
-                                color=common.bot_error_color,
-                            ),
-                            ephemeral=True,
-                        )
-                        return
+                        has_active_session = True
+                        break
+                    legacy_session = member_juice.get("session")
+                    if isinstance(legacy_session, dict) and legacy_session.get("tower"):
+                        has_active_session = True
+                        break
+                if has_active_session:
+                    await self.tower_supersede_active_session(member_ids)
                 embed = Embed(
                     title="Juice Battle｜爬塔邀請",
                     description=(
@@ -6139,19 +6235,22 @@ class JuiceBattleTowerInviteView(discord.ui.View):
             self.teammate_id: self.teammate_name,
         }
         async with self.cog.tower_lock:
+            has_active_session = False
             for member_id in member_ids:
                 member_data = await self.cog.load_user(member_id)
                 member_juice = member_data["juice_battle"]
                 if isinstance(member_juice.get("tower_session"), dict):
-                    await interaction.response.send_message(
-                        embed=Embed(
-                            title="Juice Battle｜爬塔",
-                            description=f"<@{member_id}> 目前已有進行中的爬塔介面。",
-                            color=common.bot_error_color,
-                        ),
-                        ephemeral=True,
-                    )
-                    return
+                    has_active_session = True
+                    break
+                legacy_session = member_juice.get("session")
+                if isinstance(legacy_session, dict) and legacy_session.get("tower"):
+                    has_active_session = True
+                    break
+            if has_active_session:
+                await self.cog.tower_supersede_active_session(member_ids)
+            for member_id in member_ids:
+                member_data = await self.cog.load_user(member_id)
+                member_juice = member_data["juice_battle"]
                 existing_progress = member_juice.get("tower_progress")
                 if not isinstance(existing_progress, dict):
                     continue
@@ -7171,6 +7270,8 @@ class JuiceBattleTowerView(discord.ui.View):
         """
         依先攻順序找到下一位玩家或切換到怪物回合。
         """
+        if self.finished:
+            return
         while self.current_index < len(self.turn_order):
             user_id = self.turn_order[self.current_index]
             self.current_index += 1
@@ -7728,6 +7829,8 @@ class JuiceBattleTowerView(discord.ui.View):
         """
         執行怪物回合並等待被選中隊員防禦或閃避。
         """
+        if self.finished:
+            return
         living = self.living_fighters()
         if not living:
             await self.cog.tower_finish_defeat(self, "所有我方成員都已死亡。")
