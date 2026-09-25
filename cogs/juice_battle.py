@@ -1899,6 +1899,7 @@ class JuiceBattle(commands.Cog):
             "blood_feast_stacks": 0,
             "stun_remaining": 0,
             "dodge_offset": 0,
+            "sticky_debuff_remaining": 0,
             "hellfire_offset": 0,
             "bleed_stacks": 0,
             "attack_offset_multiplier": 1,
@@ -2013,6 +2014,36 @@ class JuiceBattle(commands.Cog):
         if stance_swap_defend:
             return fighter["atk"], fighter["def_offset"]
         return fighter["defense"], fighter["def_offset"]
+
+    def fighter_display_offsets(
+        self,
+        fighter: dict,
+        *,
+        agility_slime_preview: bool = False,
+    ) -> dict:
+        """
+        計算 embed 面板要顯示的有效偏移（含祝福倍率等戰鬥中偏移改動）。
+
+        Args:
+            fighter (dict): "戰鬥中的選手狀態"
+            agility_slime_preview (bool): "攻擊方已發動黏液時，預覽對手敏捷偏移 -1"
+
+        Returns:
+            offsets (dict): "{'atk_offset': 4, 'def_offset': 2, 'agi_offset': 0}"
+        """
+        atk_offset = int(fighter.get("atk_offset", 0)) + int(fighter.get("berserk_offset", 0))
+        atk_offset *= int(fighter.get("attack_offset_multiplier", 1))
+        def_offset = int(fighter.get("def_offset", 0)) * int(fighter.get("def_offset_multiplier", 1))
+        agi_offset = int(fighter.get("agi_offset", 0)) + int(fighter.get("dodge_offset", 0))
+        if int(fighter.get("sticky_debuff_remaining", 0)) > 0:
+            agi_offset -= 1
+        if agility_slime_preview:
+            agi_offset -= 1
+        return {
+            "atk_offset": atk_offset,
+            "def_offset": def_offset,
+            "agi_offset": agi_offset,
+        }
 
     def skill_source_label(self, source: str) -> str:
         """
@@ -2719,16 +2750,14 @@ class JuiceBattle(commands.Cog):
             else:
                 display_atk = fighter["atk"]
                 display_def = fighter["defense"]
-            display_atk_offset = int(fighter.get("atk_offset", 0)) + int(fighter.get("berserk_offset", 0))
-            display_def_offset = int(fighter.get("def_offset", 0))
-            display_agi_offset = int(fighter.get("agi_offset", 0)) + int(fighter.get("dodge_offset", 0))
-            # 攻擊方已發動黏液時，預覽對手面板敏捷偏移 -1
-            if (
-                slime_preview
-                and attacker is not None
-                and fighter["user_id"] != attacker["user_id"]
-            ):
-                display_agi_offset -= 1
+            display_offsets = self.fighter_display_offsets(
+                fighter,
+                agility_slime_preview=(
+                    slime_preview
+                    and attacker is not None
+                    and fighter["user_id"] != attacker["user_id"]
+                ),
+            )
 
             status_parts = []
             if fighter.get("poison_remaining", 0) > 0:
@@ -2757,7 +2786,9 @@ class JuiceBattle(commands.Cog):
                 status_parts.append(f"震懾（{fighter['intimidation_remaining']}回合）")
             if fighter.get("berserk_triggered"):
                 status_parts.append("暴走")
-            if int(fighter.get("dodge_offset", 0)) != 0:
+            if int(fighter.get("sticky_debuff_remaining", 0)) > 0:
+                status_parts.append("黏呼呼 閃避偏移 -1")
+            elif int(fighter.get("dodge_offset", 0)) != 0:
                 status_parts.append(f"黏液閃避偏移 {fighter['dodge_offset']:+d}")
             elif (
                 slime_preview
@@ -2780,9 +2811,9 @@ class JuiceBattle(commands.Cog):
                 name=f"{fighter['display_name']}（{fighter['character_name']}）",
                 value=(
                     f"HP **{fighter['hp']}/{fighter['max_hp']}**\n"
-                    f"攻擊 {display_atk}({display_atk_offset:+d})｜"
-                    f"防禦 {display_def}({display_def_offset:+d})｜"
-                    f"敏捷 {fighter['agi']}({display_agi_offset:+d})"
+                    f"攻擊 {display_atk}({display_offsets['atk_offset']:+d})｜"
+                    f"防禦 {display_def}({display_offsets['def_offset']:+d})｜"
+                    f"敏捷 {fighter['agi']}({display_offsets['agi_offset']:+d})"
                     f"{ability_text}{status_text}"
                 ),
                 inline=False,
@@ -7028,7 +7059,9 @@ class JuiceBattleTowerView(discord.ui.View):
                 status.append(f"血宴 {fighter['blood_feast_stacks']}")
             if fighter.get("berserk_triggered"):
                 status.append("暴走")
-            if int(fighter.get("dodge_offset", 0)) != 0:
+            if int(fighter.get("sticky_debuff_remaining", 0)) > 0:
+                status.append("黏呼呼 閃避偏移 -1")
+            elif int(fighter.get("dodge_offset", 0)) != 0:
                 status.append(f"黏液閃避偏移 {fighter['dodge_offset']:+d}")
             armed_abilities = []
             for ability_id in self.cog.tower_armed_ability_ids(fighter):
@@ -7051,8 +7084,7 @@ class JuiceBattleTowerView(discord.ui.View):
             else:
                 display_atk = fighter["atk"]
                 display_def = fighter["defense"]
-            display_atk_offset = int(fighter.get("atk_offset", 0)) + int(fighter.get("berserk_offset", 0))
-            display_def_offset = int(fighter.get("def_offset", 0))
+            display_offsets = self.cog.fighter_display_offsets(fighter)
             ability_names = []
             for source in ("character", "weapon", "armor"):
                 for ability in self.cog.fighter_abilities(fighter, source):
@@ -7062,9 +7094,9 @@ class JuiceBattleTowerView(discord.ui.View):
                 name=f"{fighter['display_name']}（{fighter['character_name']}）",
                 value=(
                     f"HP **{fighter['hp']}/{fighter['max_hp']}**\n"
-                    f"攻擊 {display_atk}({display_atk_offset:+d})｜"
-                    f"防禦 {display_def}({display_def_offset:+d})｜"
-                    f"敏捷 {fighter['agi']}({fighter.get('agi_offset', 0) + fighter.get('dodge_offset', 0):+d})"
+                    f"攻擊 {display_atk}({display_offsets['atk_offset']:+d})｜"
+                    f"防禦 {display_def}({display_offsets['def_offset']:+d})｜"
+                    f"敏捷 {fighter['agi']}({display_offsets['agi_offset']:+d})"
                     f"{ability_text}{status_text}"
                 ),
                 inline=False,
@@ -7308,7 +7340,6 @@ class JuiceBattleTowerView(discord.ui.View):
         """
         self.cog.tower_prepare_skill_cooldowns(fighter, "attack")
         self.cog.tower_clear_skill_armed(fighter)
-        fighter["dodge_offset"] = 0
         # 攻擊偏移祝福回合遞減
         attack_blessing_remaining = int(fighter.get("attack_offset_blessing_remaining", 0))
         if attack_blessing_remaining > 0:
@@ -7889,6 +7920,8 @@ class JuiceBattleTowerView(discord.ui.View):
         defender = self.fighter_by_id(self.pending_target_id or "")
         if defender is None or self.pending_attack_total is None:
             return
+        had_sticky_debuff = int(defender.get("sticky_debuff_remaining", 0)) > 0
+        sticky_applied_this_resolve = False
         if mode == "dodge" and self.pending_bind:
             await interaction.response.send_message(
                 embed=Embed(title="Juice Battle｜爬塔", description="你被束縛，無法閃避。", color=common.bot_error_color),
@@ -7922,10 +7955,13 @@ class JuiceBattleTowerView(discord.ui.View):
             else:
                 defender_skill_note = ""
         if not defender_stunned and mode == "dodge":
+            dodge_offset = int(defender.get("agi_offset", 0)) + int(defender.get("dodge_offset", 0))
+            if had_sticky_debuff:
+                dodge_offset -= 1
             defense_dice, dodge_total, _dodge_text = self.cog.tower_roll(
                 defender,
                 defender["agi"],
-                defender.get("agi_offset", 0) + defender.get("dodge_offset", 0),
+                dodge_offset,
             )
             if attack_total >= dodge_total:
                 damage = attack_total
@@ -8010,13 +8046,14 @@ class JuiceBattleTowerView(discord.ui.View):
             reflect = actual_damage // 2
             reflected = self.apply_damage(self.monster, reflect)
             log_parts.append(f"反傷造成 **{reflected}** 點傷害")
-        # 黏呼呼：造成傷害後才上閃避減益，持續到該玩家下次攻擊回合
+        # 黏呼呼：造成傷害後上閃避減益，持續到下次被怪物攻擊並結算防守
         if (
             self.monster.get("id") == "sticky_slime"
             and actual_damage > 0
             and defender["hp"] > 0
         ):
-            defender["dodge_offset"] = -1
+            defender["sticky_debuff_remaining"] = 1
+            sticky_applied_this_resolve = True
             log_parts.append(f"{defender['display_name']} 被黏液黏住，閃避偏移 -1")
         # 中毒被動：攻擊成功時施加中毒，於對方回合開始扣血 3 回合
         if self.monster_ability("poison") is not None and actual_damage > 0:
@@ -8028,6 +8065,8 @@ class JuiceBattleTowerView(discord.ui.View):
         self.pending_attack_total = None
         self.pending_attack_dice = ""
         self.pending_bind = False
+        if had_sticky_debuff and not sticky_applied_this_resolve:
+            defender["sticky_debuff_remaining"] = 0
         if not self.living_fighters():
             await self.cog.tower_finish_defeat(self, "所有我方成員都已死亡。")
             return
