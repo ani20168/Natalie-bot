@@ -106,6 +106,7 @@ class ServerItemHouse:
         self.status_pickaxe_discount = "pickaxe_discount"
         self.status_glass_slipper = "glass_slipper"
         self.status_dimension_cloak = "dimension_cloak"
+        self.status_invisibility_cloak = "invisibility_cloak"
         self.charge_effect_keys = {self.status_blackjack_cheat, self.status_jade_bracelet}
         self.charge_count_unit_keys = {self.status_master_thief, self.status_pickaxe_discount, self.status_dimension_cloak}
         self.anti_theft_invalid_title = "你的防盜卡已失效"
@@ -127,6 +128,7 @@ class ServerItemHouse:
             self.status_pickaxe_discount: "礦鎬折價卷",
             self.status_glass_slipper: "灰姑娘的玻璃鞋",
             self.status_dimension_cloak: "次元斗篷",
+            self.status_invisibility_cloak: "隱形斗篷",
         }
         self.items = {
             "anti_theft_3": {
@@ -297,6 +299,13 @@ class ServerItemHouse:
                 "use_kind": "self_charge",
                 "status_key": self.status_dimension_cloak,
                 "charge_amount": 1,
+            },
+            "invisibility_cloak_7": {
+                "name": "隱形斗篷(7天)",
+                "description": "搶劫可以隱藏自己的行蹤",
+                "duration_days": 7,
+                "use_kind": "self_status",
+                "status_key": self.status_invisibility_cloak,
             },
         }
 

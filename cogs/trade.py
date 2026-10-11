@@ -1256,12 +1256,15 @@ class Trade(commands.Cog):
         else:
             robber_data = await common.mongo_storage.ensure_user_document(userid)
             victim_data = await common.mongo_storage.ensure_user_document(str(member.id))
+
+        # 隱形斗篷：之後的回覆只有自己看得到
+        hidden = item_house is not None and item_house.has_status_in_data(robber_data, item_house.status_invisibility_cloak)
         if item_house is not None and item_house.has_status_in_data(victim_data, item_house.status_anti_theft):
             await interaction.response.send_message(embed=Embed(
                 title=title,
                 description="對方身上有防盜卡，這次下手失敗了。",
                 color=common.bot_error_color,
-            ))
+            ), ephemeral=hidden)
             return
         robber_cake = int(robber_data.get("cake", 0))
         victim_cake = int(victim_data.get("cake", 0))
@@ -1277,14 +1280,14 @@ class Trade(commands.Cog):
                     title=title,
                     description=f"你已經很有錢了！身上超過 **{self.robbery_self_max_cake}** 塊{common.cake_emoji}就不能當小偷喔（目前 **{robber_cake}**）",
                     color=common.bot_error_color,
-                ))
+                ), ephemeral=hidden)
                 return
         if victim_cake < self.robbery_target_min_cake:
             await interaction.response.send_message(embed=Embed(
                 title=title,
                 description=f"對方窮到只剩 **{victim_cake}** 塊{common.cake_emoji}，放過人家吧（至少要 **{self.robbery_target_min_cake}**）",
                 color=common.bot_error_color,
-            ))
+            ), ephemeral=hidden)
             return
 
         now = datetime.now()
@@ -1310,7 +1313,7 @@ class Trade(commands.Cog):
                     title=title,
                     description=f"搶太兇會被盯上！再等 **{remaining_hours}** 小時 **{remaining_minutes}** 分 **{remaining_secs}** 秒才能再出手",
                     color=common.bot_error_color,
-                ))
+                ), ephemeral=hidden)
                 return
 
         # 進入後續判斷：無論成敗皆寫入冷卻
@@ -1367,7 +1370,7 @@ class Trade(commands.Cog):
                     {self.robbery_forced_cooldown_key: int(item_house.bodyguard_fail_cooldown.total_seconds())},
                 )
             message.add_field(name="結果", value=fail_text, inline=False)
-            await interaction.response.send_message(embed=message)
+            await interaction.response.send_message(embed=message, ephemeral=hidden)
             return
 
         steal_max = max(1, robber_level * self.robbery_cake_per_level)
@@ -1381,7 +1384,7 @@ class Trade(commands.Cog):
         if steal_result is None:
             message.add_field(name="結果", value=f"手伸進去了，結果口袋是空的……{common.cake_emoji}不知跑哪去了", inline=False)
             message.color = common.bot_error_color
-            await interaction.response.send_message(embed=message)
+            await interaction.response.send_message(embed=message, ephemeral=hidden)
             return
 
         try:
@@ -1414,7 +1417,7 @@ class Trade(commands.Cog):
         if cloak_bonus > 0:
             result_text += f"\n次元斗篷額外獲得 **{cloak_bonus}** 塊{common.cake_emoji}！"
         message.add_field(name="結果", value=result_text, inline=False)
-        await interaction.response.send_message(embed=message)
+        await interaction.response.send_message(embed=message, ephemeral=hidden)
 
 
 async def setup(client:commands.Bot):
