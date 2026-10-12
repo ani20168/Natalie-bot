@@ -1745,6 +1745,7 @@ class MiningGame(commands.Cog):
 class BlackJack(commands.Cog):
     def __init__(self, client:commands.Bot):
         self.bot = client
+        self.max_bet = 200000 #最多可下注多少
         self.deck = [{"2": 2}, {"3": 3}, {"4": 4}, {"5": 5}, {"6": 6}, {"7": 7}, {"8": 8}, {"9": 9}, {"10": 10}, {"J": 10}, {"Q": 10}, {"K": 10}, {"A": 11}] * 4
         # 邊注例牌賠率(利潤倍數，派彩時另加還原邊注本金)
         self.side_bet_payout = {
@@ -1926,7 +1927,7 @@ class BlackJack(commands.Cog):
 
     @app_commands.command(name = "blackjack", description = "21點!")
     @app_commands.describe(
-        bet="要下多少賭注?(支援all、half以及輸入蛋糕數量)",
+        bet="要下多少賭注?(支援all、half以及輸入蛋糕數量，最多下注200000)",
         side_bet="邊注：三張例牌(順子/三條/21點順子/21點三條)額外賭注，留空表示不玩邊注",
     )
     @app_commands.rename(bet="賭注", side_bet="邊注")
@@ -1970,6 +1971,8 @@ class BlackJack(commands.Cog):
             else:
                 await interaction.followup.send(embed=Embed(title="Natalie 21點",description=f"無效的數據。(輸入想賭注的{cake_emoji}數量，或者輸入all下注全部的{cake_emoji})",color=common.bot_error_color))
                 return
+            if bet > self.max_bet:
+                bet = self.max_bet  # 下注最高上限
 
             side_bet_amount = 0
             if side_bet is not None and str(side_bet).strip() != "":
