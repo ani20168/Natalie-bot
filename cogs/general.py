@@ -107,6 +107,7 @@ class ServerItemHouse:
         self.status_glass_slipper = "glass_slipper"
         self.status_dimension_cloak = "dimension_cloak"
         self.status_invisibility_cloak = "invisibility_cloak"
+        self.status_bulletproof_vest = "bulletproof_vest"
         self.charge_effect_keys = {self.status_blackjack_cheat, self.status_jade_bracelet}
         self.charge_count_unit_keys = {self.status_master_thief, self.status_pickaxe_discount, self.status_dimension_cloak}
         self.anti_theft_invalid_title = "你的防盜卡已失效"
@@ -129,6 +130,7 @@ class ServerItemHouse:
             self.status_glass_slipper: "灰姑娘的玻璃鞋",
             self.status_dimension_cloak: "次元斗篷",
             self.status_invisibility_cloak: "隱形斗篷",
+            self.status_bulletproof_vest: "防彈衣",
         }
         self.items = {
             "anti_theft_3": {
@@ -306,6 +308,13 @@ class ServerItemHouse:
                 "duration_days": 7,
                 "use_kind": "self_status",
                 "status_key": self.status_invisibility_cloak,
+            },
+            "bulletproof_vest_7": {
+                "name": "防彈衣(7天)",
+                "description": "遊玩困難模式的魷魚猜拳時，每局可以抵擋一次槍擊，實彈會重新加入彈匣內",
+                "duration_days": 7,
+                "use_kind": "self_status",
+                "status_key": self.status_bulletproof_vest,
             },
         }
 

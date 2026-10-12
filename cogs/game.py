@@ -3428,10 +3428,13 @@ class SquidRPS(commands.Cog):
             if "squid_rps_difficulty" not in data[userid]:
                 data[userid]["squid_rps_difficulty"] = "normal"
             difficulty = data[userid]["squid_rps_difficulty"]
+            # 防彈衣：僅困難模式生效
+            house = getattr(self.bot, "server_item_house", None)
+            has_vest = difficulty == "hard" and house is not None and house.has_status_in_data(data[userid], house.status_bulletproof_vest)
             data[userid]["squid_playing"] = True
             await common.mongo_storage.replace_user(userid, data[userid])
 
-        view = SquidRPSView(user=interaction, bet=bet, client=self.bot, difficulty=difficulty)
+        view = SquidRPSView(user=interaction, bet=bet, client=self.bot, difficulty=difficulty, has_vest=has_vest)
         message = Embed(
             title="魷魚猜拳",
             description="請選擇你要出的雙手組合",
@@ -3441,6 +3444,7 @@ class SquidRPS(commands.Cog):
         if difficulty == "hard":
             message.add_field(name="Natalie血量", value=view.hp_display(), inline=False)
         message.add_field(name="手槍彈夾", value=view.clip_display(), inline=False)
+        view.add_vest_field(message)
         message.set_footer(text=await self.win_rate_show(userid))
         msg = await interaction.followup.send(embed=message, view=view)
         view.message = msg
@@ -3596,8 +3600,11 @@ class SquidRPSStrategy:
 
 
 class SquidRPSView(discord.ui.View):
-    def __init__(self, *, timeout=120, user, bet, client, difficulty="normal"):
+    def __init__(self, *, timeout=120, user, bet, client, difficulty="normal", has_vest=False):
         super().__init__(timeout=timeout)
+        # 防彈衣：每局可擋一次實彈
+        self.has_vest = has_vest
+        self.vest_available = has_vest
         self.command_interaction = user
         self.bet = bet
         self.bot = client
@@ -3682,6 +3689,16 @@ class SquidRPSView(discord.ui.View):
         """顯示目前彈夾狀態"""
         return "".join("○" if i < self.shots_fired else "●" for i in range(6))
 
+    def add_vest_field(self, embed) -> None:
+        """
+        持有防彈衣時在 embed 加上防彈衣狀態欄。
+
+        Args:
+            embed (Embed): "魷魚猜拳 embed"
+        """
+        if not self.has_vest: return
+        embed.add_field(name="防彈衣", value="可用" if self.vest_available else "已擋下一發", inline=False)
+
     async def reset_round(self):
         for b in self.combo_buttons:
             b.disabled = False
@@ -3703,6 +3720,7 @@ class SquidRPSView(discord.ui.View):
         if self.difficulty == "hard":
             embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+        self.add_vest_field(embed)
         embed.set_footer(
             text=await SquidRPS(self.bot).win_rate_show(
                 str(self.command_interaction.user.id), self.difficulty
@@ -3733,6 +3751,7 @@ class SquidRPSView(discord.ui.View):
         embed.add_field(name="Natalie的雙手", value=f"{self.bot_combo[0]}、{self.bot_combo[1]}", inline=False)
         embed.add_field(name="你的雙手", value=f"{combo[0]}、{combo[1]}", inline=False)
         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+        self.add_vest_field(embed)
 
         embed.add_field(name="思考時間", value="5秒", inline=False)
         await self._edit_message(interaction, embed=embed, view=self)
@@ -3814,6 +3833,7 @@ class SquidRPSView(discord.ui.View):
             if self.difficulty == "hard":
                 embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
             embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+            self.add_vest_field(embed)
             embed.set_footer(
                 text=await SquidRPS(self.bot).win_rate_show(
                     str(self.command_interaction.user.id), self.difficulty
@@ -3885,6 +3905,7 @@ class SquidRPSView(discord.ui.View):
                         embed.add_field(name="難度", value=self.difficulty, inline=False)
                         embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
                         embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+                        self.add_vest_field(embed)
                         await common.mongo_storage.replace_user(userid, data[userid])
 
                         embed.set_footer(
@@ -3902,6 +3923,7 @@ class SquidRPSView(discord.ui.View):
                     if self.difficulty == "hard":
                         embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+                    self.add_vest_field(embed)
                     await common.mongo_storage.replace_user(userid, data[userid])
 
                     embed.set_footer(
@@ -3914,6 +3936,31 @@ class SquidRPSView(discord.ui.View):
                     return
             else:
                 desc += "，你輸了..."
+                if shot and self.vest_available:
+                    # 防彈衣擋下子彈，實彈放回未擊發的空格，沒有空格就重轉彈匣
+                    self.vest_available = False
+                    desc += "\n砰! 防彈衣擋下了子彈，實彈重新裝回彈匣!"
+                    empty_positions = [index for index in range(self.shots_fired, 6) if index not in self.bullet_positions]
+                    if empty_positions:
+                        self.bullet_positions.add(random.choice(empty_positions))
+                    else:
+                        live_bullets = len(self.bullet_positions) + 1
+                        self.shots_fired = 0
+                        self.bullet_positions = set(random.sample(range(6), live_bullets))
+                        desc += "\n彈匣已重新轉動!"
+                    embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
+                    embed.add_field(name="難度", value=self.difficulty, inline=False)
+                    embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
+                    embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+                    self.add_vest_field(embed)
+                    embed.set_footer(
+                        text=await SquidRPS(self.bot).win_rate_show(userid, self.difficulty)
+                    )
+                    await self._edit_message(interaction, embed=embed, view=self)
+
+                    await asyncio.sleep(3.5)  # 等3.5秒讓玩家確認結果
+                    await self.reset_round()
+                    return
                 if shot:
                     desc += "\n砰! 你被實彈擊中了..."
                     data[userid]["squid_playing"] = False
@@ -3945,6 +3992,7 @@ class SquidRPSView(discord.ui.View):
                     if self.difficulty == "hard":
                         embed.add_field(name="Natalie血量", value=self.hp_display(), inline=False)
                     embed.add_field(name="手槍彈夾", value=self.clip_display(), inline=False)
+                    self.add_vest_field(embed)
                     await common.mongo_storage.replace_user(userid, data[userid])
 
                     embed.set_footer(
