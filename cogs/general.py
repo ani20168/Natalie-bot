@@ -1037,13 +1037,14 @@ class ServerItemHouse:
             await self.save_bag_and_status(user_id, user_data)
             return True
 
-    async def build_bag_embed(self, user_id: str, page: int) -> Embed:
+    async def build_bag_embed(self, user_id: str, page: int, pending_use_slot: int | None = None) -> Embed:
         """
         組出背包某一頁。
 
         Args:
             user_id (str): "410847926236086272"
             page (int): "0"
+            pending_use_slot (int | None): "3"
 
         Returns:
             embed (Embed): Embed(...)
@@ -1054,10 +1055,9 @@ class ServerItemHouse:
         page = max(0, min(page, max_page))
         start = page * self.bag_page_size
         end = min(start + self.bag_page_size, self.bag_size)
-        used = len(self.occupied_indexes(bag))
         embed = Embed(
             title="Natalie 背包",
-            description=f"共 {self.bag_size} 格，已使用 **{used}** 格。第 **{page + 1}**／**{max_page + 1}** 頁。\n使用 `/bag 編號` 使用道具；需要對象時加上 `/bag 編號:@玩家`。",
+            description=f"第 **{page + 1}**／**{max_page + 1}** 頁。",
             color=common.bot_color,
         )
         for index in range(start, end):
@@ -1071,6 +1071,16 @@ class ServerItemHouse:
             embed.add_field(
                 name=f"[{slot_label}] {self.item_display_name(item_id)}  x{count}",
                 value=self.item_description(item_id),
+                inline=False,
+            )
+        if pending_use_slot is not None:
+            entry = bag[pending_use_slot] if 0 <= pending_use_slot < len(bag) else None
+            item_name = "未知"
+            if isinstance(entry, dict):
+                item_name = self.item_display_name(str(entry.get("item_id") or ""))
+            embed.add_field(
+                name="選擇對象",
+                value=f"請選擇要使用第 **{pending_use_slot + 1}** 格 **{item_name}** 的對象。",
                 inline=False,
             )
         return embed
@@ -1204,7 +1214,7 @@ class ServerItemHouse:
             need_target = bool(item.get("need_target"))
             target_optional = bool(item.get("target_optional"))
             if need_target and target is None and not target_optional:
-                return False, f"使用 **{item['name']}** 需要指定對象：`/bag {slot}:@玩家`"
+                return False, f"使用 **{item['name']}** 需要指定對象，請在背包選對象。"
             if target is not None and target.bot:
                 return False, "不能對機器人使用道具。"
             if item.get("voice_only"):
@@ -1309,7 +1319,7 @@ class ServerItemHouse:
         if use_kind == "heaven_punish":
             if target is None:
                 self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
-                return False, f"使用 **{name}** 需要指定對象：`/bag 編號:@玩家`"
+                return False, f"使用 **{name}** 需要指定對象，請在背包選對象。"
             if str(target.id) == user_id:
                 destroyed = self.take_random_stack(self.normalize_bag(user_data))
                 if destroyed is None:
@@ -1372,20 +1382,157 @@ class ServerItemHouse:
         return False, "這個道具目前無法使用。"
 
 
-class BagPageView(discord.ui.View):
-    """背包上一頁／下一頁。"""
+class BagUseButton(discord.ui.Button):
+    """使用指定背包格。"""
 
-    def __init__(self, house: ServerItemHouse, owner_id: int, page: int):
-        super().__init__(timeout=180.0)
+    def __init__(self, *, slot_index: int, row: int):
+        super().__init__(label=f"使用{slot_index + 1}", style=discord.ButtonStyle.primary, row=row)
+        self.slot_index = slot_index
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        處理使用按鈕。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: BagPageView = self.view  # type: ignore[assignment]
+        await view.on_use(interaction, self.slot_index)
+
+
+class BagPrevButton(discord.ui.Button):
+    """背包上一頁。"""
+
+    def __init__(self, *, disabled: bool):
+        super().__init__(label="上一頁", style=discord.ButtonStyle.secondary, row=4, disabled=disabled)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        切到上一頁。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: BagPageView = self.view  # type: ignore[assignment]
+        await view.on_prev(interaction)
+
+
+class BagNextButton(discord.ui.Button):
+    """背包下一頁。"""
+
+    def __init__(self, *, disabled: bool):
+        super().__init__(label="下一頁", style=discord.ButtonStyle.secondary, row=4, disabled=disabled)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        切到下一頁。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: BagPageView = self.view  # type: ignore[assignment]
+        await view.on_next(interaction)
+
+
+class BagUseOnSelfButton(discord.ui.Button):
+    """把待使用道具用在自己身上。"""
+
+    def __init__(self):
+        super().__init__(label="用在自己", style=discord.ButtonStyle.primary, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        對自己使用待選對象道具。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: BagPageView = self.view  # type: ignore[assignment]
+        await view.on_use_on_self(interaction)
+
+
+class BagCancelTargetButton(discord.ui.Button):
+    """取消選對象。"""
+
+    def __init__(self):
+        super().__init__(label="取消", style=discord.ButtonStyle.secondary, row=1)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        取消選對象並回主畫面。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: BagPageView = self.view  # type: ignore[assignment]
+        await view.on_cancel_target(interaction)
+
+
+class BagTargetUserSelect(discord.ui.UserSelect):
+    """選擇道具使用對象。"""
+
+    def __init__(self):
+        super().__init__(placeholder="選擇使用對象", min_values=1, max_values=1, row=0)
+
+    async def callback(self, interaction: discord.Interaction):
+        """
+        選定對象後使用道具。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        view: BagPageView = self.view  # type: ignore[assignment]
+        await view.on_target_selected(interaction, self.values[0])
+
+
+class BagPageView(discord.ui.View):
+    """伺服器道具背包：分頁、使用、選對象。"""
+
+    def __init__(
+        self,
+        *,
+        house: ServerItemHouse,
+        userid: str,
+        page: int,
+        pending_use_slot: int | None = None,
+        pending_target_optional: bool = False,
+    ):
+        super().__init__(timeout=None)
         self.house = house
-        self.owner_id = owner_id
+        self.userid = userid
         self.page = page
+        self.pending_use_slot = pending_use_slot
+        self.pending_target_optional = pending_target_optional if pending_use_slot is not None else False
         self.max_page = (house.bag_size - 1) // house.bag_page_size
-        self.prev_button.disabled = page <= 0
-        self.next_button.disabled = page >= self.max_page
+        self.page_start = page * house.bag_page_size
+        self.page_end = min(self.page_start + house.bag_page_size, house.bag_size)
+        self.rebuild_items()
+
+    def rebuild_items(self):
+        """
+        依目前頁面與選對象狀態重建元件。
+        """
+        self.clear_items()
+        if self.pending_use_slot is not None:
+            self.add_item(BagTargetUserSelect())
+            if self.pending_target_optional:
+                self.add_item(BagUseOnSelfButton())
+            self.add_item(BagCancelTargetButton())
+            return
+        self.add_item(BagPrevButton(disabled=self.page <= 0))
+        self.add_item(BagNextButton(disabled=self.page >= self.max_page))
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.owner_id:
+        """
+        只允許本人操作背包。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+
+        Returns:
+            allowed (bool): "True"
+        """
+        if str(interaction.user.id) == self.userid:
             return True
         await interaction.response.send_message(embed=Embed(title="Natalie 背包", description=random.choice([
             "你不要亂翻別人的背包!!",
@@ -1394,27 +1541,204 @@ class BagPageView(discord.ui.View):
         ]), color=common.bot_error_color), ephemeral=True)
         return False
 
-    async def show_page(self, interaction: discord.Interaction, page: int) -> None:
+    async def attach_slot_buttons(self, bag: list):
         """
-        切換背包頁並更新按鈕。
+        依背包內容為目前頁加上使用按鈕。
+
+        Args:
+            bag (list): "[{'item_id': 'milk', 'count': 1}]"
+        """
+        if self.pending_use_slot is not None:
+            return
+        page_buttons = [
+            child
+            for child in self.children
+            if isinstance(child, (BagPrevButton, BagNextButton))
+        ]
+        self.clear_items()
+        use_count = 0
+        for index in range(self.page_start, self.page_end):
+            entry = bag[index]
+            if not isinstance(entry, dict):
+                continue
+            self.add_item(BagUseButton(slot_index=index, row=use_count // 5))
+            use_count += 1
+        for button in page_buttons:
+            self.add_item(button)
+
+    async def refresh_message(
+        self,
+        interaction: discord.Interaction,
+        bag: list,
+        *,
+        result_message: str | None = None,
+        result_ok: bool | None = None,
+    ):
+        """
+        用目前狀態更新背包訊息。
 
         Args:
             interaction (discord.Interaction): "按鈕互動"
-            page (int): "1"
+            bag (list): "[{'item_id': 'milk', 'count': 1}]"
+            result_message (str | None): "使用成功"
+            result_ok (bool | None): "True"
         """
-        self.page = max(0, min(page, self.max_page))
-        self.prev_button.disabled = self.page <= 0
-        self.next_button.disabled = self.page >= self.max_page
-        embed = await self.house.build_bag_embed(str(self.owner_id), self.page)
-        await interaction.response.edit_message(embed=embed, view=self)
+        new_view = BagPageView(
+            house=self.house,
+            userid=self.userid,
+            page=self.page,
+            pending_use_slot=self.pending_use_slot,
+            pending_target_optional=self.pending_target_optional,
+        )
+        await new_view.attach_slot_buttons(bag)
+        embed = await self.house.build_bag_embed(self.userid, self.page, self.pending_use_slot)
+        await interaction.response.edit_message(embed=embed, view=new_view)
+        self.stop()
+        if result_message is None:
+            return
+        color = common.bot_color if result_ok else common.bot_error_color
+        await interaction.followup.send(embed=Embed(title="Natalie 背包", description=result_message, color=color))
 
-    @discord.ui.button(label="上一頁", style=discord.ButtonStyle.secondary)
-    async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.show_page(interaction, self.page - 1)
+    async def on_prev(self, interaction: discord.Interaction):
+        """
+        上一頁。
 
-    @discord.ui.button(label="下一頁", style=discord.ButtonStyle.secondary)
-    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await self.show_page(interaction, self.page + 1)
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        user_data = await self.house.load_user(self.userid)
+        bag = self.house.normalize_bag(user_data)
+        self.page = max(0, self.page - 1)
+        self.pending_use_slot = None
+        self.pending_target_optional = False
+        self.page_start = self.page * self.house.bag_page_size
+        self.page_end = min(self.page_start + self.house.bag_page_size, self.house.bag_size)
+        await self.refresh_message(interaction, bag)
+
+    async def on_next(self, interaction: discord.Interaction):
+        """
+        下一頁。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        user_data = await self.house.load_user(self.userid)
+        bag = self.house.normalize_bag(user_data)
+        self.page = min(self.max_page, self.page + 1)
+        self.pending_use_slot = None
+        self.pending_target_optional = False
+        self.page_start = self.page * self.house.bag_page_size
+        self.page_end = min(self.page_start + self.house.bag_page_size, self.house.bag_size)
+        await self.refresh_message(interaction, bag)
+
+    async def on_use(self, interaction: discord.Interaction, slot_index: int):
+        """
+        使用指定格子；需對象則進入選對象模式。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+            slot_index (int): "0"
+        """
+        user_data = await self.house.load_user(self.userid)
+        bag = self.house.normalize_bag(user_data)
+        entry = bag[slot_index] if 0 <= slot_index < len(bag) else None
+        if not isinstance(entry, dict):
+            await interaction.response.send_message(
+                embed=Embed(title="Natalie 背包", description="該格沒有物品。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        item = self.house.items.get(str(entry.get("item_id") or ""))
+        if item is None:
+            await interaction.response.send_message(
+                embed=Embed(title="Natalie 背包", description="未知的道具，無法使用。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        if bool(item.get("need_target")):
+            self.pending_use_slot = slot_index
+            self.pending_target_optional = bool(item.get("target_optional"))
+            await self.refresh_message(interaction, bag)
+            return
+        ok, message = await self.house.use_slot(self.userid, slot_index + 1, None, interaction.user)
+        user_data = await self.house.load_user(self.userid)
+        bag = self.house.normalize_bag(user_data)
+        self.pending_use_slot = None
+        self.pending_target_optional = False
+        await self.refresh_message(interaction, bag, result_message=message, result_ok=ok)
+
+    async def on_use_on_self(self, interaction: discord.Interaction):
+        """
+        對自己使用待選對象道具。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        slot_index = self.pending_use_slot
+        if slot_index is None:
+            await interaction.response.send_message(
+                embed=Embed(title="Natalie 背包", description="沒有待使用的道具。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        ok, message = await self.house.use_slot(self.userid, slot_index + 1, interaction.user, interaction.user)
+        user_data = await self.house.load_user(self.userid)
+        bag = self.house.normalize_bag(user_data)
+        self.pending_use_slot = None
+        self.pending_target_optional = False
+        await self.refresh_message(interaction, bag, result_message=message, result_ok=ok)
+
+    async def on_cancel_target(self, interaction: discord.Interaction):
+        """
+        取消選對象。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+        """
+        user_data = await self.house.load_user(self.userid)
+        bag = self.house.normalize_bag(user_data)
+        self.pending_use_slot = None
+        self.pending_target_optional = False
+        await self.refresh_message(interaction, bag)
+
+    async def on_target_selected(self, interaction: discord.Interaction, selected_user: discord.abc.User):
+        """
+        選定對象後使用道具。
+
+        Args:
+            interaction (discord.Interaction): "按鈕互動"
+            selected_user (discord.abc.User): "被選的玩家"
+        """
+        slot_index = self.pending_use_slot
+        if slot_index is None:
+            await interaction.response.send_message(
+                embed=Embed(title="Natalie 背包", description="沒有待使用的道具。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        target = None
+        if interaction.guild is not None:
+            target = interaction.guild.get_member(selected_user.id)
+        if target is None and isinstance(selected_user, discord.Member):
+            target = selected_user
+        if target is None:
+            await interaction.response.send_message(
+                embed=Embed(title="Natalie 背包", description="找不到該成員，請再選一次。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        if target.bot:
+            await interaction.response.send_message(
+                embed=Embed(title="Natalie 背包", description="不能對機器人使用道具。", color=common.bot_error_color),
+                ephemeral=True,
+            )
+            return
+        ok, message = await self.house.use_slot(self.userid, slot_index + 1, target, interaction.user)
+        user_data = await self.house.load_user(self.userid)
+        bag = self.house.normalize_bag(user_data)
+        self.pending_use_slot = None
+        self.pending_target_optional = False
+        await self.refresh_message(interaction, bag, result_message=message, result_ok=ok)
 
 
 class General(commands.Cog):
@@ -1969,28 +2293,22 @@ class General(commands.Cog):
         return choices
 
     @app_commands.command(name="bag", description="查看或使用背包道具")
-    @app_commands.describe(index="要使用的欄位編號（1～99），留空則只查看", member="需要指定對象的道具")
-    @app_commands.rename(index="編號", member="對象")
-    async def bag(self, interaction: discord.Interaction, index: Optional[int] = None, member: Optional[discord.Member] = None):
+    async def bag(self, interaction: discord.Interaction):
         """
-        查看背包或使用指定格子的道具。
+        開啟伺服器道具背包（分頁、按鈕使用）。
 
         Args:
             interaction (discord.Interaction): "指令互動"
-            index (int | None): "1"
-            member (discord.Member | None): "要作用的玩家"
         """
         userid = str(interaction.user.id)
         house = self.server_item_house
-        if index is not None:
-            ok, description = await house.use_slot(userid, index, member, interaction.user)
-            color = common.bot_color if ok else common.bot_error_color
-            await interaction.response.send_message(embed=Embed(title="Natalie 背包", description=description, color=color))
-            return
         user_data = await house.load_user(userid)
+        bag = house.normalize_bag(user_data)
         hidden = house.has_status_in_data(user_data, house.status_camo_bag)
         embed = await house.build_bag_embed(userid, 0)
-        await interaction.response.send_message(embed=embed, view=BagPageView(house, interaction.user.id, 0), ephemeral=hidden)
+        view = BagPageView(house=house, userid=userid, page=0)
+        await view.attach_slot_buttons(bag)
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=hidden)
 
     @app_commands.command(name="serveritem_add", description="給予玩家伺服器道具（僅擁有者）")
     @app_commands.describe(member="要給予的玩家", item="要加入的道具", quantity="數量")
