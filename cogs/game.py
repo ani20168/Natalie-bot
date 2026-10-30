@@ -3574,8 +3574,8 @@ class SquidRPS(commands.Cog):
 class SquidRPSStrategy:
     """猜拳策略"""
 
-    def __init__(self, *, case3_prob: float = 2/3, case4_prob: float = 3/4):
-        # 機率設定:case3為輸&平手、贏&輸情形留左手的機率
+    def __init__(self, *, case3_prob: float = 1/5, case4_prob: float = 3/4):
+        # 機率設定:case3為輸&平手、贏&輸情形留「輸&平手」的機率（其餘留「贏&輸」）
         self.case3_prob = case3_prob
         # 機率設定:case4為贏&輸、平手&贏情形留右手的機率
         self.case4_prob = case4_prob
@@ -3615,7 +3615,7 @@ class SquidRPSStrategy:
         if result_set == {(0, 0), (1, 1)}:
             return index_of((1, 1))
 
-        # 輸&平手、贏&輸 -> 2/3機率留下輸&平手的手
+        # 輸&平手、贏&輸 -> 1/5機率留下輸&平手、4/5留下贏&輸
         if result_set == {(-1, 0), (1, -1)}:
             return index_of((-1, 0)) if random.random() < self.case3_prob else index_of((1, -1))
 
