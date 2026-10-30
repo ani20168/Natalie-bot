@@ -90,6 +90,7 @@ class ServerItemHouse:
             ("blackjack_cheat", 1),
             ("chance_scroll", 3),
             ("fate_scroll", 3),
+            ("tempering_scroll", 3),
         )
         self.status_anti_theft = "anti_theft"
         self.status_bodyguard = "bodyguard"
@@ -108,6 +109,7 @@ class ServerItemHouse:
         self.status_dimension_cloak = "dimension_cloak"
         self.status_invisibility_cloak = "invisibility_cloak"
         self.status_bulletproof_vest = "bulletproof_vest"
+        self.status_fate_pistol = "fate_pistol"
         self.charge_effect_keys = {self.status_blackjack_cheat, self.status_jade_bracelet}
         self.charge_count_unit_keys = {self.status_master_thief, self.status_pickaxe_discount, self.status_dimension_cloak}
         self.anti_theft_invalid_title = "你的防盜卡已失效"
@@ -131,6 +133,7 @@ class ServerItemHouse:
             self.status_dimension_cloak: "次元斗篷",
             self.status_invisibility_cloak: "隱形斗篷",
             self.status_bulletproof_vest: "防彈衣",
+            self.status_fate_pistol: "操控命運的手槍",
         }
         self.items = {
             "anti_theft_3": {
@@ -266,6 +269,12 @@ class ServerItemHouse:
                 "duration_days": 0,
                 "use_kind": "chance_scroll",
             },
+            "tempering_scroll": {
+                "name": "淬鍊卷軸",
+                "description": "重骰當前裝備的技能礦鎬的耐久上限",
+                "duration_days": 0,
+                "use_kind": "tempering_scroll",
+            },
             "fate_scroll": {
                 "name": "命運卷軸",
                 "description": "對當前裝備的技能礦鎬：50% 多一個尚未擁有的技能、50% 少一個技能",
@@ -274,7 +283,7 @@ class ServerItemHouse:
             },
             "gambler_gift": {
                 "name": "賭狗大禮包",
-                "description": "開啟後獲得：21點作弊卡 x1、機會卷軸 x3、命運卷軸 x3",
+                "description": "使用後，給予以下道具:21點作弊卡x1、機會卷軸x3、命運卷軸x3、淬鍊卷軸x3",
                 "duration_days": 0,
                 "use_kind": "item_bundle",
                 "grant_items": self.gambler_gift_contents,
@@ -315,6 +324,13 @@ class ServerItemHouse:
                 "duration_days": 7,
                 "use_kind": "self_status",
                 "status_key": self.status_bulletproof_vest,
+            },
+            "fate_pistol_30": {
+                "name": "操控命運的手槍",
+                "description": "遊玩魷魚猜拳時，在開始遊戲後實彈會放在第1~3格的位置",
+                "duration_days": 30,
+                "use_kind": "self_status",
+                "status_key": self.status_fate_pistol,
             },
         }
 
@@ -1317,6 +1333,15 @@ class ServerItemHouse:
                 self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
                 return False, "挖礦系統尚未就緒，暫時無法使用機會卷軸。"
             ok, message = await mining_cog.apply_chance_scroll(user_id)
+            if not ok:
+                self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
+            return ok, message
+        if use_kind == "tempering_scroll":
+            mining_cog = self.bot.get_cog("MiningGame")
+            if mining_cog is None:
+                self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
+                return False, "挖礦系統尚未就緒，暫時無法使用淬鍊卷軸。"
+            ok, message = await mining_cog.apply_tempering_scroll(user_id)
             if not ok:
                 self.put_items_on_bag(self.normalize_bag(user_data), item_id, 1)
             return ok, message

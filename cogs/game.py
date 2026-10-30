@@ -511,6 +511,42 @@ class MiningGame(commands.Cog):
         return True, f"使用了 **機會卷軸**，已重骰 **{template}** 上所有可重骰技能：\n{changes}"
 
 
+    async def apply_tempering_scroll(self, userid: str) -> tuple[bool, str]:
+        """
+        淬鍊卷軸：重骰目前裝備技能礦鎬的耐久上限。
+
+        Args:
+            userid (str): "4108"
+
+        Returns:
+            result (tuple): "(True, '重骰成功說明')"
+        """
+        async with common.jsonio_lock:
+            mining_data = await self.miningdata_read(userid)
+            entry = self.get_equipped_skill_pickaxe_entry(mining_data, userid)
+            if entry is None:
+                return False, "你目前沒有裝備技能礦鎬，無法使用淬鍊卷軸。"
+            template = str(entry.get("template") or "")
+            if template not in self.skill_pickaxe_skill_pools:
+                return False, "目前裝備的礦鎬無法使用淬鍊卷軸。"
+            before_max = int(entry.get("max_health") or 0)
+            before_current = int(entry.get("current_health") or 0)
+            if template == "靈能之手":
+                new_max = self.roll_psychic_hand_pickaxe_durability()
+            else:
+                new_max = self.roll_random_pickaxe_durability()
+            new_current = min(before_current, new_max)
+            entry["max_health"] = new_max
+            entry["current_health"] = new_current
+            mining_data[userid]["pickaxe_maxhealth"] = new_max
+            mining_data[userid]["pickaxe_health"] = new_current
+            await common.mongo_storage.upsert_user(userid, mining_data[userid], "mining")
+        return True, (
+            f"使用了 **淬鍊卷軸**，已重骰 **{template}** 的耐久上限：\n"
+            f"・**{before_current}/{before_max}** → **{new_current}/{new_max}**"
+        )
+
+
     async def apply_fate_scroll(self, userid: str) -> tuple[bool, str]:
         """
         命運卷軸：對目前裝備技能礦鎬 50% 多一個技能、50% 少一個技能。
@@ -3431,13 +3467,14 @@ class SquidRPS(commands.Cog):
             if "squid_rps_difficulty" not in data[userid]:
                 data[userid]["squid_rps_difficulty"] = "normal"
             difficulty = data[userid]["squid_rps_difficulty"]
-            # 防彈衣：僅困難模式生效
+            # 防彈衣：僅困難模式生效；操控命運的手槍：實彈限第1~3格
             house = getattr(self.bot, "server_item_house", None)
             has_vest = difficulty == "hard" and house is not None and house.has_status_in_data(data[userid], house.status_bulletproof_vest)
+            has_fate_pistol = house is not None and house.has_status_in_data(data[userid], house.status_fate_pistol)
             data[userid]["squid_playing"] = True
             await common.mongo_storage.replace_user(userid, data[userid])
 
-        view = SquidRPSView(user=interaction, bet=bet, client=self.bot, difficulty=difficulty, has_vest=has_vest)
+        view = SquidRPSView(user=interaction, bet=bet, client=self.bot, difficulty=difficulty, has_vest=has_vest, has_fate_pistol=has_fate_pistol)
         message = Embed(
             title="魷魚猜拳",
             description="請選擇你要出的雙手組合",
@@ -3603,11 +3640,13 @@ class SquidRPSStrategy:
 
 
 class SquidRPSView(discord.ui.View):
-    def __init__(self, *, timeout=120, user, bet, client, difficulty="normal", has_vest=False):
+    def __init__(self, *, timeout=120, user, bet, client, difficulty="normal", has_vest=False, has_fate_pistol=False):
         super().__init__(timeout=timeout)
         # 防彈衣：每局可擋一次實彈
         self.has_vest = has_vest
         self.vest_available = has_vest
+        # 操控命運的手槍：實彈只落在第1~3格（index 0~2）
+        self.has_fate_pistol = has_fate_pistol
         self.command_interaction = user
         self.bet = bet
         self.bot = client
@@ -3617,10 +3656,8 @@ class SquidRPSView(discord.ui.View):
         self.difficulty = difficulty
         self.natalie_hp = 2 if difficulty == "hard" else 1
         self.max_hp = self.natalie_hp
-        if difficulty == "hard":
-            self.bullet_positions = set(random.sample(range(6), 2))
-        else:
-            self.bullet_positions = {random.randint(0, 5)}
+        bullet_count = 2 if difficulty == "hard" else 1
+        self.bullet_positions = self.roll_bullet_positions(bullet_count)
         self.message = None
         self.player_combo = None
         self.bot_combo = None
@@ -3691,6 +3728,20 @@ class SquidRPSView(discord.ui.View):
     def clip_display(self) -> str:
         """顯示目前彈夾狀態"""
         return "".join("○" if i < self.shots_fired else "●" for i in range(6))
+
+    def roll_bullet_positions(self, live_bullets: int) -> set:
+        """
+        依難度與操控命運的手槍狀態骰出實彈位置。
+
+        Args:
+            live_bullets (int): "2"
+
+        Returns:
+            positions (set): "{0, 2}"
+        """
+        slot_count = 3 if self.has_fate_pistol else 6
+        count = max(1, min(int(live_bullets), slot_count))
+        return set(random.sample(range(slot_count), count))
 
     def add_vest_field(self, embed) -> None:
         """
@@ -3949,7 +4000,7 @@ class SquidRPSView(discord.ui.View):
                     else:
                         live_bullets = len(self.bullet_positions) + 1
                         self.shots_fired = 0
-                        self.bullet_positions = set(random.sample(range(6), live_bullets))
+                        self.bullet_positions = self.roll_bullet_positions(live_bullets)
                         desc += "\n彈匣已重新轉動!"
                     embed = Embed(title="魷魚猜拳", description=desc, color=common.bot_color)
                     embed.add_field(name="難度", value=self.difficulty, inline=False)
