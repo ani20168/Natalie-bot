@@ -1796,6 +1796,7 @@ class General(commands.Cog):
             "587934995063111681", #xu6
         ]
         self.vip_retain_days = 30  # 取消 Boost 後仍保留 VIP 的天數
+        self.join_role_ids = [419183641046941706, 570977682225889281]  # 進入妹妹群時賦予：倖存者們、稱號bar
         self.message_audit_content_limit = 1000  # 訊息審核 embed 內容字數上限
         self.message_audit_max_attachments = 10  # 訊息審核最多附檔數量
         self.invite_link_pattern = re.compile(
@@ -3099,8 +3100,27 @@ class General(commands.Cog):
         await self.bot.get_channel(common.admin_log_channel).send(embed=embed, files=files)
 
     @commands.Cog.listener()
-    async def on_member_join(self,member):  
+    async def on_member_join(self, member: discord.Member):
+        """
+        成員加入時建立使用者資料；進入妹妹群時賦予預設身份組。
+
+        Args:
+            member (discord.Member): "新加入的成員"
+        """
         await common.mongo_storage.ensure_user_document(str(member.id))
+        # 只處理妹妹群的真人成員
+        if member.bot or member.guild.id != common.fake_sister_server_id: return
+        # 賦予預設身份組
+        roles = []
+        for role_id in self.join_role_ids:
+            role = member.guild.get_role(role_id)
+            if role is None or role in member.roles: continue
+            roles.append(role)
+        if not roles: return
+        try:
+            await member.add_roles(*roles, reason="進入妹妹群，賦予預設身份組")
+        except discord.HTTPException:
+            pass
 
     @commands.Cog.listener()
     async def on_member_remove(self, member: discord.Member):
