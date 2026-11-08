@@ -170,6 +170,11 @@
         return;
       }
       sellBox.innerHTML = orders.map(function (order) {
+        var durabilityBlock = "";
+        if (order.max_health !== null && order.max_health !== undefined) {
+          durabilityBlock =
+            '<p class="shop-card-meta">耐久 ' + order.current_health + "/" + order.max_health + "</p>";
+        }
         var skillBlock = "";
         if (order.skill_lines && order.skill_lines.length) {
           skillBlock =
@@ -192,6 +197,7 @@
             "</div>" +
             '<p class="shop-card-meta">單價 ' + order.price + cakeIcon() + "</p>" +
             qtyBlock +
+            durabilityBlock +
             skillBlock +
             offsetBlock +
             remarkBlock +

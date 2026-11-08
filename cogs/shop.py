@@ -1390,8 +1390,18 @@ class ShopHouse:
         user_id = str(order.get("user_id") or "")
         instance = order.get("item_instance") if isinstance(order.get("item_instance"), dict) else None
         skills = instance.get("skills") if instance is not None and isinstance(instance.get("skills"), dict) else {}
-        skill_lines = self.skill_pickaxe_public_lines(skills) if instance is not None and "skills" in (instance or {}) else []
+        is_skill_pickaxe = instance is not None and "skills" in instance
+        skill_lines = self.skill_pickaxe_public_lines(skills) if is_skill_pickaxe else []
         skill_keys = [key for key, value in skills.items() if value]
+        current_health = None
+        max_health = None
+        if is_skill_pickaxe:
+            try:
+                current_health = max(0, int(instance.get("current_health") or 0))
+                max_health = max(0, int(instance.get("max_health") or 0))
+            except (TypeError, ValueError):
+                current_health = 0
+                max_health = 0
         offsets = self.juice_battle_offsets_public(instance) if instance is not None and "item_id" in instance else None
         display_name = str(order.get("product_name") or order.get("product_id") or "")
         enhancement_level = None
@@ -1421,6 +1431,8 @@ class ShopHouse:
             "is_mine": user_id == str(viewer_id),
             "skill_lines": skill_lines,
             "skill_keys": skill_keys,
+            "current_health": current_health,
+            "max_health": max_health,
             "offsets": offsets,
             "has_offsets": offsets is not None,
             "display_name": display_name,

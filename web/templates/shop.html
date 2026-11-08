@@ -599,13 +599,17 @@
             )
           : '<button type="button" class="btn btn-bid btn-sm" data-action="ask-buy" data-id="' + order.order_id +
             '" data-price="' + order.price + '" data-qty="' + order.quantity + '">購買</button>';
-        var skillBlock = "";
-        if (order.skill_lines && order.skill_lines.length) {
-          skillBlock =
-            '<p class="shop-order-skills">技能:<br>' +
-            order.skill_lines.map(escapeHtml).join("<br>") +
-            "</p>";
+        var detailLines = [];
+        if (order.max_health !== null && order.max_health !== undefined) {
+          detailLines.push("耐久 " + order.current_health + "/" + order.max_health);
         }
+        if (order.skill_lines && order.skill_lines.length) {
+          detailLines.push("技能:");
+          detailLines = detailLines.concat(order.skill_lines);
+        }
+        var skillBlock = detailLines.length
+          ? '<p class="shop-order-skills">' + detailLines.map(escapeHtml).join("<br>") + "</p>"
+          : "";
         var offsetBlock = order.has_offsets ? renderOffsetBlock(order.offsets) : "";
         var protectionBlock = order.protection_count !== null && order.protection_count !== undefined
           ? '<p class="shop-order-offsets shop-order-protection">保護石懲罰:' + order.protection_count + "</p>"
